@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "../.runtime/windows/tools/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
+      "../.runtime/windows/tools/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
+      "../.runtime/windows/tools/notices/": "resources/ffmpeg/notices/"
+    },
+    "windows": {
+      "webviewInstallMode": { "type": "offlineInstaller" },
+      "nsis": { "installMode": "currentUser" }
+    }
+  }
+}

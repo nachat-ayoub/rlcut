@@ -1294,3 +1294,23 @@ progress::-moz-progress-bar {
 .cutout-preview { background:repeating-conic-gradient(#25212b 0% 25%,#393341 0% 50%) 0 / 16px 16px; display:flex; justify-content:center; align-items:center; min-height:100px; padding:12px; margin:10px 0; }
 .crop-footer { flex-wrap:wrap; }
 @media(max-width:800px) { .crop-layout { grid-template-columns:1fr; } .crop-settings { max-height:none; } }
+.brand { flex-direction:column; align-items:flex-start; gap:6px; }
+.brand-logo { display:block; width:100%; height:auto; object-fit:contain; }
+.brand small { margin:0; }
+.boot-logo { width:240px; max-width:80vw; height:auto; }
+.welcome-logo { display:block; width:280px; max-width:100%; height:auto; margin:0 auto 16px; }
+.dropdown { display:inline-block; min-width:0; width:100%; }
+.dropdown-trigger { display:flex; justify-content:space-between; width:100%; min-height:42px; padding:10px 12px; background:#15131c; border:1px solid #3c3448; color:#dedde8; text-align:left; }
+.dropdown-trigger>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dropdown-trigger>svg { flex-shrink:0; color:#b69cda; }
+.dropdown-trigger:hover { background:#25202f; border-color:#7a5f9c; }
+.dropdown-trigger.open { border-color:var(--purple); background:#251d32; }
+.dropdown-menu { position:fixed; z-index:10000; overflow:auto; padding:6px; border:1px solid #665078; border-radius:10px; background:#211b2b; box-shadow:0 12px 36px #0009; color:#e9e0f3; font-size:12px; }
+.dropdown-option { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px; min-height:38px; border-radius:6px; cursor:pointer; }
+.dropdown-option.highlighted { background:#403050; }
+.dropdown-option[aria-selected=true] { color:#cfb4ff; }
+.dropdown-option>span { overflow-wrap:anywhere; }
+.canvas-caption label { display:inline-flex; align-items:center; gap:6px; }
+.canvas-caption .dropdown { width:90px; }
+.canvas-caption .dropdown-trigger { min-height:26px; padding:4px 7px; font-size:10px; }
+.crop-zoom .dropdown { width:100px; }

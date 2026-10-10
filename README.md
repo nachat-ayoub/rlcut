@@ -2,6 +2,12 @@
 
 Offline Rocket League vertical clip template maker, built with Tauri 2, Rust, React, TypeScript, Vite, Tailwind CSS, Lucide, FFmpeg and FFprobe. No accounts, uploads, watermarks, subscriptions or video playback timeline.
 
+## Open the app
+
+Linux: double-click the exported `dist/rlcut` executable. The entire app and its video tools are inside this one file; no terminal command, Docker, FFmpeg installation, or FUSE setup is required.
+
+Windows: the installer packaging command produces `dist/rlcut-setup.exe`, including video tools and the offline WebView2 installer. Install once, then launch from the Start menu. Windows builds require a Windows packaging machine; the Windows installer workflow is configured but has not been run in this Linux session.
+
 ## Features
 
 Import MP4/MOV/MKV/WebM via native picker or drag/drop. Scrub a cached frame preview and compare before/after. Configure a blurred cover background, undistorted gameplay and a synchronized boost HUD crop. Select the HUD visually; move/resize source selection and composition layers; adjust independent width/height, **boost scale**, circular/elliptical masks and feathering. Manage immutable built-in and auto-saved custom presets; import/export validated JSON. Export full clips as H.264 MP4 with optional original audio converted to AAC, progress/ETA, cancellation and output opening.
@@ -16,7 +22,7 @@ Use `bash scripts/run.sh dev` (or `npm run desktop`) on either machine. The
 launcher detects school hostnames / goinfre paths and supports `RLCUT_ENV=native`
 or `RLCUT_ENV=docker` overrides. No host sudo is used in Docker mode.
 
-Use Node **22.12+**, current stable Rust (**1.85+** declared minimum; current Tauri dependencies may require newer), and FFmpeg **4.4+** / FFprobe. Tauri CLI 2 is included as an npm development dependency. FFmpeg needs libx264, AAC, scale, crop, gblur, geq and overlay. Python 3 runs video integration tests. Install Rust's rustfmt and clippy components.
+Use Node **22.12+**, current stable Rust (**1.85+** declared minimum; current Tauri dependencies may require newer), and FFmpeg **4.4+** / FFprobe. Tauri CLI 2 is included as an npm development dependency. FFmpeg needs libx264, AAC, scale, crop, gblur, geq, overlay, zscale and tonemap. Python 3 runs video integration tests. Install Rust's rustfmt and clippy components.
 
 Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/). Ubuntu 24.04:
 
@@ -30,7 +36,7 @@ npm run desktop
 
 On Ubuntu 22.04, install the same desktop libraries and use its repository FFmpeg 4.4 build.
 
-Windows: install Visual Studio Build Tools with Desktop development with C++, Rust MSVC and WebView2; put matching FFmpeg/FFprobe on PATH. macOS: install Xcode Command Line Tools, Rust and FFmpeg (e.g. `brew install ffmpeg`). The automatic launcher is intended for Linux; on Windows use `npm ci` followed by `npm run desktop:native` or `npm run desktop:build:native` directly.
+Windows: install Visual Studio Build Tools with Desktop development with C++, Rust MSVC and WebView2; put matching FFmpeg/FFprobe on PATH. macOS: install Xcode Command Line Tools, Rust and FFmpeg (e.g. `brew install ffmpeg`). The automatic launcher is intended for Linux; on Windows use `npm ci` followed by `npm run desktop:native` directly, or `npm run desktop:build:windows` to package the complete installer.
 
 ```sh
 npm run dev             # browser UI development view
@@ -53,7 +59,7 @@ Browser mode explicitly reports that native video actions require the desktop ru
 
 Ctrl/⌘ O imports; Ctrl/⌘ E exports; ←/→ steps one nominal frame; Shift ←/→ jumps one second; Escape closes a dialog. VFR stepping uses nominal timestamps rather than indexed decoder frames.
 
-Settings save default quality/FPS/folder/preset and show FFmpeg/FFprobe status. Presets/settings use versioned JSON in Tauri's platform app-data directory for `io.rlcut.desktop`; previews use app-cache. Writes keep a settings backup. Corrupt configurations are reported and retained; explicitly reset settings to resume saving.
+Settings save default quality/FPS/folder/preset with themed dropdown menus. Presets/settings use versioned JSON in Tauri's platform app-data directory for `io.rlcut.desktop`; previews use app-cache. Writes keep a settings backup. Corrupt configurations are reported and retained; explicitly reset settings to resume saving.
 
 ## Architecture
 

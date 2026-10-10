@@ -181,3 +181,15 @@ The Linux build baseline is Ubuntu 22.04 x86_64 (this school PC).
 - Click outside the video to clear selection and hide the handles. Click a layer to select it again.
 - Use preview Zoom to inspect the composition. In **Select boost area**, source zoom goes up to 800% and scrolls toward your selected crop. The dialog includes the boost settings and a masked cutout preview; Cancel discards dialog changes, and Apply saves them together.
 - PQ and HLG HDR recordings are tone-mapped to SDR BT.709 consistently in source previews, compositions, and H.264 exports. Export quality remains CRF 20 / medium, with up to four filter threads.
+
+### Branding assets
+
+The in-app logo lives in `public/branding/logo.png`. The original launcher artwork lives in `assets/branding/icon.png`; generate platform icons with `npx tauri icon assets/branding/icon.png --output src-tauri/icons`. The browser preview favicon is `public/branding/icon.png`, copied from the generated 128px icon. Rebuild the AppImage after changing branding assets.
+
+### Open the packaged app
+
+On Linux, double-click the executable `dist/rlcut`. It contains the complete AppImage and handles extraction automatically, including on school PCs without FUSE. Keep or copy this one file wherever you want; it needs no neighboring FFmpeg files, Docker, or terminal flags. The conventional `dist/rlcut.AppImage` is also exported.
+
+On Windows, the intended end-user package is `rlcut-setup.exe`: open the installer once, then use its Start menu shortcut. The installer includes both video tools and the offline WebView2 installer. No FFmpeg or PATH setup is required. Developer packaging on a Windows machine uses `npm run desktop:build:windows`; it downloads and verifies a versioned Windows video-tool archive at build time and exports the installer to `dist/rlcut-setup.exe`. The manual GitHub Actions **Windows installer** workflow runs the same packaging process. Windows packaging has not been executed or runtime-tested from this Linux session.
+
+The local app-menu shortcut can be installed with `bash scripts/install-shortcut.sh` after building. It creates a user-owned `rlcut` entry using the generated launcher icon, with no sudo or system-wide changes. This provides a click-to-open option on desktops whose file manager does not launch executables on double-click.

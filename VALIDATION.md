@@ -63,3 +63,19 @@ A two-second 1080p/60 export from the supplied clip took 18.982 seconds with one
 Validation for this update: 11 frontend tests; TypeScript, ESLint, frontend formatting and production build; 21 Rust unit tests plus the real import/cache/export-worker integration test; desktop Clippy with warnings denied; and six real FFmpeg regressions covering SDR, portrait/4K inputs, audio/CFR/duration, plus PQ and HLG color fidelity. All passed. Interactive browser verification was unavailable because this session exposes no browser surface; interaction math and rendered controls were checked through tests.
 
 Rebuilt `dist/rlcut.AppImage` (128.44 MiB, executable). The AppImage runtime and its bundled FFprobe/FFmpeg were tested natively on the 42 host; HDR probing and one-frame tone mapping succeeded without Docker or host FFmpeg installation.
+
+## Custom branding update
+
+Moved the supplied logo to `public/branding/logo.png` and launcher artwork to `assets/branding/icon.png`. The logo appears in the sidebar, loading screen, and welcome screen. Generated native icons with the Tauri icon CLI and added a browser favicon. TypeScript, ESLint, all 11 frontend tests, and the production/AppImage build passed. Verified packaged logo/favicon bytes and that the AppImage desktop entry points to the new generated 256px launcher icon. The rebuilt AppImage runtime responds natively on the school PC.
+
+## Simple launch and themed menus
+
+Replaced every native HTML select (settings, export, presets and zoom) with app-themed combobox/listbox menus, including keyboard navigation, type-ahead, escape/outside-click dismissal, and popup positioning outside clipped editor panels. Removed internal tool paths from Settings and updated missing-engine messaging to refer to the complete application package.
+
+Added `dist/rlcut`, a single-file Linux executable containing the full AppImage. It supplies the extraction flag automatically for school PCs without FUSE, forwards arguments/exit status, and removes its temporary payload after normal exit. Its independent fixture test verified argument preservation, exit status, and cleanup. Video engines remain bundled inside the app.
+
+Configured a Windows current-user NSIS installer, offline WebView2 packaging, versioned/checksummed static Windows video tools, and a manual Windows build workflow. The combined installer configuration passed the installed Tauri JSON schema. Windows builds were not executed on this Linux host.
+
+TypeScript, ESLint, frontend formatting, 12 frontend tests, 21 Rust unit tests and real import/preview/export worker integration passed. Eight environment/launcher checks passed. The user's newly replaced logo was detected during packaging and included by a final rebuild.
+
+Final rebuild includes the user's latest logo and updated icon artwork. Verified the packaged frontend images match the final source assets and the AppImage's root launcher icon matches the freshly generated 128px icon. Both `dist/rlcut` and `dist/rlcut.AppImage` are executable (about 130 MiB). Installed a per-user rlcut app-menu shortcut pointing to the single-file executable and latest launcher icon. A native headless launch reached the GTK backend, confirming payload extraction/execution; GTK requires the graphical desktop for the user-facing window.

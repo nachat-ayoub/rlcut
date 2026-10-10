@@ -57,7 +57,9 @@ case "$action" in
       if [[ -f src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage ]]; then
         cp src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage dist/rlcut.AppImage
         chmod 755 dist/rlcut.AppImage
-        echo 'Standalone AppImage saved to dist/rlcut.AppImage'
+        rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut
+        chmod 755 dist/rlcut
+        echo 'Standalone app saved to dist/rlcut (double-click) and dist/rlcut.AppImage'
       fi
     else
       npm run desktop:build:native -- "$@"

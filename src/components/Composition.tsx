@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { Dropdown } from './Dropdown';
 import { Film, LoaderCircle, Move, Scan } from 'lucide-react';
 import type { Layer, Preset, Preview, Video } from '../types';
 import { clamp } from '../lib/presets';
@@ -108,6 +109,6 @@ export function Composition({ video, preview, preset, before, guides, layer, set
       </div></div>
     <span className="canvas-caption">
       <Scan size={12} />
-      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · <label>Zoom <select aria-label="Preview zoom" value={zoom} onChange={e => setZoom(Number(e.target.value))}>{[1, 1.5, 2, 3, 4].map(z => <option key={z} value={z}>{z === 1 ? 'Fit' : `${z * 100}%`}</option>)}</select></label></span>
+      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · <label>Zoom <Dropdown label="Preview zoom" value={zoom} onChange={value => setZoom(Number(value))} options={[1, 1.5, 2, 3, 4].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /></label></span>
   </div>;
 }

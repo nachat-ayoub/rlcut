@@ -104,3 +104,13 @@ test('boost dialog includes cutout preview and complete boost controls', () => {
   for (const label of ['Source zoom','Boost cutout result','Edge feather','X position','Y position','Crop width','Crop height','Apply boost settings']) assert.ok(html.includes(label), label);
   assert.equal((html.match(/Resize boost crop/g) || []).length, 4);
 });
+
+const { Dropdown } = await import('../src/components/Dropdown.tsx');
+test('dropdown uses the app combobox rather than native select chrome', () => {
+  const html = renderToStaticMarkup(createElement(Dropdown, { label:'Default FPS', value:60, options:[{value:30,label:'30 FPS'},{value:60,label:'60 FPS'}], onChange:()=>{} }));
+  assert.match(html, /role="combobox"/);
+  assert.match(html, /aria-label="Default FPS"/);
+  assert.match(html, /aria-expanded="false"/);
+  assert.match(html, /60 FPS/);
+  assert.doesNotMatch(html, /<select|<option/);
+});

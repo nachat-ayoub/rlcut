@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Check, MousePointer2, RotateCcw, X } from 'lucide-react';
 import type { Preset, Rect } from '../types';
+import { Dropdown } from './Dropdown';
 import { Slider } from './Controls';
 import { Alignment } from './Alignment';
 import { corners, resizeCrop, type Corner } from '../lib/geometry';
@@ -67,7 +68,7 @@ export function CropEditor({ source, preset, aspect, onApply, onCancel }: {
       </div>
       <p>Draw around the HUD, then move or resize the selection. Only the masked area appears in your clip.</p>
       <div className="crop-layout"><div>
-        <label className="crop-zoom">Source zoom <select aria-label="Source zoom" value={zoom} onChange={e => zoomTo(Number(e.target.value))}>{[1, 2, 3, 4, 6, 8].map(z => <option key={z} value={z}>{z === 1 ? 'Fit' : `${z * 100}%`}</option>)}</select> <span>Scroll to inspect the HUD</span></label>
+        <label className="crop-zoom">Source zoom <Dropdown label="Source zoom" value={zoom} onChange={value => zoomTo(Number(value))} options={[1, 2, 3, 4, 6, 8].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /> <span>Scroll to inspect the HUD</span></label>
         <div className="crop-viewport" ref={viewport}><div className="crop-frame" style={{ width: `${zoom * 100}%` }} ref={frame} onPointerDown={e => start(e, 'draw')} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}>
           <img src={source} alt="Original frame for boost crop selection" draggable={false} />
           <div className="crop-selection" style={style} onPointerDown={e => start(e, draw ? 'draw' : 'move')}>

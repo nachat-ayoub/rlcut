@@ -71,12 +71,14 @@ impl Binaries {
         }
     }
     pub fn ffmpeg(&self) -> Result<&Path, String> {
-        self.ffmpeg.as_deref().ok_or_else(||"FFmpeg not found. Install FFmpeg with libx264 support, add it to PATH, or bundle it in resources/ffmpeg.".into())
+        self.ffmpeg.as_deref().ok_or_else(|| {
+            "Video processing is unavailable. Reinstall the complete rlcut app package.".into()
+        })
     }
     pub fn ffprobe(&self) -> Result<&Path, String> {
-        self.ffprobe
-            .as_deref()
-            .ok_or_else(|| "FFprobe not found. Install FFmpeg/FFprobe and restart rlcut.".into())
+        self.ffprobe.as_deref().ok_or_else(|| {
+            "Video information could not be read. Reinstall the complete rlcut app package.".into()
+        })
     }
 }
 #[cfg(test)]
@@ -88,7 +90,7 @@ mod tests {
             ffmpeg: None,
             ffprobe: None,
         };
-        assert!(b.ffmpeg().unwrap_err().contains("FFmpeg not found"));
+        assert!(b.ffmpeg().unwrap_err().contains("Reinstall the complete"));
         assert!(b.ffprobe().is_err());
     }
 }

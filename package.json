@@ -20,7 +20,8 @@
     "desktop:build:native": "tauri build --features desktop",
     "doctor": "bash scripts/run.sh doctor",
     "check": "bash scripts/run.sh check",
-    "test:environment": "bash tests/environment.test.sh"
+    "test:environment": "bash tests/environment.test.sh",
+    "desktop:build:windows": "powershell -NoProfile -File scripts/build-windows.ps1"
   },
   "dependencies": {
     "lucide-react": "1.26.0",

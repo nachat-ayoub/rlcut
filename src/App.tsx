@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SkipBack, SkipForward, SlidersHorizontal, Trash2, Upload, X, Zap } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SkipBack, SkipForward, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
 import type { Init, Layer, Preset, Preview, Progress, Store, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, time, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
+import { Dropdown } from './components/Dropdown';
 import { Section, Slider } from './components/Controls';
 import { Composition } from './components/Composition';
 import { Alignment } from './components/Alignment';
@@ -172,7 +173,7 @@ export default function App() {
   }, [video, exporting, exportStarting, outputFolder, preset, quality, fps, outputName, report]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
-      const input = (e.target as HTMLElement).closest('input,textarea,select,[contenteditable]'); if (e.key === 'Escape') {
+      const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
         setModal(null);
         return;
       } if (input || modal)
@@ -226,17 +227,13 @@ export default function App() {
   const b = preset.boost;
   if (!ready)
     return <div className="boot">
-      <Zap size={32} />
+      <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
       <span>Opening rlcut…</span>
     </div>;
   return <div className="app-shell" onPointerDownCapture={e => { if (!(e.target as HTMLElement).closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">
-          <Zap size={22} fill="currentColor" />
-        </span>
-        <span>rlcut<span className="brand-dot">.</span>
-        </span>
+        <img className="brand-logo" src="/branding/logo.png" alt="rlcut" />
         <small>DESKTOP</small>
       </div>
       <button className="import-button" onClick={() => void importVideo()} disabled={importing}>
@@ -296,7 +293,7 @@ export default function App() {
           {video ? 'Video imported' : 'Ready to create'}
         </div>
       </header>
-      {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, FFmpeg previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">FFmpeg / FFprobe missing. Install both or bundle them, then restart rlcut.<button onClick={() => setModal('settings')}>View settings</button>
+      {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, FFmpeg previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
       </div>}
       <div className="preview-toolbar">
         <div className="breadcrumb">
@@ -353,7 +350,7 @@ export default function App() {
       <footer className="workspace-footer">
         <span>
           <span className="status-dot" />Offline by design</span>
-        <span>FFmpeg composition · H.264 / AAC</span>
+        <span>H.264 video · AAC audio</span>
       </footer>
     </main>
     <aside className="inspector">
@@ -427,16 +424,9 @@ export default function App() {
         </Section>
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
-            <label className="field">Resolution<select value={quality} onChange={e => setQuality(Number(e.target.value))}>
-              <option value={480}>480p · 480 × 854</option>
-              <option value={720}>720p · 720 × 1280</option>
-              <option value={1080}>1080p · 1080 × 1920</option>
-            </select>
+            <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
             </label>
-            <label className="field">Frame rate<select value={fps} onChange={e => setFps(Number(e.target.value))}>
-              <option value={30}>30 FPS</option>
-              <option value={60}>60 FPS</option>
-            </select>
+            <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={[{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-short.mp4" />
@@ -492,9 +482,7 @@ export default function App() {
     </div>}
     {!store.setupComplete && <div className="modal-backdrop">
       <div className="modal welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
-        <span className="welcome-mark">
-          <Zap size={30} fill="currentColor" />
-        </span>
+        <img className="welcome-logo" src="/branding/logo.png" alt="rlcut" />
         <span className="eyebrow">WELCOME TO RLCUT</span>
         <h2 id="welcome-title">Big plays.<br />
           <span>Perfectly framed.</span>
@@ -533,11 +521,7 @@ export default function App() {
           </button>
         </div>
         {modal === 'presets' ? <>
-          <label className="field">Selected preset<select value={preset.id} onChange={e => select(e.target.value)}>
-            {allPresets.map(p => <option key={p.id} value={p.id}>
-              {p.name}
-            </option>)}
-          </select>
+          <label className="field">Selected preset<Dropdown label="Selected preset" value={preset.id} onChange={value => select(value)} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
           <label className="field">Preset name<div className="folder-picker">
             <input value={rename} onChange={e => setRename(e.target.value)} disabled={preset.id === 'classic'} maxLength={100} />
@@ -561,23 +545,12 @@ export default function App() {
           </div>
         </> : <>
           <div className="two-controls">
-            <label className="field">Default quality<select value={store.settings.quality} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, quality: Number(e.target.value) } }))}>
-              <option value={480}>480p</option>
-              <option value={720}>720p</option>
-              <option value={1080}>1080p</option>
-            </select>
+            <label className="field">Default quality<Dropdown label="Default quality" value={store.settings.quality} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, quality: Number(value) } }))} options={[{ value: 480, label: '480p' }, { value: 720, label: '720p' }, { value: 1080, label: '1080p' }]} />
             </label>
-            <label className="field">Default FPS<select value={store.settings.fps} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, fps: Number(e.target.value) } }))}>
-              <option value={30}>30 FPS</option>
-              <option value={60}>60 FPS</option>
-            </select>
+            <label className="field">Default FPS<Dropdown label="Default FPS" value={store.settings.fps} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, fps: Number(value) } }))} options={[{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
-          <label className="field">Default preset<select value={store.settings.defaultPreset} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, defaultPreset: e.target.value } }))}>
-            {allPresets.map(p => <option key={p.id} value={p.id}>
-              {p.name}
-            </option>)}
-          </select>
+          <label className="field">Default preset<Dropdown label="Default preset" value={store.settings.defaultPreset} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, defaultPreset: value } }))} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
           <label className="field">Default output folder<div className="folder-picker">
             <input value={store.settings.outputFolder} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, outputFolder: e.target.value } }))} />
@@ -589,18 +562,6 @@ export default function App() {
             </button>
           </div>
           </label>
-          <div className="binary-status">
-            <strong>Video processing tools</strong>
-            <p>FFmpeg: <code>
-              {init?.binaries.ffmpeg ?? 'Not detected'}
-            </code>
-            </p>
-            <p>FFprobe: <code>
-              {init?.binaries.ffprobe ?? 'Not detected'}
-            </code>
-            </p>
-            <small>Uses bundled binaries or PATH. Restart after installing tools.</small>
-          </div>
           <div className="modal-actions">
             <button onClick={() => void invoke('clear_cache').then(() => { setRefresh(n => n + 1); setNotice('Preview cache cleared'); }).catch(report)}>
               <Trash2 size={15} />Clear preview cache</button>
