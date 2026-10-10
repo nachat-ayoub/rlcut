@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "linux": {
+      "appimage": {
+        "files": {
+          "/usr/bin/ffmpeg": "../.runtime/appimage-tools/ffmpeg",
+          "/usr/bin/ffprobe": "../.runtime/appimage-tools/ffprobe",
+          "/usr/share/rlcut/video-tool-notices": "../.runtime/appimage-tools/notices"
+        }
+      }
+    }
+  }
+}

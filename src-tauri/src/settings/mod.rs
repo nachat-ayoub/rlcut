@@ -1,0 +1,136 @@
+use crate::model::{ExportOptions, Preset};
+use serde::{Deserialize, Serialize};
+use std::{
+    fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Settings {
+    pub quality: u32,
+    pub fps: u32,
+    pub output_folder: String,
+    pub default_preset: String,
+}
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            quality: 1080,
+            fps: 60,
+            output_folder: String::new(),
+            default_preset: "classic".into(),
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Store {
+    pub version: u32,
+    pub setup_complete: bool,
+    pub active_preset: String,
+    pub presets: Vec<Preset>,
+    pub settings: Settings,
+    pub recent_files: Vec<String>,
+}
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            setup_complete: false,
+            active_preset: "classic".into(),
+            presets: Vec::new(),
+            settings: Settings::default(),
+            recent_files: Vec::new(),
+        }
+    }
+}
+impl Store {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.version != 1 {
+            return Err("Unsupported settings version".into());
+        }
+        if self.presets.len() > 200 || self.recent_files.len() > 12 {
+            return Err("Too many presets or recent files".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        ids.insert("classic".to_string());
+        for p in &self.presets {
+            p.validate()?;
+            if !ids.insert(p.id.clone()) {
+                return Err("Preset IDs must be unique; built-in preset cannot be replaced".into());
+            }
+        }
+        if !ids.contains(&self.active_preset) || !ids.contains(&self.settings.default_preset) {
+            return Err("Selected preset does not exist".into());
+        }
+        ExportOptions {
+            quality: self.settings.quality,
+            fps: self.settings.fps,
+            folder: String::new(),
+            filename: String::new(),
+        }
+        .resolution()?;
+        Ok(())
+    }
+}
+pub fn load(path: &Path) -> Result<Store, String> {
+    if !path.exists() {
+        return Ok(Store::default());
+    }
+    let bytes = fs::read(path).map_err(|e| format!("Cannot read settings: {e}"))?;
+    let store: Store = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Cannot read settings JSON (original file retained): {e}"))?;
+    store.validate()?;
+    Ok(store)
+}
+pub fn save(path: &Path, store: &Store) -> Result<(), String> {
+    store.validate()?;
+    let parent = path.parent().ok_or("Invalid settings path")?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("json.tmp");
+    let backup = path.with_extension("json.bak");
+    let data = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
+    let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    f.write_all(&data)
+        .and_then(|_| f.sync_all())
+        .map_err(|e| e.to_string())?;
+    drop(f);
+    // Preserve last known good settings on Windows, where rename cannot replace a file.
+    if path.exists() {
+        fs::copy(path, &backup).map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    if path.exists() {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        if !path.exists() && backup.exists() {
+            let _ = fs::copy(&backup, path);
+        }
+        return Err(format!("Could not save settings: {e}"));
+    }
+    Ok(())
+}
+pub fn data_file(dir: PathBuf) -> PathBuf {
+    dir.join("settings-v1.json")
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cannot_mutate_builtin() {
+        let mut s = Store::default();
+        s.presets.push(Preset::default());
+        assert!(s.validate().is_err());
+    }
+    #[test]
+    fn roundtrip() {
+        let s = Store::default();
+        let encoded = serde_json::to_string(&s).unwrap();
+        serde_json::from_str::<Store>(&encoded)
+            .unwrap()
+            .validate()
+            .unwrap();
+    }
+}

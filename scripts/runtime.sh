@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+action="${1:-dev}"
+shift || true
+if [[ "$action" == doctor ]]; then
+  for tool in node npm cargo rustc ffmpeg ffprobe; do
+    if command -v "$tool" >/dev/null; then
+      case "$tool" in ffmpeg|ffprobe) "$tool" -version | head -n 1 ;; *) "$tool" --version ;; esac
+    else echo "MISSING: $tool"; fi
+  done
+  for lib in gtk+-3.0 webkit2gtk-4.1; do
+    pkg-config --modversion "$lib" 2>/dev/null || echo "MISSING: $lib (see RUNNING.md)"
+  done
+  exit
+fi
+if [[ "$action" == shell ]]; then exec bash "$@"; fi
+if [[ "$action" == appimage ]]; then
+  appimage="${1:-dist/rlcut.AppImage}"
+  if (($#)); then shift; fi
+  [[ -f "$appimage" ]] || { echo "AppImage missing: $appimage" >&2; exit 1; }
+  appimage="$(cd "$(dirname "$appimage")" && pwd)/$(basename "$appimage")"
+  exec "$appimage" --appimage-extract-and-run "$@"
+fi
+[[ "$action" != image ]] || { echo 'image is only available in Docker mode.' >&2; exit 1; }
+for tool in node npm cargo rustc ffmpeg ffprobe; do
+  command -v "$tool" >/dev/null || { echo "Missing $tool. See RUNNING.md for native setup." >&2; exit 1; }
+done
+node -e 'const [a,b]=process.versions.node.split(".").map(Number); if(a<22||(a===22&&b<12)) { console.error("Node 22.12+ required"); process.exit(1); }'
+node --input-type=module -e 'import {execFileSync} from "node:child_process"; const v=execFileSync("rustc",["--version"],{encoding:"utf8"}).match(/rustc (\d+)\.(\d+)/); if(!v||(+v[1]===1&&+v[2]<85)){console.error("Rust 1.85+ required; install current stable with rustup (see RUNNING.md)");process.exit(1)}'
+if [[ "$(uname -s)" == Linux ]]; then
+  for lib in gtk+-3.0 webkit2gtk-4.1; do
+    pkg-config --exists "$lib" 2>/dev/null || { echo "Missing $lib. See RUNNING.md for native setup or use RLCUT_ENV=docker." >&2; exit 1; }
+  done
+fi
+# Reinstall only when the lock changes; node_modules is isolated in Docker.
+stamp=node_modules/.rlcut-lock
+lock="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; import {createHash} from "node:crypto"; console.log(createHash("sha256").update(readFileSync("package-lock.json")).digest("hex"))')"
+if [[ ! -f "$stamp" || "$(cat "$stamp")" != "$lock" ]]; then
+  npm ci
+  printf '%s' "$lock" > "$stamp"
+fi
+case "$action" in
+  dev)
+    if [[ "${RLCUT_CONTAINER:-}" == 1 ]]; then
+      # A private bus supports GTK dialogs without mounting the host session bus.
+      export XDG_RUNTIME_DIR=/tmp/rlcut-runtime
+      mkdir -p "$XDG_RUNTIME_DIR"; chmod 700 "$XDG_RUNTIME_DIR"
+      exec dbus-run-session -- npm run desktop:native -- "$@"
+    fi
+    exec npm run desktop:native -- "$@" ;;
+  build)
+    if [[ "${RLCUT_CONTAINER:-}" == 1 ]]; then export APPIMAGE_EXTRACT_AND_RUN=1; fi
+    if [[ "$(uname -s)" == Linux ]]; then
+      bash scripts/prepare-appimage.sh
+      npm run desktop:build:native -- "$@" --config src-tauri/tauri.appimage.conf.json
+      if [[ -f src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage ]]; then
+        cp src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage dist/rlcut.AppImage
+        chmod 755 dist/rlcut.AppImage
+        echo 'Standalone AppImage saved to dist/rlcut.AppImage'
+      fi
+    else
+      npm run desktop:build:native -- "$@"
+    fi ;;
+  check)
+    npm run format:check
+    npm run lint
+    npm test
+    npm run test:environment
+    npm run test:core
+    npm run build
+    cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+    cargo test --manifest-path src-tauri/Cargo.toml
+    cargo check --manifest-path src-tauri/Cargo.toml --features desktop
+    cargo clippy --manifest-path src-tauri/Cargo.toml --features desktop --all-targets -- -D warnings
+    python3 tests/pipeline.py ;;
+esac
