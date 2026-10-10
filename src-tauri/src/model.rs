@@ -157,6 +157,8 @@ pub struct Video {
     pub duration: f64,
     pub fps: f64,
     pub has_audio: bool,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub color_transfer: String,
 }
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]

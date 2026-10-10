@@ -74,6 +74,15 @@ pub fn geometry(video: &Video, preset: &Preset, w: u32, h: u32) -> Result<Geomet
         },
     })
 }
+/// Normalize HDR recordings to the SDR BT.709 canvas before compositing.
+/// Source-frame previews use this same transform, so cropping stays consistent.
+pub fn color_filter(video: &Video) -> &'static str {
+    if matches!(video.color_transfer.as_str(), "smpte2084" | "arib-std-b67") {
+        "zscale=transfer=linear:npl=100,format=gbrpf32le,zscale=primaries=bt709,tonemap=tonemap=hable:desat=0,zscale=transfer=bt709:matrix=bt709:range=limited,format=yuv420p,setparams=range=limited:colorspace=bt709:color_primaries=bt709:color_trc=bt709"
+    } else {
+        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,setparams=range=limited:colorspace=bt709:color_primaries=bt709:color_trc=bt709"
+    }
+}
 /// The single composition implementation used for previews AND full video exports.
 pub fn filter_graph(video: &Video, p: &Preset, w: u32, h: u32) -> Result<String, String> {
     let g = geometry(video, p, w, h)?;
@@ -81,7 +90,7 @@ pub fn filter_graph(video: &Video, p: &Preset, w: u32, h: u32) -> Result<String,
     let gp = g.gameplay;
     let b = g.boost;
     let c = g.crop;
-    let mut graph=format!("[0:v:0]scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=2,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[base]",video.width,video.height,if p.boost.enabled{
+    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=2,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[base]",color_filter(video),video.width,video.height,if p.boost.enabled{
         3
     }
     else{
@@ -105,7 +114,7 @@ pub fn filter_graph(video: &Video, p: &Preset, w: u32, h: u32) -> Result<String,
         } else {
             format!("255*clip((1-({distance}))/{:.6},0,1)", p.boost.feather)
         };
-        graph.push_str(&format!(";[hudsrc]crop={}:{}:{}:{},scale={}:{}:flags=lanczos,format=rgba,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='{alpha}'[hud];[base][hud]overlay=x={}:y={}:eval=init:shortest=1:format=auto,format=yuv420p,setsar=1[out]",c.width,c.height,c.x,c.y,b.width,b.height,b.x,b.y));
+        graph.push_str(&format!(";[hudsrc]crop={}:{}:{}:{},scale={}:{}:flags=lanczos,format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{alpha}'[hud];[base][hud]overlay=x={}:y={}:eval=init:shortest=1:format=yuv420,format=yuv420p,setsar=1[out]",c.width,c.height,c.x,c.y,b.width,b.height,b.x,b.y));
     } else {
         graph.push_str(";[base]format=yuv420p,setsar=1[out]");
     }
@@ -122,6 +131,7 @@ mod tests {
             duration: 3.,
             fps: 60.,
             has_audio: true,
+            color_transfer: String::new(),
         }
     }
     #[test]
@@ -180,7 +190,7 @@ mod tests {
         p.boost.height = 0.2;
         let graph = filter_graph(&video(1920, 1080), &p, 720, 1280).unwrap();
         assert!(graph.contains("(H/2)"));
-        assert!(graph.contains("format=rgba"));
+        assert!(graph.contains("format=yuva420p"));
     }
     #[test]
     fn disabled_boost_has_no_unused_split() {

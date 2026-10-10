@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 FFMPEG = os.environ.get('RLCUT_FFMPEG') or shutil.which('ffmpeg')
 FFPROBE = os.environ.get('RLCUT_FFPROBE') or shutil.which('ffprobe')
 
-def run(args):
-    return subprocess.run([str(a) for a in args], check=True, capture_output=True, text=True)
+def run(args, env=None):
+    return subprocess.run([str(a) for a in args], check=True, capture_output=True, text=True, env=env)
 
 @unittest.skipUnless(FFMPEG and FFPROBE, 'Install FFmpeg and FFprobe to run real encoding tests')
 class Pipeline(unittest.TestCase):
@@ -24,20 +24,23 @@ class Pipeline(unittest.TestCase):
         cls.cli = ROOT / '.checks' / ('graph-cli.exe' if os.name == 'nt' else 'graph-cli')
         run(['rustc', '--edition=2021', ROOT / 'scripts/graph-cli.rs', '-o', cls.cli])
 
-    def exercise(self, width, height, quality, fps, audio, shape):
+    def exercise(self, width, height, quality, fps, audio, shape, transfer=None):
         with tempfile.TemporaryDirectory(prefix='rlcut-') as folder:
             folder = Path(folder)
             source, output, preview = folder / 'source unicode é.mp4', folder / 'short.mp4', folder / 'preview.png'
             args = [FFMPEG, '-v', 'error', '-f', 'lavfi', '-i', f'testsrc2=size={width}x{height}:rate=24:duration=0.5']
             if audio:
                 args += ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.8', '-c:a', 'aac']
-            run(args + ['-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', source])
-            graph = run([self.cli, width, height, quality, fps, shape, 'audio' if audio else 'silent']).stdout.strip()
+            if transfer:
+                args += ['-vf', f'zscale=matrixin=bt709:transferin=bt709:primariesin=bt709:rangein=limited:matrix=bt2020nc:transfer={transfer}:primaries=bt2020:range=limited,format=yuv420p10le', '-colorspace', 'bt2020nc', '-color_trc', transfer, '-color_primaries', 'bt2020', '-color_range', 'tv']
+            env = {**os.environ, 'RLCUT_TEST_TRANSFER': transfer or ''}
+            run(args + ['-c:v' , 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p10le' if transfer else 'yuv420p', source])
+            graph = run([self.cli, width, height, quality, fps, shape, 'audio' if audio else 'silent'], env=env).stdout.strip()
             common = [FFMPEG, '-v', 'error', '-filter_complex_threads', '1', '-i', source, '-filter_complex', graph, '-map', '[out]']
             # Execute production export arguments as well as the production graph.
             # This catches audio duration/CFR/encoder bugs hidden by a test-only command.
             export_args = run([self.cli, width, height, quality, fps, shape,
-                               'audio' if audio else 'silent', source, output, 0.5]).stdout.rstrip('\0').split('\0')
+                               'audio' if audio else 'silent', source, output, 0.5], env=env).stdout.rstrip('\0').split('\0')
             run([FFMPEG] + export_args)
             run(common + ['-frames:v', '1', '-threads', '1', '-update', '1', preview])
             info = json.loads(run([FFPROBE, '-v', 'error', '-show_streams', '-show_format', '-of', 'json', output]).stdout)
@@ -47,6 +50,7 @@ class Pipeline(unittest.TestCase):
             self.assertEqual(stream['r_frame_rate'], f'{fps}/1')
             self.assertEqual(stream['codec_name'], 'h264')
             self.assertEqual(stream['sample_aspect_ratio'], '1:1')
+            self.assertEqual([stream[k] for k in ['color_range', 'color_space', 'color_transfer', 'color_primaries']], ['tv', 'bt709', 'bt709', 'bt709'])
             self.assertEqual(any(s['codec_type'] == 'audio' for s in info['streams']), audio)
             self.assertAlmostEqual(float(info['format']['duration']), 0.5, delta=0.15)
             # Compare lossless preview with the decoded first export frame. Encoding can
@@ -56,9 +60,20 @@ class Pipeline(unittest.TestCase):
             self.assertEqual(len(raw_a), len(raw_b))
             self.assertLess(sum(abs(a-b) for a,b in zip(raw_a,raw_b))/len(raw_a), 8.0)
 
+            if transfer:
+                # The sharp gameplay region must retain the independent SDR reference,
+                # even when an alpha-masked boost layer is enabled elsewhere.
+                transform = 'zscale=transfer=linear:npl=100,format=gbrpf32le,zscale=primaries=bt709,tonemap=tonemap=hable:desat=0,zscale=transfer=bt709:matrix=bt709:range=limited,format=yuv420p,scale=480:270:flags=lanczos'
+                reference = subprocess.check_output([str(FFMPEG), '-v', 'error', '-i', str(source), '-vf', transform, '-frames:v', '1', '-threads', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+                gameplay = subprocess.check_output([str(FFMPEG), '-v', 'error', '-i', str(output), '-vf', 'crop=480:270:0:292', '-frames:v', '1', '-threads', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+                self.assertEqual(len(reference), len(gameplay))
+                self.assertLess(sum(abs(a-b) for a,b in zip(reference,gameplay))/len(reference), 4.0)
+
     def test_480_30_audio_circle(self): self.exercise(640, 360, 480, 30, True, 'circle')
     def test_720_60_silent_ellipse(self): self.exercise(1280, 720, 720, 60, False, 'ellipse')
     def test_1080_30_4k(self): self.exercise(3840, 2160, 1080, 30, False, 'circle')
+    def test_hdr_pq_colors(self): self.exercise(640, 360, 480, 30, False, 'circle', 'smpte2084')
+    def test_hdr_hlg_colors(self): self.exercise(640, 360, 480, 30, False, 'ellipse', 'arib-std-b67')
     def test_portrait_source(self): self.exercise(360, 640, 480, 60, True, 'ellipse')
 
 if __name__ == '__main__': unittest.main(verbosity=2)

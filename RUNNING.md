@@ -172,3 +172,12 @@ FFmpeg/FFprobe. Run it without FUSE or sudo:
 Choose your actual host video/output folders in its file picker. The AppImage
 uses normal native app settings; it does not use Docker's `/media` mount.
 The Linux build baseline is Ubuntu 22.04 x86_64 (this school PC).
+
+### Editing and checking the result
+
+- Position X/Y use the canvas center as `(0, 0)`. Values are fractions of the canvas: `-0.5` is the left/top edge and `+0.5` is the right/bottom edge. Existing saved templates retain their positions.
+- Drag gameplay or boost to snap its center or edges to the canvas. Cyan lines show a snap; hold Alt to move freely. Each layer also has a nine-button alignment grid for sides, corners, and the exact center.
+- Resize selected layers and the boost source crop from any of the four corners. Gameplay keeps its aspect ratio; the boost crop can change width and height independently.
+- Click outside the video to clear selection and hide the handles. Click a layer to select it again.
+- Use preview Zoom to inspect the composition. In **Select boost area**, source zoom goes up to 800% and scrolls toward your selected crop. The dialog includes the boost settings and a masked cutout preview; Cancel discards dialog changes, and Apply saves them together.
+- PQ and HLG HDR recordings are tone-mapped to SDR BT.709 consistently in source previews, compositions, and H.264 exports. Export quality remains CRF 20 / medium, with up to four filter threads.

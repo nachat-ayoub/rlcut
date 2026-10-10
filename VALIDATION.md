@@ -51,3 +51,15 @@ Manual UI interaction (file dialogs, dragging/resizing, preset editing and expor
 buttons), native laptop execution, Windows/macOS builds and installer smoke tests
 remain user/target-machine checks. The successful backend and desktop startup
 checks do not certify every UI interaction. See RUNNING.md for the manual test guide.
+
+## Editor and HDR export update (2026-10-10)
+
+Added readable time units, four-corner source/layer resizing, detailed source and composition zoom, transactional boost settings with masked cutout preview, deselection, center-origin position controls, center/edge snapping, and nine-way alignment.
+
+The supplied Rocket League recording is 1280×720, 59.94 FPS, 10-bit YUV, limited-range BT.2020/PQ. Its washed-out export came from treating HDR values as SDR. Source and composition now share linear-light Hable tone mapping into limited-range BT.709; exported files explicitly carry BT.709 color metadata. HUD masking stays in planar YUV with alpha rather than converting the entire composition through RGB.
+
+A two-second 1080p/60 export from the supplied clip took 18.982 seconds with one filter thread and 12.944 seconds with four (31.8% less time on this machine). All 120 decoded video frames were pixel-identical between thread counts. The encoded frame differed from the lossless composition preview by 0.948/255 mean absolute RGB error. The encoder preset and CRF are unchanged. This is a short-sample measurement, not a guaranteed speedup on other hardware. HDR-to-SDR tone mapping necessarily compresses HDR luminance into the SDR display range.
+
+Validation for this update: 11 frontend tests; TypeScript, ESLint, frontend formatting and production build; 21 Rust unit tests plus the real import/cache/export-worker integration test; desktop Clippy with warnings denied; and six real FFmpeg regressions covering SDR, portrait/4K inputs, audio/CFR/duration, plus PQ and HLG color fidelity. All passed. Interactive browser verification was unavailable because this session exposes no browser surface; interaction math and rendered controls were checked through tests.
+
+Rebuilt `dist/rlcut.AppImage` (128.44 MiB, executable). The AppImage runtime and its bundled FFprobe/FFmpeg were tested natively on the 42 host; HDR probing and one-frame tone mapping succeeded without Docker or host FFmpeg installation.

@@ -1,10 +1,11 @@
-import { useRef, type CSSProperties, type PointerEvent } from 'react';
+import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Film, LoaderCircle, Move, Scan } from 'lucide-react';
 import type { Layer, Preset, Preview, Video } from '../types';
 import { clamp } from '../lib/presets';
+import { corners, snapAxis, type Corner } from '../lib/geometry';
 type Gesture = {
   layer: Layer;
-  resize: boolean;
+  resize: Corner | null;
   x: number;
   y: number;
   preset: Preset;
@@ -15,39 +16,47 @@ export function Composition({ video, preview, preset, before, guides, layer, set
   preset: Preset;
   before: boolean;
   guides: boolean;
-  layer: Layer;
-  setLayer: (l: Layer) => void;
+  layer: Layer | null;
+  setLayer: (l: Layer | null) => void;
   change: (p: Preset) => void;
   busy: boolean;
   importVideo: () => void;
   quality: number;
 }) {
   const canvas = useRef<HTMLDivElement>(null), gesture = useRef<Gesture | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  function begin(e: PointerEvent, target: Layer, resize = false) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function begin(e: PointerEvent, target: Layer, resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function move(e: PointerEvent) {
     const g = gesture.current;
     if (!g || !canvas.current)
       return;
     const r = canvas.current.getBoundingClientRect(), dx = (e.clientX - g.x) / r.width, dy = (e.clientY - g.y) / r.height;
     const p = structuredClone(g.preset);
-    if (g.layer === 'gameplay') {
-      if (g.resize)
-        p.gameplay.scale = clamp(p.gameplay.scale + dx * 2, .2, 4);
-      else {
-        p.gameplay.x = clamp(p.gameplay.x + dx);
-        p.gameplay.y = clamp(p.gameplay.y + dy);
+    const item = p[g.layer];
+    const width = g.layer === 'gameplay' ? p.gameplay.scale : p.boost.width * p.boost.scale;
+    const height = g.layer === 'gameplay' ? width * (video!.height / video!.width) * ratio : p.boost.height * p.boost.scale;
+    if (g.resize) {
+      const sx = g.resize.includes('w') ? -1 : 1, sy = g.resize.includes('n') ? -1 : 1;
+      let nw: number, nh: number;
+      if (g.layer === 'gameplay') {
+        const aspect = height / width;
+        const delta = Math.abs(dx) >= Math.abs(dy / aspect) ? sx * dx : sy * dy / aspect;
+        nw = clamp(width + delta, .2, 4); nh = nw * aspect;
+        p.gameplay.scale = nw;
+      } else {
+        nw = clamp(width + sx * dx, .01 * p.boost.scale, p.boost.scale);
+        nh = clamp(height + sy * dy, .005 * p.boost.scale, p.boost.scale);
+        p.boost.width = nw / p.boost.scale; p.boost.height = nh / p.boost.scale;
       }
-    }
-    else {
-      if (g.resize) {
-        p.boost.width = clamp(p.boost.width + dx * 2 / p.boost.scale, .01, 1);
-        p.boost.height = clamp(p.boost.height + dy * 2 / p.boost.scale, .005, 1);
-      }
-      else {
-        p.boost.x = clamp(p.boost.x + dx);
-        p.boost.y = clamp(p.boost.y + dy);
-      }
+      item.x = clamp(item.x + sx * (nw - width) / 2);
+      item.y = clamp(item.y + sy * (nh - height) / 2);
+      setSnaps([null, null]);
+    } else {
+      const x = snapAxis(item.x + dx, width, e.altKey ? 0 : 8 / r.width);
+      const y = snapAxis(item.y + dy, height, e.altKey ? 0 : 8 / r.height);
+      item.x = x.position; item.y = y.position; setSnaps([x.guide, y.guide]);
     }
     change(p);
   }
@@ -82,20 +91,23 @@ export function Composition({ video, preview, preset, before, guides, layer, set
         </div>
       </div>
     </div>;
-  return <div className="preview-stage">
-    <div className={`composition ${before ? 'source-mode' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: '100%' }} onPointerMove={move} onPointerUp={() => { gesture.current = null; }} onPointerCancel={() => { gesture.current = null; }}>
-      {preview && <img src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && <div className="preview-loading">
-        <LoaderCircle className="spin" />Rendering your composition…</div>}{!before && guides && preview && (['gameplay', 'boost'] as Layer[]).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : ''} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
-          <span>
-            <Move size={10} />
-            {target === 'gameplay' ? 'GAMEPLAY' : 'BOOST'}
-          </span>
-          <button className="resize-handle" aria-label={`Resize ${target}`} onPointerDown={e => begin(e, target, true)} />
-        </div>)}{busy && preview && <span className="render-badge">
-          <LoaderCircle size={12} className="spin" />Updating</span>}
-    </div>
+  return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
+    <div className="preview-viewport">
+      <div className={`composition ${before ? 'source-mode' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+        {preview && <img src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && <div className="preview-loading">
+          <LoaderCircle className="spin" />Rendering your composition…</div>}{!before && guides && preview && (['gameplay', 'boost'] as Layer[]).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
+            {layer === target && <span>
+              <Move size={10} />
+              {target === 'gameplay' ? 'GAMEPLAY' : 'BOOST'}
+            </span>}
+            {layer === target && corners.map(corner => <button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize ${target} ${corner}`} onPointerDown={e => begin(e, target, corner)} />)}
+          </div>)}{busy && preview && <span className="render-badge">
+            <LoaderCircle size={12} className="spin" />Updating</span>}
+        {snaps[0] !== null && <i className="snap-line vertical" style={{ left: `${snaps[0]! * 100}%` }} />}
+        {snaps[1] !== null && <i className="snap-line horizontal" style={{ top: `${snaps[1]! * 100}%` }} />}
+      </div></div>
     <span className="canvas-caption">
       <Scan size={12} />
-      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · Zoom to fit</span>
+      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · <label>Zoom <select aria-label="Preview zoom" value={zoom} onChange={e => setZoom(Number(e.target.value))}>{[1, 1.5, 2, 3, 4].map(z => <option key={z} value={z}>{z === 1 ? 'Fit' : `${z * 100}%`}</option>)}</select></label></span>
   </div>;
 }

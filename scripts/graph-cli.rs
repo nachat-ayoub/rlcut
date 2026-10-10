@@ -18,6 +18,7 @@ fn main() {
         duration: a.get(9).and_then(|v| v.parse().ok()).unwrap_or(1.),
         fps: 30.,
         has_audio: a.get(6).is_some_and(|v| v == "audio"),
+        color_transfer: std::env::var("RLCUT_TEST_TRANSFER").unwrap_or_default(),
     };
     let mut p = model::Preset::default();
     if a.get(5).is_some_and(|v| v == "ellipse") {

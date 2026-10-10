@@ -216,6 +216,7 @@ mod tests {
             duration: 3.,
             fps: 30.,
             has_audio: false,
+            color_transfer: String::new(),
         };
         let o = ExportOptions {
             quality: 480,

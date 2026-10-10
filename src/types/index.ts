@@ -39,6 +39,7 @@ export type Video = {
   duration: number;
   fps: number;
   hasAudio: boolean;
+  colorTransfer?: string;
 };
 export type Settings = {
   quality: number;

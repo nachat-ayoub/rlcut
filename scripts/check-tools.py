@@ -15,7 +15,7 @@ try:
     if '--enable-nonfree' in version: raise ValueError('Nonfree builds must not be redistributed')
     if 'libx264' not in output(ffmpeg, '-hide_banner', '-encoders'): raise ValueError('libx264 is required')
     filters = output(ffmpeg, '-hide_banner', '-filters')
-    for name in ['scale', 'crop', 'gblur', 'geq', 'overlay']:
+    for name in ['scale', 'crop', 'gblur', 'geq', 'overlay', 'zscale', 'tonemap']:
         if name not in filters: raise ValueError('Required filter missing: ' + name)
     print('Tools respond and support the configured pipeline. Verify target compatibility and corresponding license/source notices before distribution.')
 except (OSError, ValueError, subprocess.CalledProcessError) as error:

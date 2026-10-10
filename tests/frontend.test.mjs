@@ -1,7 +1,7 @@
 import '../scripts/register-ts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const { classic, copyPreset, clamp, time, filename } = await import('../src/lib/presets.ts');
+const { classic, copyPreset, clamp, time, duration, filename } = await import('../src/lib/presets.ts');
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { createElement } = await import('react');
 const { Composition } = await import('../src/components/Composition.tsx');
@@ -18,7 +18,7 @@ test('duplicating presets preserves all values and isolates nested edits', () =>
 test('positions clamp and timestamps support long recordings', () => {
   assert.equal(clamp(-0.2), 0);
   assert.equal(clamp(1.2), 1);
-  assert.equal(time(3661.25), '1:01:01.25');
+  assert.equal(time(3661.25), '1 h 1 min 1.25 s');
   assert.equal(filename('C:\\videos\\play.mp4'), 'play.mp4');
 });
 test('preview boundaries preserve gameplay aspect and apply boost scale', () => {
@@ -28,7 +28,7 @@ test('preview boundaries preserve gameplay aspect and apply boost scale', () => 
   }));
   assert.match(html, /width:100%;height:31\.640625%/);
   assert.match(html, /width:24%;height:13\.5%/);
-  assert.match(html, /Resize gameplay/);
+  assert.doesNotMatch(html, /Resize gameplay/);
   assert.match(html, /Resize boost/);
 });
 test('empty workspace has an actionable import control', () => {
@@ -64,4 +64,43 @@ test('absent desktop runtime produces an actionable error', async () => {
     const { invoke } = await import('../src/lib/native.ts');
     await assert.rejects(invoke('import_video', { path: '/video.mp4' }), /npm run desktop/);
   } finally { globalThis.window = old; }
+});
+
+const { resizeCrop, snapAxis, anchor } = await import('../src/lib/geometry.ts');
+test('durations use readable units with sane rounding', () => {
+  assert.equal(duration(3661.25), '1 h 1 min 1 s');
+  assert.equal(duration(24.82), '25 s');
+  assert.equal(duration(81.31), '1 min 21 s');
+  assert.equal(duration(59.8), '1 min 0 s');
+});
+test('all crop corners resize while preserving the opposite corner and source bounds', () => {
+  const r = { x: .2, y: .3, width: .4, height: .4 };
+  for (const c of ['nw', 'ne', 'sw', 'se']) {
+    const n = resizeCrop(r, c, .1, .1);
+    assert.ok(n.x >= 0 && n.y >= 0 && n.x + n.width <= 1 && n.y + n.height <= 1);
+    assert.ok(Math.abs((c.includes('w') ? n.x + n.width : n.x) - (c.includes('w') ? .6 : .2)) < 1e-10);
+    assert.ok(Math.abs((c.includes('n') ? n.y + n.height : n.y) - (c.includes('n') ? .7 : .3)) < 1e-10);
+    const bounded = resizeCrop(r, c, -5, 5);
+    assert.ok(bounded.width >= .00199 && bounded.height >= .00199);
+  }
+});
+test('drag snaps to center and sides independently, with matching alignment anchors', () => {
+  assert.deepEqual(snapAxis(.493, .2, .01), { position: .5, guide: .5 });
+  assert.deepEqual(snapAxis(.105, .2, .01), { position: .1, guide: 0 });
+  assert.deepEqual(snapAxis(.895, .2, .01), { position: .9, guide: 1 });
+  assert.equal(snapAxis(.4, .2, .01).guide, null);
+  assert.equal(anchor(.2, 0), .1);
+  assert.equal(anchor(.2, .5), .5);
+  assert.equal(anchor(.2, 1), .9);
+});
+test('deselected composition has no labels or resize boxes', () => {
+  const html = renderToStaticMarkup(createElement(Composition, { video: {width:1920,height:1080}, preview:{source:'x',composed:'y'}, preset:classic, before:false,guides:true,layer:null,setLayer:()=>{},change:()=>{},quality:1080 }));
+  assert.doesNotMatch(html, /resize-handle/);
+  assert.doesNotMatch(html, /GAMEPLAY|BOOST/);
+});
+const { CropEditor } = await import('../src/components/CropEditor.tsx');
+test('boost dialog includes cutout preview and complete boost controls', () => {
+  const html = renderToStaticMarkup(createElement(CropEditor, {source:'x',preset:classic,aspect:16/9,onApply:()=>{},onCancel:()=>{}}));
+  for (const label of ['Source zoom','Boost cutout result','Edge feather','X position','Y position','Crop width','Crop height','Apply boost settings']) assert.ok(html.includes(label), label);
+  assert.equal((html.match(/Resize boost crop/g) || []).length, 4);
 });

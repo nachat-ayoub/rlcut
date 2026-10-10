@@ -9,7 +9,15 @@ export const initialStore: Store = { version: 1, setupComplete: false, activePre
 export const copyPreset = (p: Preset, name = `${p.name} copy`): Preset => ({ ...structuredClone(p), id: crypto.randomUUID(), name: Array.from(name).slice(0, 100).join('') });
 export const clamp = (v: number, min = 0, max = 1) => Math.max(min, Math.min(max, v));
 export function time(seconds: number): string {
-  const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60;
-  return `${h ? `${h}:` : ''}${String(m).padStart(2, '0')}:${(seconds % 60).toFixed(2).padStart(5, '0')}`;
+  const total = Math.max(0, Math.round((Number.isFinite(seconds) ? seconds : 0) * 100));
+  const h = Math.floor(total / 360000), m = Math.floor(total / 6000) % 60;
+  const s = (total % 6000 / 100).toFixed(2);
+  return [h ? `${h} h` : '', m ? `${m} min` : '', `${s} s`].filter(Boolean).join(' ');
 }
 export function filename(path: string) { return path.split(/[\\/]/).pop() || path; }
+
+export function duration(seconds: number): string {
+  const total = Math.max(0, Math.round(Number.isFinite(seconds) ? seconds : 0));
+  const h = Math.floor(total / 3600), m = Math.floor(total / 60) % 60, s = total % 60;
+  return [h ? `${h} h` : '', m ? `${m} min` : '', `${s} s`].filter(Boolean).join(' ');
+}

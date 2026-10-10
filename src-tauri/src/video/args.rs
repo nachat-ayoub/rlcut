@@ -18,7 +18,10 @@ pub fn export_args(
         "-nostdin".into(),
         "-n".into(),
         "-filter_complex_threads".into(),
-        "1".into(),
+        std::thread::available_parallelism()
+            .map(|n| n.get().min(4))
+            .unwrap_or(1)
+            .to_string(),
         "-i".into(),
         v.path.clone(),
         "-filter_complex".into(),
@@ -46,7 +49,23 @@ pub fn export_args(
     }
     args.extend(
         [
-            "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p", "-r",
+            "-color_range",
+            "tv",
+            "-colorspace",
+            "bt709",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "medium",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-r",
         ]
         .map(String::from),
     );
@@ -89,6 +108,7 @@ mod tests {
             duration: 2.,
             fps: 29.97,
             has_audio: true,
+            color_transfer: String::new(),
         };
         let o = ExportOptions {
             quality: 480,

@@ -1,6 +1,6 @@
 use super::{
     binaries::{command, Binaries},
-    geometry::filter_graph,
+    geometry::{color_filter, filter_graph},
 };
 use crate::model::{Preset, Video};
 use serde::Serialize;
@@ -141,6 +141,7 @@ pub fn render(
     let ts = timestamp.max(0.).min((v.duration - 1. / v.fps).max(0.));
     fs::create_dir_all(cache).map_err(|e| e.to_string())?;
     let mut hash = DefaultHasher::new();
+    "hdr-color-pipeline-v3".hash(&mut hash);
     v.path.hash(&mut hash);
     fs::metadata(&v.path)
         .ok()
@@ -149,7 +150,7 @@ pub fn render(
     format!("{ts:.6}").hash(&mut hash);
     let source = cache.join(format!("source-{:x}.png", hash.finish()));
     if !source.exists() {
-        let width = v.width.min(960) / 2 * 2;
+        let width = v.width.min(3840) / 2 * 2;
         let height = ((width as f64 * v.height as f64 / v.width as f64 / 2.)
             .round()
             .max(1.)
@@ -158,7 +159,10 @@ pub fn render(
             b,
             v,
             ts,
-            &format!("scale={width}:{height}:flags=lanczos,setsar=1"),
+            &format!(
+                "{},scale={width}:{height}:flags=lanczos,setsar=1",
+                color_filter(v)
+            ),
             &source,
             epoch,
             ticket,
@@ -171,9 +175,13 @@ pub fn render(
     quality.hash(&mut hash);
     let composed = cache.join(format!("composition-{:x}.png", hash.finish()));
     let (w, h) = if quality == 480 {
-        (240, 428)
+        (480, 854)
     } else {
-        (360, 640)
+        if quality == 720 {
+            (720, 1280)
+        } else {
+            (1080, 1920)
+        }
     };
     if !composed.exists() {
         run(

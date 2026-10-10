@@ -104,6 +104,7 @@ pub fn probe(b: &Binaries, path: &Path) -> Result<Video, String> {
         duration,
         fps,
         has_audio: streams.iter().any(|s| s["codec_type"] == "audio"),
+        color_transfer: s["color_transfer"].as_str().unwrap_or("").into(),
     })
 }
 #[cfg(test)]

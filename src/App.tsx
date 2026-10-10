@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SkipBack, SkipForward, SlidersHorizontal, Trash2, Upload, X, Zap } from 'lucide-react';
 import type { Init, Layer, Preset, Preview, Progress, Store, Video } from './types';
-import { classic, clamp, copyPreset, filename, initialStore, time } from './lib/presets';
+import { classic, clamp, copyPreset, filename, initialStore, time, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Section, Slider } from './components/Controls';
 import { Composition } from './components/Composition';
+import { Alignment } from './components/Alignment';
 import { CropEditor } from './components/CropEditor';
 type Modal = 'settings' | 'presets' | 'crop' | null;
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
   const [video, setVideo] = useState<Video | null>(null), [preview, setPreview] = useState<Preview | null>(null), [timestamp, setTimestamp] = useState(0);
-  const [busy, setBusy] = useState(false), [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer>('boost');
+  const [busy, setBusy] = useState(false), [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-short.mp4');
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
@@ -228,7 +229,7 @@ export default function App() {
       <Zap size={32} />
       <span>Opening rlcut…</span>
     </div>;
-  return <div className="app-shell">
+  return <div className="app-shell" onPointerDownCapture={e => { if (!(e.target as HTMLElement).closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">
         <span className="brand-mark">
@@ -329,7 +330,7 @@ export default function App() {
         <input aria-label="Preview timestamp" type="range" min="0" max={Math.max(0, (video?.duration ?? 0) - 1 / (video?.fps ?? 30))} step={1 / (video?.fps ?? 30)} value={timestamp} disabled={!video} onChange={e => setTimestamp(Number(e.target.value))} />
         <div className="frame-buttons">
           <span className="frame-hint">
-            {video ? 'Drag a layer to position · Use corner handle to resize' : 'A single-frame preview. A full-motion export.'}
+            {video ? 'Drag a layer to position · Resize from any corner · Alt disables snapping' : 'A single-frame preview. A full-motion export.'}
           </span>
           <button aria-label="Back one second" disabled={!video} onClick={() => jump(-1)}>
             <SkipBack size={15} />
@@ -374,17 +375,19 @@ export default function App() {
           <Slider label="Blur" value={preset.background.blur} max={100} step={1} onChange={blur => edit('background', { blur })} />
           <Slider label="Scale" value={preset.background.scale} min={1} max={2} onChange={scale => edit('background', { scale })} suffix="×" />
           <div className="two-controls">
-            <Slider label="X offset" value={preset.background.x} onChange={x => edit('background', { x })} />
-            <Slider label="Y offset" value={preset.background.y} onChange={y => edit('background', { y })} />
+            <Slider label="X offset" value={preset.background.x - .5} min={-.5} max={.5} onChange={x => edit('background', { x: x + .5 })} />
+            <Slider label="Y offset" value={preset.background.y - .5} min={-.5} max={.5} onChange={y => edit('background', { y: y + .5 })} />
           </div>
+          <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
           <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} onChange={brightness => edit('background', { brightness })} />
         </Section>
         <Section title="Gameplay" icon={<Film size={16} />} reset={() => reset('gameplay')}>
           <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} onChange={scale => edit('gameplay', { scale })} suffix="×" />
           <div className="two-controls">
-            <Slider label="X position" value={preset.gameplay.x} onChange={x => edit('gameplay', { x })} />
-            <Slider label="Y position" value={preset.gameplay.y} onChange={y => edit('gameplay', { y })} />
+            <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} onChange={x => edit('gameplay', { x: x + .5 })} />
+            <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} onChange={y => edit('gameplay', { y: y + .5 })} />
           </div>
+          <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
           <button className="text-button" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}>Center gameplay</button>
           <p className="help-text">Full frame at 1×. Aspect ratio always preserved.</p>
         </Section>
@@ -406,9 +409,10 @@ export default function App() {
           <div className="two-controls">
             <Slider label="Width" value={b.width} min={.01} max={1} step={.001} onChange={width => edit('boost', { width })} />
             <Slider label="Height" value={b.height} min={.005} max={1} step={.001} onChange={height => edit('boost', { height })} />
-            <Slider label="X position" value={b.x} onChange={x => edit('boost', { x })} />
-            <Slider label="Y position" value={b.y} onChange={y => edit('boost', { y })} />
+            <Slider label="X position" value={b.x - .5} min={-.5} max={.5} onChange={x => edit('boost', { x: x + .5 })} />
+            <Slider label="Y position" value={b.y - .5} min={-.5} max={.5} onChange={y => edit('boost', { y: y + .5 })} />
           </div>
+          <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
           <Slider label="Edge feather" value={b.feather} max={.25} step={.005} onChange={feather => edit('boost', { feather })} />
           <details className="crop-numbers">
             <summary>Source crop coordinates</summary>
@@ -460,7 +464,7 @@ export default function App() {
           </div>
           <progress max="100" value={progress.percent} />
           <small>
-            {time(progress.elapsed)} elapsed{progress.remaining != null ? ` · ${time(progress.remaining)} remaining` : ''}
+            {duration(progress.elapsed)} elapsed{progress.remaining != null ? ` · ${duration(progress.remaining)} remaining` : ''}
           </small>
           {progress.phase === 'complete' && <div className="row">
             <button onClick={() => void invoke('open_export', { folder: false }).catch(report)}>Open file</button>
@@ -514,7 +518,7 @@ export default function App() {
           <ShieldCheck size={14} />Offline. No accounts. Your files stay on your device.</small>
       </div>
     </div>}
-    {modal === 'crop' && preview && <CropEditor aspect={(video?.width ?? 16) / (video?.height ?? 9)} source={preview.source} preset={preset} onCancel={() => setModal(null)} onApply={crop => { edit('boost', { crop }); setBefore(false); setModal(null); }} />}
+    {modal === 'crop' && preview && <CropEditor aspect={(video?.width ?? 16) / (video?.height ?? 9)} source={preview.source} preset={preset} onCancel={() => setModal(null)} onApply={boost => { edit('boost', boost); setBefore(false); setModal(null); }} />}
     {(modal === 'presets' || modal === 'settings') && <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-heading">
