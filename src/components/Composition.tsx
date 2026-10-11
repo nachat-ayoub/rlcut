@@ -58,14 +58,14 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     const lost = (event: Event) => { event.preventDefault(); setForceCPU(true); };
     target.addEventListener('webglcontextlost', lost); target.addEventListener('compositionfallback', lost);
     draw.current = () => {
-      const current = callbacks.current, source = player.current?.source;
-      if (!current.video || !source?.width) return;
+      const current = callbacks.current, source = player.current?.frame;
+      if (!current.video || !source) return;
       try { compositor.draw(source, source.width, source.height, current.video, current.preset, current.quality, current.before, current.playing); }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
     snapshot.current = () => {
-      const source = player.current?.source;
-      if (source?.width && !callbacks.current.playing) callbacks.current.onSourceFrame?.(source.toDataURL('image/jpeg', .92));
+      const source = !callbacks.current.playing && player.current?.snapshotCanvas();
+      if (source) callbacks.current.onSourceFrame?.(source.toDataURL('image/jpeg', .92));
     };
     const observer = new ResizeObserver(() => draw.current()); observer.observe(target);
     draw.current();

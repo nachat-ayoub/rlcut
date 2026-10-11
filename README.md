@@ -29,7 +29,7 @@ Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisi
 ```sh
 sudo apt update
 sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libgstreamer1.0-dev gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 npm ci
 npm run desktop
 ```

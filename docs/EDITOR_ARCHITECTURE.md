@@ -7,7 +7,9 @@ A Rust worker drains the bounded one-frame queue independently of React and
 checks the kept timeline intervals. Deleted intervals trigger native seeks.
 
 The UI requests binary frames through Tauri IPC. At most one request is in flight;
-unchanged frames send a small header, rather than another image. Frame timestamps,
+unchanged 120 Hz polls send a small header, rather than another image. Changed RGBA
+buffers upload directly into a reused WebGL texture without an intermediate 2D
+canvas; paused snapshots and the software compositor materialize a canvas. Frame timestamps,
 readiness, errors and end-of-playback come from the native engine. Source replacement
 is session-scoped; old controls cannot stop a newer player. Shutdown joins the
 worker and sets the pipeline to NULL to release decoding and audio resources.

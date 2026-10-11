@@ -1,5 +1,5 @@
 import type { Preset, Video } from '../types';
-import type { Scene } from './compositor';
+import type { CompositionSource, Scene } from './compositor';
 const vertex = `attribute vec2 position;attribute vec2 uv;varying vec2 coord;void main(){coord=uv;gl_Position=vec4(position,0.,1.);}`;
 const sprite = `precision mediump float;uniform sampler2D image;uniform vec4 crop;uniform vec2 mask;uniform float feather;uniform float brightness;varying vec2 coord;void main(){vec4 color=texture2D(image,crop.xy+coord*crop.zw);float alpha=1.;if(mask.x>0.){float distance=length((coord-.5)*mask);alpha=feather>0.?clamp((1.-distance)/feather,0.,1.):step(distance,1.);}gl_FragColor=vec4(clamp(color.rgb+brightness,0.,1.),alpha);}`;
 const blur = `precision mediump float;uniform sampler2D image;uniform vec2 stepSize;uniform float brightness;varying vec2 coord;void main(){vec2 base=vec2(coord.x,1.-coord.y);vec3 sum=vec3(0.);float weight=0.;for(int i=-8;i<=8;i++){float x=float(i)*.375;float w=exp(-.5*x*x);sum+=texture2D(image,base+float(i)*stepSize).rgb*w;weight+=w;}gl_FragColor=vec4(clamp(sum/weight+brightness,0.,1.),1.);}`;
@@ -10,6 +10,8 @@ export class GPUCompositor {
   private blur: WebGLProgram;
   private buffer: WebGLBuffer;
   private source: WebGLTexture;
+  private sourceWidth = 0;
+  private sourceHeight = 0;
   private targets: { texture: WebGLTexture; framebuffer: WebGLFramebuffer }[];
   constructor(private canvas: HTMLCanvasElement, private gl: WebGLRenderingContext) {
     this.sprite = this.program(sprite); this.blur = this.program(blur);
@@ -45,7 +47,7 @@ export class GPUCompositor {
     gl.uniform1f(gl.getUniformLocation(this.sprite, 'feather'), feather); gl.uniform1f(gl.getUniformLocation(this.sprite, 'brightness'), brightness);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
-  draw(source: CanvasImageSource, video: Pick<Video, 'width' | 'height'>, preset: Preset, plan: Scene, before: boolean) {
+  draw(source: CompositionSource, video: Pick<Video, 'width' | 'height'>, preset: Preset, plan: Scene, before: boolean) {
     const gl = this.gl, width = plan.width, height = plan.height;
     if (this.width !== width || this.height !== height) {
       this.width = width; this.height = height;
@@ -57,7 +59,15 @@ export class GPUCompositor {
       }
     }
     gl.viewport(0, 0, width, height); gl.bindTexture(gl.TEXTURE_2D, this.source);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource);
+    if ('pixels' in source) {
+      if (source.width !== this.sourceWidth || source.height !== this.sourceHeight) {
+        this.sourceWidth = source.width; this.sourceHeight = source.height;
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, source.width, source.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, source.pixels);
+      } else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, source.width, source.height, gl.RGBA, gl.UNSIGNED_BYTE, source.pixels);
+    } else {
+      this.sourceWidth = 0; this.sourceHeight = 0;
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source as TexImageSource);
+    }
     gl.disable(gl.BLEND); gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const full = { x: 0, y: 0, width, height };
     if (before) { this.paint(this.source, full); return; }

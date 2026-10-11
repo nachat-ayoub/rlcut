@@ -2,17 +2,20 @@ import { invoke } from './native';
 import type { Segment } from '../types';
 let nextSession = Date.now() * 1000;
 type Callbacks = {
-  frame: (source: HTMLCanvasElement, time: number) => void;
+  frame: (source: NativeFrame, time: number) => void;
   time: (time: number) => void;
   waiting: (waiting: boolean) => void;
   ended: () => void;
   error: (error: unknown) => void;
 };
+export type NativeFrame = { width: number; height: number; pixels: Uint8Array<ArrayBuffer>; sequence: number };
 // A pull transport provides backpressure: at most one binary frame request is
 // in flight. The native engine owns decoding/audio/time even if UI rendering
 // slows down. Editing the scene does not touch this session.
 export class NativePlayback {
-  readonly source = document.createElement('canvas');
+  private readonly snapshot = document.createElement('canvas');
+  private snapshotSequence = 0;
+  frame: NativeFrame | null = null;
   private session = ++nextSession;
   private disposed = false;
   private timer = 0;
@@ -22,7 +25,6 @@ export class NativePlayback {
   private waiting = true;
   constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks) {
     this.latestTime = time;
-    this.source.width = 0; this.source.height = 0;
     this.commands = invoke<void>('playback_open', { session: this.session, path, time, segments });
     void this.commands.then(() => { if (!this.disposed) void this.poll(); }).catch(error => this.fail(error));
   }
@@ -47,15 +49,16 @@ export class NativePlayback {
         if (buffer.byteLength > 32 && sequence !== this.sequence) {
           if (buffer.byteLength !== 32 + width * height * 4) throw new Error('Invalid decoded frame');
           this.sequence = sequence;
-          if (this.source.width !== width || this.source.height !== height) { this.source.width = width; this.source.height = height; }
-          const ctx = this.source.getContext('2d', { alpha: false })!;
-          ctx.putImageData(new ImageData(new Uint8ClampedArray(buffer, 32), width, height), 0, 0);
-          this.callbacks.frame(this.source, time);
+          this.frame = { width, height, sequence, pixels: new Uint8Array(buffer, 32) };
+          this.callbacks.frame(this.frame, time);
         }
         if (flags & 4) this.callbacks.ended();
       }
     } catch (error) { this.fail(error); return; }
-    if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), Math.max(0, 1000 / 60 - (performance.now() - started)));
+    // Poll above the source cadence so a request that lands just before a
+    // decoded frame does not halve visible 60 FPS playback. Unchanged replies
+    // contain only the 32-byte header; image payloads remain frame-bounded.
+    if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), Math.max(0, 1000 / 120 - (performance.now() - started)));
   }
   control(values: { playing?: boolean; time?: number; segments?: Segment[] }) {
     if (this.disposed) return;
@@ -65,6 +68,19 @@ export class NativePlayback {
     void this.commands.catch(error => this.fail(error));
   }
   seek(time: number) { if (Math.abs(time - this.latestTime) > .045) { this.latestTime = time; this.callbacks.waiting(true); this.control({ time }); } }
+  snapshotCanvas() {
+    const frame = this.frame;
+    if (!frame) return null;
+    if (this.snapshotSequence !== frame.sequence) {
+      if (this.snapshot.width !== frame.width || this.snapshot.height !== frame.height) {
+        this.snapshot.width = frame.width; this.snapshot.height = frame.height;
+      }
+      const pixels = new Uint8ClampedArray(frame.pixels.buffer, frame.pixels.byteOffset, frame.pixels.byteLength);
+      this.snapshot.getContext('2d', { alpha: false })!.putImageData(new ImageData(pixels, frame.width, frame.height), 0, 0);
+      this.snapshotSequence = frame.sequence;
+    }
+    return this.snapshot;
+  }
   dispose() {
     if (this.disposed) return;
     this.disposed = true; clearTimeout(this.timer);

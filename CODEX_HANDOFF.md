@@ -3,14 +3,36 @@
 Updated: 2026-10-11. This file records context and the next direction; no application
 code was changed as part of this handoff.
 
-## Next priority: fix visible playback FPS
+## Playback FPS optimization (2026-10-11)
 
-**The user reports that preview playback currently feels like approximately
+The frame path now polls lightweight native headers at 120 Hz so a request just
+ahead of a 60 FPS source frame does not reduce presentation to 30 FPS. Changed
+frames remain bounded to the latest frame and are uploaded from their RGBA IPC
+buffer directly into a reused WebGL texture; the redundant `putImageData` source
+canvas pass is now created only for paused snapshots and the software fallback.
+Playing GPU output is capped at 540 pixels wide, decoder transport at 640 pixels,
+and export continues to use the original full-resolution recording.
+
+GPU fallback now requires 24 sustained frames slower than the 30 FPS budget,
+rather than switching to the CPU after one frame over 20 ms. Steady playback no
+longer queries GStreamer position on every 8 ms worker tick. A native smoke run
+with a 1280×720 60 FPS H.264 source delivered 120 distinct frames in two seconds
+(60.0 FPS). Frontend, Rust, pipeline tests and the production AppImage build pass.
+The user should still confirm visible composed FPS with their real recording and
+graphics driver; the decoder measurement alone is not an end-to-end UI claim.
+
+The GStreamer bridge now declares only stable public runtime ABI and links the
+versioned runtime libraries, so native builds no longer require the optional
+GStreamer header package. Runtime/plugins are still required and bundled.
+
+## Playback acceptance requirement
+
+**The user reported that preview playback felt like approximately
 10 FPS. This is an observation, not an instrumented measurement. The minimum
 acceptable result is sustained 30 FPS of visibly changing, composed video.**
 
-The next session should investigate and improve playback performance on the
-user's Ubuntu laptop. Do not declare success based on decoder FPS, timer frequency,
+Continue to verify playback performance on the user's Ubuntu laptop. Do not declare
+end-to-end success based only on decoder FPS, timer frequency,
 render-call counts, or an isolated headless test. Measure distinct video frames
 actually presented in the running desktop editor, including after packaging.
 Aim for 60 FPS where practical, but 30 FPS is the minimum requirement for the
@@ -26,7 +48,7 @@ clock and bounded queues.
 
 ## Current code version and status
 
-- Code baseline: `4423b75` — **Fix native timeline arguments and initial playhead**.
+- This optimization builds on `80d5d4d` — **Document playback FPS priorities and laptop handoff**.
 - Previous architecture commit: `097733a` — **Add native playback and import progress**.
 - Both were pushed to `origin/main` in `nachat-ayoub/rlcut`.
 - The import argument error was `unknown field id, expected start or end`.
@@ -34,8 +56,9 @@ clock and bounded queues.
   accepts only `start` and `end`. `src/lib/native.ts` now strips UI IDs at the IPC
   boundary for playback open/control and export. Keep IDs in the UI state.
 - Imported clips now start paused at **0 seconds**, rather than halfway through.
-- The user acknowledged that fix, but then reported poor playback FPS.
-  Treat performance as unresolved; smooth end-to-end playback is not established.
+- The user acknowledged that fix, but then reported poor playback FPS. The
+  transport/compositor optimizations above are implemented; real-clip visible
+  FPS confirmation remains the acceptance check.
 - Linux artifacts were rebuilt into `dist/rlcut.AppImage` and `dist/rlcut`.
   `dist/` is ignored and is not available from GitHub after a fresh clone.
 
@@ -66,20 +89,18 @@ Original recording
 - `src-tauri/src/commands.rs`: owns a native worker polling every 8 ms;
   session-scoped `playback_open/control/frame/close` commands. Native operations
   use a shared player mutex. Frame IPC is async and executes blocking work away
-  from the UI thread. Captured frames have a maximum dimension of 768 pixels.
-- `src/lib/native-playback.ts`: serializes controls, polls binary frame packets,
-  converts RGBA to `ImageData`, writes the source canvas, and invokes composition.
-  Polling targets 60 Hz, but awaits IPC and synchronous drawing before scheduling
-  the next request. That target does **not** establish actual 60 FPS.
+  from the UI thread. Captured frames have a maximum dimension of 640 pixels.
+- `src/lib/native-playback.ts`: serializes controls and polls binary frame packets
+  at 120 Hz. Changed RGBA packets go directly to composition; a 2D canvas is
+  materialized only for paused JPEG snapshots and software fallback.
 - `src/components/Composition.tsx`: source session lifetime is separate from scene
   edits and compositor replacement. There is **no hidden HTML video decoder**.
   Paused snapshots supply the boost crop dialog. Edits redraw the cached source.
 - `src/lib/gpu-compositor.ts`: uploads the source canvas as a texture; uses GPU
   blur passes, gameplay transform, crop and circle/ellipse/feather masks.
 - `src/lib/compositor.ts`: common geometry, GPU selection, fallback and software
-  renderer. Software playing preview is 360 pixels wide; paused/GPU preview is
-  larger. The current GPU fallback is aggressive: after the first frame, a draw
-  taking more than 20 ms can switch to CPU. Review this policy with measurements.
+  renderer. Software playing preview is 360 pixels wide and GPU playback is
+  capped at 540 pixels. GPU fallback requires sustained draws over 34 ms.
 - `src/lib/timeline.ts`: maps between source time and edited time. Keep this
   consistent with native playback and full-quality export.
 - `src-tauri/src/video/decoder.rs`: prepares/caches one seekable SDR source,
@@ -99,12 +120,10 @@ Start by measuring decode/queue rate, IPC latency and throughput, frame copies,
 Compare the actual GPU renderer/driver and GStreamer plugins in native development
 and in the AppImage. The school PC and the laptop may behave differently.
 
-A 768 × 432 RGBA frame contains about 1.33 MB. Transferring 60 such frames each
-second involves about 80 MB/s of payload before copies. The current path includes
-native allocation/copy, IPC transport, `ImageData`/canvas upload, and composition;
-these are plausible costs, not yet identified as the cause. Inspect rather than
-assuming decoding is slow. Also check timer scheduling, mutex contention, shader
-warm-up, the fallback threshold, and unnecessary paused work/snapshots.
+A 640 × 360 RGBA frame contains about 0.88 MB. At 60 FPS that is roughly 55 MB/s
+of payload before transport overhead. The redundant playing-frame `ImageData` and
+2D canvas upload has been removed; continue checking IPC latency, driver behavior,
+shader cost and any software fallback on the user's representative recording.
 
 Existing `canvas.compositionStats` records render calls and draw costs. It excludes
 some upstream costs and can count repeated frames or resize/edit redraws. Use
@@ -160,7 +179,7 @@ overrides detection if needed. Do not assume school paths/caches exist on the la
 
 For laptop setup, follow [RUNNING.md](RUNNING.md). Native prerequisites include
 current Rust, Node 22.12+, GTK/WebKit development libraries, FFmpeg, GStreamer
-core development headers, and base/good/libav plugins. Typical commands after setup:
+runtime libraries, and base/good/libav plugins. Typical commands after setup:
 
 ```sh
 git pull --ff-only

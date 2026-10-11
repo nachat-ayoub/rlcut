@@ -1,6 +1,8 @@
 import type { Preset, Video } from '../types';
 import { GPUCompositor } from './gpu-compositor';
 export type PixelRect = { x: number; y: number; width: number; height: number };
+export type PixelSource = { width: number; height: number; pixels: Uint8Array<ArrayBuffer> };
+export type CompositionSource = CanvasImageSource | PixelSource;
 export type Scene = { width: number; height: number; background: PixelRect; gameplay: PixelRect; boost: PixelRect; crop: PixelRect };
 const even = (value: number) => Math.max(2, Math.round(value / 2) * 2);
 // This is the export geometry contract: source pixels for crop, output pixels
@@ -57,19 +59,24 @@ class CPUCompositor {
   private hud = document.createElement('canvas');
   private frame = document.createElement('canvas');
   private scratch = new Uint8ClampedArray(0);
+  private frameContext: CanvasRenderingContext2D;
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('The editor could not create its composition canvas.');
     this.ctx = ctx;
+    this.frameContext = this.frame.getContext('2d', { alpha: false })!;
   }
-  draw(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
     const width = playing ? 360 : Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
     const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
     if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
     // Capture once: all layers see precisely the same decoded frame, and
     // WebKit does not need to download the video texture three separate times.
     if (this.frame.width !== sourceWidth || this.frame.height !== sourceHeight) { this.frame.width = sourceWidth; this.frame.height = sourceHeight; }
-    this.frame.getContext('2d', { alpha: false })!.drawImage(source, 0, 0);
+    if ('pixels' in source) {
+      const pixels = new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
+      this.frameContext.putImageData(new ImageData(pixels, sourceWidth, sourceHeight), 0, 0);
+    } else this.frameContext.drawImage(source, 0, 0);
     source = this.frame;
     const ctx = this.ctx;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = playing ? 'low' : 'high';
@@ -136,16 +143,16 @@ export class Compositor {
   private stats: CompositionStats;
   private slowFrames = 0;
   constructor(private canvas: HTMLCanvasElement, forceCPU = false, forceGPU = false) {
-    const gl = forceCPU || (!forceGPU && !hardwareGPU()) ? null : canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: true });
+    const gl = forceCPU || (!forceGPU && !hardwareGPU()) ? null : canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false });
     if (gl) this.gpu = new GPUCompositor(canvas, gl);
     else this.cpu = new CPUCompositor(canvas);
     this.stats = { frames: 0, costs: [], backend: gl ? 'gpu' : 'cpu' };
     (canvas as CompositionCanvas).compositionStats = this.stats;
   }
-  draw(source: CanvasImageSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
     const start = performance.now();
     if (this.gpu) {
-      const width = Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
+      const width = Math.min(playing ? 540 : 720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
       const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
       this.gpu.draw(source, video, preset, scene(video, preset, width, height), before);
     } else this.cpu!.draw(source, sourceWidth, sourceHeight, video, preset, quality, before, playing);
@@ -153,9 +160,12 @@ export class Compositor {
     if (this.stats.costs.length === 120) this.stats.costs.shift();
     const cost = performance.now() - start;
     this.stats.costs.push(cost);
-    if (this.gpu && this.stats.frames > 1) {
-      this.slowFrames = cost > 20 ? this.slowFrames + 1 : 0;
-      if (this.slowFrames === 1) this.canvas.dispatchEvent(new Event('compositionfallback'));
+    if (this.gpu && this.stats.frames > 2) {
+      // Shader warm-up, texture allocation and an occasional busy frame are
+      // not evidence that software rendering will be faster. Fall back only
+      // after a sustained sub-30 FPS GPU run.
+      this.slowFrames = cost > 34 ? this.slowFrames + 1 : Math.max(0, this.slowFrames - 2);
+      if (this.slowFrames === 24) this.canvas.dispatchEvent(new Event('compositionfallback'));
     }
   }
   dispose() { this.gpu?.dispose(); }

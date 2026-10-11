@@ -139,7 +139,14 @@ impl Player {
             self.play(false)?;
             self.ended = true;
         }
-        let mut time = unsafe { rl_player_position(self.handle) };
+        // During steady playback PTS is the media-clocked position we display
+        // and use for segment boundaries. Avoid a synchronous pipeline query
+        // on every 8 ms worker tick; retain it for paused/seeking state.
+        let mut time = if self.playing && self.seeking.is_none() {
+            self.position
+        } else {
+            unsafe { rl_player_position(self.handle) }
+        };
         if self.playing && self.seeking.is_none() {
             match self.kept(time) {
                 Some(next) if (next - time).abs() > 0.01 => {
@@ -171,6 +178,7 @@ impl Player {
                 self.rgba = unsafe { std::slice::from_raw_parts(bytes, length) }.to_vec();
                 self.sequence = self.sequence.wrapping_add(1);
                 self.frame_time = pts;
+                time = pts;
                 self.seeking = None;
             }
             unsafe { rl_frame_free(bytes) };

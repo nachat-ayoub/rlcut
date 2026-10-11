@@ -374,7 +374,10 @@ pub async fn playback_open(
             return Err("Playback session superseded".into());
         }
         let metadata = metadata::probe(&tools, &file)?;
-        let scale = (768. / metadata.width.max(metadata.height) as f64).min(1.);
+        // A 640 px RGBA source is sharp enough for the interactive preview
+        // while keeping 60 FPS IPC payloads under 1 MB for 16:9 recordings.
+        // Export continues to use the original recording at full resolution.
+        let scale = (640. / metadata.width.max(metadata.height) as f64).min(1.);
         let w = ((metadata.width as f64 * scale / 2.).round() as u32 * 2).max(2);
         let h = ((metadata.height as f64 * scale / 2.).round() as u32 * 2).max(2);
         let player =

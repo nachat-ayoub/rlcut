@@ -48,7 +48,7 @@ Use Ubuntu 24.04 or later. Install the native prerequisites once:
 sudo apt update
 sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
   libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3 curl \
-  libgstreamer1.0-dev gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+  gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 ```
 
 Install current stable Rust from [rustup](https://rustup.rs/) and Node 22.12+
