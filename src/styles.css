@@ -448,11 +448,17 @@ h1 {
 }
 .composition video {
   display:block;
+  position:absolute;
+  inset:0;
   width:100%;
   height:100%;
   object-fit:contain;
-  background:#08080b
+  background:#08080b;
+  opacity:0;
+  pointer-events:none
 }
+.composition video.active { opacity:1 }
+.composition img.playback-hidden { visibility:hidden }
 .composition.background-selected {
   box-shadow:0 0 0 2px #9c72d2,0 8px 50px #0008
 }

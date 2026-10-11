@@ -141,6 +141,7 @@ pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<St
     blocking(move || {
         std::fs::create_dir_all(&proxy_dir).map_err(|e| e.to_string())?;
         let mut hasher = DefaultHasher::new();
+        "proxy-v2".hash(&mut hasher);
         video.path.hash(&mut hasher);
         std::fs::metadata(&video.path)
             .ok()
@@ -167,9 +168,9 @@ pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<St
                 "-crf",
                 "28",
                 "-g",
-                "30",
+                "15",
                 "-keyint_min",
-                "30",
+                "15",
                 "-sc_threshold",
                 "0",
                 "-pix_fmt",

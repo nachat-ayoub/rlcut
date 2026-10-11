@@ -28,22 +28,39 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
   quality: number;
   playing: boolean;
   timestamp: number;
-  onTimestamp: (value: number) => void;
+  onTimestamp: (value: number) => number | void;
   onPlayingChange: (value: boolean) => void;
 }) {
   const canvas = useRef<HTMLDivElement>(null), player = useRef<HTMLVideoElement>(null), gesture = useRef<Gesture | null>(null);
   const [zoom, setZoom] = useState(1);
+  const [mediaReady, setMediaReady] = useState(false);
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
   useEffect(() => {
     if (!player.current || !video) return;
-    if (Math.abs(player.current.currentTime - timestamp) > .18) player.current.currentTime = timestamp;
-  }, [timestamp, video]);
+    if (!playing || Math.abs(player.current.currentTime - timestamp) > .5)
+      if (Math.abs(player.current.currentTime - timestamp) > .04) player.current.currentTime = timestamp;
+  }, [timestamp, video, playing]);
   useEffect(() => {
-    if (!player.current) return;
-    if (playing) void player.current.play().catch(() => onPlayingChange(false));
-    else player.current.pause();
-  }, [playing, onPlayingChange]);
+    const videoElement = player.current;
+    if (!videoElement) return;
+    let frame = 0, lastReport = -1;
+    if (playing) {
+      void videoElement.play().then(() => {
+        const update = () => {
+          const current = videoElement.currentTime;
+          if (Math.abs(current - lastReport) >= .04) {
+            lastReport = current;
+            const corrected = onTimestamp(current);
+            if (typeof corrected === 'number' && Math.abs(corrected - current) > .01) videoElement.currentTime = corrected;
+          }
+          if (!videoElement.paused && !videoElement.ended) frame = requestAnimationFrame(update);
+        };
+        frame = requestAnimationFrame(update);
+      }).catch(() => onPlayingChange(false));
+    } else videoElement.pause();
+    return () => cancelAnimationFrame(frame);
+  }, [playing, playbackPath, onTimestamp, onPlayingChange]);
   function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function move(e: PointerEvent) {
     const g = gesture.current;
@@ -111,7 +128,8 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className="preview-viewport">
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('img,video')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
-        {playing && playbackPath ? <video ref={player} className="playback-video" src={fileUrl(playbackPath)} preload="auto" onTimeUpdate={e => onTimestamp(e.currentTarget.currentTime)} onEnded={() => onPlayingChange(false)} /> : preview && <img src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && !playing && <div className="preview-loading">
+        {playbackPath && <video ref={player} className={`playback-video ${playing ? 'active' : ''}`} src={fileUrl(playbackPath)} preload="auto" playsInline onLoadedData={() => setMediaReady(true)} onCanPlay={() => setMediaReady(true)} onEnded={() => onPlayingChange(false)} />}
+        {preview && <img className={playing ? 'playback-hidden' : ''} src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && !playing && <div className="preview-loading">
           <LoaderCircle className="spin" />Rendering your composition…</div>}{!playing && !before && guides && preview && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
             {layer === target && <span>
               <Move size={10} />
@@ -123,6 +141,7 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
         {snaps[0] !== null && <i className="snap-line vertical" style={{ left: `${snaps[0]! * 100}%` }} />}
         {snaps[1] !== null && <i className="snap-line horizontal" style={{ top: `${snaps[1]! * 100}%` }} />}
         {proxyPreparing && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Preparing smooth preview…</span></div>}
+        {playing && !mediaReady && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Buffering preview…</span></div>}
       </div></div>
     <span className="canvas-caption">
       <Scan size={12} />

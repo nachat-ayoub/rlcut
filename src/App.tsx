@@ -178,8 +178,9 @@ export default function App() {
     const kept = segments.find(segment => value >= segment.start && value < segment.end);
     if (kept) { setTimestamp(value); return; }
     const next = segments.find(segment => segment.start > value);
-    if (next) setTimestamp(next.start);
-    else { setPlaying(false); setTimestamp(segments.at(-1)?.end ?? value); }
+    if (next) { setTimestamp(next.start); return next.start; }
+    const end = segments.at(-1)?.end ?? value;
+    setPlaying(false); setTimestamp(end); return end;
   }, [segments]);
   const chooseFolder = useCallback(async () => {
     try {
