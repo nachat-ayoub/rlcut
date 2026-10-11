@@ -4,12 +4,16 @@ type DragDrop = { payload: { type: string; paths?: string[] } };
 declare global {
   interface Window {
     __TAURI__?: {
-      core: { invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> };
+      core: {
+        invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+        convertFileSrc(path: string, protocol?: string): string;
+      };
       webview: { getCurrentWebview(): { onDragDropEvent(callback: (event: DragDrop) => void): Promise<() => void> } };
     };
   }
 }
 export const isDesktop = () => Boolean(window.__TAURI__);
+export const fileUrl = (path: string) => window.__TAURI__?.core.convertFileSrc(path) ?? '';
 export async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!window.__TAURI__) throw new Error('Open rlcut with npm run desktop to use native video processing.');
   return window.__TAURI__.core.invoke<T>(command, args);

@@ -12,6 +12,11 @@ pub struct Settings {
     pub fps: u32,
     pub output_folder: String,
     pub default_preset: String,
+    #[serde(default = "default_wait_for_preview")]
+    pub wait_for_preview: bool,
+}
+fn default_wait_for_preview() -> bool {
+    true
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -20,6 +25,7 @@ impl Default for Settings {
             fps: 60,
             output_folder: String::new(),
             default_preset: "classic".into(),
+            wait_for_preview: true,
         }
     }
 }

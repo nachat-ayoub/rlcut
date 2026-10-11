@@ -1,5 +1,5 @@
 use super::geometry::filter_graph;
-use crate::model::{ExportOptions, Preset, Video};
+use crate::model::{ExportOptions, Preset, Segment, Video};
 use std::path::Path;
 pub fn export_args(
     v: &Video,
@@ -7,10 +7,67 @@ pub fn export_args(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
+    export_args_segments(
+        v,
+        p,
+        &[Segment {
+            start: 0.,
+            end: v.duration,
+        }],
+        o,
+        out,
+    )
+}
+pub fn export_args_segments(
+    v: &Video,
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
     if !v.duration.is_finite() || v.duration <= 0. {
         return Err("Invalid video duration".into());
     }
+    Segment::validate_all(segments, v.duration)?;
+    let mut graph = filter_graph(v, p, w, h)?;
+    let split_outputs = (0..segments.len())
+        .map(|i| format!("[edit{i}]"))
+        .collect::<String>();
+    graph.push_str(&format!(";[out]split={}{split_outputs}", segments.len()));
+    for (index, segment) in segments.iter().enumerate() {
+        graph.push_str(&format!(
+            ";[edit{index}]trim=start={:.6}:end={:.6},setpts=PTS-STARTPTS[v{index}]",
+            segment.start, segment.end
+        ));
+    }
+    let video_inputs = (0..segments.len())
+        .map(|i| format!("[v{i}]"))
+        .collect::<String>();
+    graph.push_str(&format!(
+        ";{video_inputs}concat=n={}:v=1:a=0[out_edit]",
+        segments.len()
+    ));
+    if v.has_audio {
+        let audio_splits = (0..segments.len())
+            .map(|i| format!("[audio{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(";[0:a:0]asplit={}{audio_splits}", segments.len()));
+        for (index, segment) in segments.iter().enumerate() {
+            graph.push_str(&format!(
+                ";[audio{index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS[a{index}]",
+                segment.start, segment.end
+            ));
+        }
+        let audio_inputs = (0..segments.len())
+            .map(|i| format!("[a{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(
+            ";{audio_inputs}concat=n={}:v=0:a=1[audio_join];[audio_join]apad[audio_edit]",
+            segments.len()
+        ));
+    }
+    let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
     let mut args = vec![
         "-hide_banner".into(),
         "-loglevel".into(),
@@ -25,21 +82,19 @@ pub fn export_args(
         "-i".into(),
         v.path.clone(),
         "-filter_complex".into(),
-        filter_graph(v, p, w, h)?,
+        graph,
         "-map".into(),
-        "[out]".into(),
+        "[out_edit]".into(),
     ];
     if v.has_audio {
         args.extend(
             [
                 "-map",
-                "0:a:0?",
+                "[audio_edit]",
                 "-c:a",
                 "aac",
                 "-b:a",
                 "192k",
-                "-af",
-                "apad",
                 "-shortest",
             ]
             .map(String::from),
@@ -72,7 +127,7 @@ pub fn export_args(
     args.push(o.fps.to_string());
     // Older FFmpeg versions can flush padded audio past video EOF despite
     // -shortest. An explicit video duration bounds both streams consistently.
-    args.extend(["-t".into(), format!("{:.6}", v.duration)]);
+    args.extend(["-t".into(), format!("{edited_duration:.6}")]);
     args.extend(
         [
             "-vsync",
@@ -118,8 +173,8 @@ mod tests {
         };
         let a = export_args(&v, &Preset::default(), &o, Path::new("/tmp/out.mp4")).unwrap();
         assert!(a.contains(&v.path));
-        assert!(a.contains(&"0:a:0?".into()));
-        assert!(a.contains(&"apad".into()));
+        assert!(a.contains(&"[audio_edit]".into()));
+        assert!(a.iter().any(|value| value.contains("apad[audio_edit]")));
         assert!(a.contains(&"-shortest".into()));
         assert!(a.contains(&"cfr".into()));
         v.has_audio = false;

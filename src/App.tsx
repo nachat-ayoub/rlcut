@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SkipBack, SkipForward, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, Preset, Preview, Progress, Store, Video } from './types';
-import { classic, clamp, copyPreset, filename, initialStore, time, duration } from './lib/presets';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
+import type { Init, Layer, Preset, Preview, Progress, Segment, Store, Video } from './types';
+import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
 import { Section, Slider } from './components/Controls';
 import { Composition } from './components/Composition';
 import { Alignment } from './components/Alignment';
 import { CropEditor } from './components/CropEditor';
+import { Timeline } from './components/Timeline';
 type Modal = 'settings' | 'presets' | 'crop' | null;
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
   const [video, setVideo] = useState<Video | null>(null), [preview, setPreview] = useState<Preview | null>(null), [timestamp, setTimestamp] = useState(0);
+  const [proxyPath, setProxyPath] = useState('');
   const [busy, setBusy] = useState(false), [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-short.mp4');
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [refresh, setRefresh] = useState(0), [saved, setSaved] = useState(true);
+  const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
+  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]);
   const initialized = useRef(false), revision = useRef(0), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
   storeRef.current = store;
   const preset = store.activePreset === 'classic' ? classic : store.presets.find(p => p.id === store.activePreset) ?? classic;
@@ -47,7 +51,7 @@ export default function App() {
     if (!notice)
       return; const timer = setTimeout(() => setNotice(null), 4000); return () => clearTimeout(timer);
   }, [notice]);
-  const change = useCallback((next: Preset) => {
+  const replacePreset = useCallback((next: Preset) => {
     setStore(s => {
       if (s.activePreset === 'classic') {
         const p = copyPreset(next, 'Classic RL Short — custom');
@@ -56,6 +60,30 @@ export default function App() {
       return { ...s, presets: s.presets.map(p => p.id === s.activePreset ? { ...next, id: p.id, name: p.name } : p) };
     });
   }, []);
+  const change = useCallback((next: Preset) => {
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    redoStack.current = [];
+    replacePreset(next);
+  }, [preset, segments, replacePreset]);
+  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[] }) => {
+    replacePreset(snapshot.preset);
+    setSegments(structuredClone(snapshot.segments));
+    setPlaying(false);
+  }, [replacePreset]);
+  const undo = useCallback(() => {
+    const snapshot = undoStack.current.pop(); if (!snapshot) return;
+    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    restoreSnapshot(snapshot);
+  }, [preset, segments, restoreSnapshot]);
+  const redo = useCallback(() => {
+    const snapshot = redoStack.current.pop(); if (!snapshot) return;
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    restoreSnapshot(snapshot);
+  }, [preset, segments, restoreSnapshot]);
+  const editSegments = useCallback((next: Segment[]) => {
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    redoStack.current = []; setSegments(next); setPlaying(false);
+  }, [preset, segments]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
@@ -69,11 +97,19 @@ export default function App() {
       if (ticket !== importRevision.current)
         return;
       setVideo(v);
+      setProxyPath('');
+      setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration }]);
+      undoStack.current = []; redoStack.current = [];
       setPreview(null);
       setTimestamp(v.duration / 2);
       setBefore(false);
       setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-short.mp4`);
       setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
+      const prepare = invoke<string>('create_proxy', { path: v.path }).then(proxy => {
+        if (ticket === importRevision.current) setProxyPath(proxy);
+      });
+      if (storeRef.current.settings.waitForPreview) await prepare;
+      else void prepare.catch(e => { if (ticket === importRevision.current) report(e); });
     }
     catch (e) {
       if (ticket === importRevision.current)
@@ -103,7 +139,7 @@ export default function App() {
     }).catch(report); return () => { disposed = true; off?.(); };
   }, [importPath, report]);
   useEffect(() => {
-    if (!video)
+    if (!video || playing)
       return;
     const ticket = ++revision.current;
     setBusy(true);
@@ -121,7 +157,7 @@ export default function App() {
       });
     }, 220);
     return () => { clearTimeout(timer); ++revision.current; };
-  }, [video, preset, timestamp, quality, refresh, report]);
+  }, [video, preset, timestamp, quality, refresh, playing, report]);
   useEffect(() => {
     if (!exporting)
       return;
@@ -138,6 +174,13 @@ export default function App() {
     return () => { disposed = true; clearInterval(timer); };
   }, [exporting, report]);
   const jump = useCallback((delta: number) => setTimestamp(t => clamp(t + delta, 0, Math.max(0, (video?.duration ?? 0) - 1 / (video?.fps ?? 30)))), [video]);
+  const updatePlaybackTime = useCallback((value: number) => {
+    const kept = segments.find(segment => value >= segment.start && value < segment.end);
+    if (kept) { setTimestamp(value); return; }
+    const next = segments.find(segment => segment.start > value);
+    if (next) setTimestamp(next.start);
+    else { setPlaying(false); setTimestamp(segments.at(-1)?.end ?? value); }
+  }, [segments]);
   const chooseFolder = useCallback(async () => {
     try {
       const folder = await invoke<string | null>('pick_folder');
@@ -161,7 +204,7 @@ export default function App() {
           return;
         setOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { path: video.path, preset, options: { quality, fps, folder, filename: outputName } });
+      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, options: { quality, fps, folder, filename: outputName } });
       setProgress(p);
     }
     catch (e) {
@@ -170,7 +213,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, exporting, exportStarting, outputFolder, preset, quality, fps, outputName, report]);
+  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, report]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -185,6 +228,10 @@ export default function App() {
         e.preventDefault();
         void startExport();
       }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault(); if (e.shiftKey) redo(); else undo();
+      }
+      else if (e.code === 'Space' && proxyPath) { e.preventDefault(); setPlaying(p => !p); }
       else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         jump(e.shiftKey ? -1 : -1 / (video?.fps ?? 30));
@@ -194,7 +241,7 @@ export default function App() {
         jump(e.shiftKey ? 1 : 1 / (video?.fps ?? 30));
       }
     } window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
-  }, [importVideo, startExport, jump, video, modal]);
+  }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath]);
   function create() { const p = copyPreset(preset); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
   function remove() {
     if (preset.id === 'classic')
@@ -230,7 +277,7 @@ export default function App() {
       <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
       <span>Opening rlcut…</span>
     </div>;
-  return <div className="app-shell" onPointerDownCapture={e => { if (!(e.target as HTMLElement).closest('.composition')) setLayer(null); }}>
+  return <div className={`app-shell ${video ? '' : 'no-video'}`} onPointerDownCapture={e => { const target = e.target as HTMLElement; if (target.closest('.preview-stage') && !target.closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">
         <img className="brand-logo" src="/branding/logo.png" alt="rlcut" />
@@ -239,10 +286,6 @@ export default function App() {
       <button className="import-button" onClick={() => void importVideo()} disabled={importing}>
         {importing ? <LoaderCircle className="spin" size={17} /> : <Plus size={18} />}Import video<kbd>⌘ O</kbd>
       </button>
-      <div className="nav-label">WORKSPACE</div>
-      <button className="nav-item active" onClick={() => setModal(null)}>
-        <SlidersHorizontal size={17} />Composition</button>
-      <div className="sidebar-divider" />
       <div className="nav-label presets-label">YOUR PRESETS<button aria-label="Create preset" title="Copy current preset" onClick={create}>
         <Plus size={15} />
       </button>
@@ -260,42 +303,16 @@ export default function App() {
         <Plus size={15} />Create preset</button>
       <button className="subtle-button" onClick={() => { setRename(preset.name); setModal('presets'); }}>
         <Layers3 size={15} />Manage presets</button>
-      {store.recentFiles.length > 0 && <>
-        <div className="sidebar-divider" />
-        <div className="nav-label">RECENT FILES</div>
-        <div className="recent-list">
-          {store.recentFiles.slice(0, 4).map(path => <button key={path} title={path} onClick={() => void importPath(path)}>
-            <Film size={13} />
-            <span>
-              {filename(path)}
-            </span>
-          </button>)}
-        </div>
-      </>}<div className="sidebar-bottom">
-        <div className="offline-note">
-          <ShieldCheck size={15} />
-          <span>Local files. All yours.<small>No uploads. No watermark.</small>
-          </span>
-        </div>
+      <div className="sidebar-bottom">
         <button className="nav-item" onClick={() => setModal('settings')}>
           <Settings2 size={17} />Settings<span className="version">v0.1</span>
         </button>
       </div>
     </aside>
     <main className="workspace">
-      <header className="topbar">
-        <div>
-          <span className="eyebrow">ROCKET LEAGUE SHORTS</span>
-          <h1>Make the play. Own the frame.</h1>
-        </div>
-        <div className="top-status">
-          <span className="status-dot" />
-          {video ? 'Video imported' : 'Ready to create'}
-        </div>
-      </header>
       {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, FFmpeg previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
       </div>}
-      <div className="preview-toolbar">
+      {video && <div className="preview-toolbar">
         <div className="breadcrumb">
           <Film size={15} />
           <span title={video?.path}>
@@ -314,46 +331,20 @@ export default function App() {
             <Maximize2 size={15} />
           </button>
         </div>
-      </div>
-      <Composition video={video} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} busy={busy} importVideo={() => void importVideo()} quality={quality} />
-      <div className="frame-controls">
-        <div className="scrubber-label">
-          <span>PREVIEW FRAME</span>
-          <span>
-            {time(timestamp)} <span className="muted">/ {time(video?.duration ?? 0)}
-            </span>
-          </span>
-        </div>
-        <input aria-label="Preview timestamp" type="range" min="0" max={Math.max(0, (video?.duration ?? 0) - 1 / (video?.fps ?? 30))} step={1 / (video?.fps ?? 30)} value={timestamp} disabled={!video} onChange={e => setTimestamp(Number(e.target.value))} />
-        <div className="frame-buttons">
-          <span className="frame-hint">
-            {video ? 'Drag a layer to position · Resize from any corner · Alt disables snapping' : 'A single-frame preview. A full-motion export.'}
-          </span>
-          <button aria-label="Back one second" disabled={!video} onClick={() => jump(-1)}>
-            <SkipBack size={15} />
-            <small>1s</small>
-          </button>
-          <button aria-label="Previous frame" disabled={!video} onClick={() => jump(-1 / (video?.fps ?? 30))}>
-            <ArrowLeft size={15} />
-          </button>
-          <span className="frame-indicator">FRAME {Math.round(timestamp * (video?.fps ?? 0))}
-          </span>
-          <button aria-label="Next frame" disabled={!video} onClick={() => jump(1 / (video?.fps ?? 30))}>
-            <ArrowRight size={15} />
-          </button>
-          <button aria-label="Forward one second" disabled={!video} onClick={() => jump(1)}>
-            <small>1s</small>
-            <SkipForward size={15} />
-          </button>
-        </div>
-      </div>
-      <footer className="workspace-footer">
+      </div>}
+      <Composition video={video} playbackPath={proxyPath} proxyPreparing={Boolean(video && !proxyPath)} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} busy={busy} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={setPlaying} />
+      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { setPlaying(false); setTimestamp(clamp(value, 0, video.duration)); }} onPlay={() => setPlaying(p => !p)} onUndo={undo} onRedo={redo}
+        onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end }] : [s])); }}
+        onTrimLeft={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp < active.end - .05) editSegments(segments.map(s => s.id === active.id ? { ...s, start: timestamp } : s)); }}
+        onTrimRight={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp > active.start + .05) editSegments(segments.map(s => s.id === active.id ? { ...s, end: timestamp } : s)); }}
+        onDelete={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && segments.length > 1) { const next = segments.filter(s => s.id !== active.id); editSegments(next); setTimestamp(next[0].start); } }} />}
+      {video && <footer className="workspace-footer">
         <span>
           <span className="status-dot" />Offline by design</span>
         <span>H.264 video · AAC audio</span>
-      </footer>
+      </footer>}
     </main>
-    <aside className="inspector">
+    {video && <aside className="inspector">
       <div className="inspector-heading">
         <span className="eyebrow">TEMPLATE SETTINGS</span>
         <h2>
@@ -368,7 +359,8 @@ export default function App() {
         </span>
       </div>
       <div className="inspector-scroll">
-        <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
+        {!layer && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, or boost element in the preview to edit it.</span></div>}
+        {layer === 'background' && <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
           <Slider label="Blur" value={preset.background.blur} max={100} step={1} onChange={blur => edit('background', { blur })} />
           <Slider label="Scale" value={preset.background.scale} min={1} max={2} onChange={scale => edit('background', { scale })} suffix="×" />
           <div className="two-controls">
@@ -377,8 +369,8 @@ export default function App() {
           </div>
           <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
           <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} onChange={brightness => edit('background', { brightness })} />
-        </Section>
-        <Section title="Gameplay" icon={<Film size={16} />} reset={() => reset('gameplay')}>
+        </Section>}
+        {layer === 'gameplay' && <Section title="Gameplay" icon={<Film size={16} />} reset={() => reset('gameplay')}>
           <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} onChange={scale => edit('gameplay', { scale })} suffix="×" />
           <div className="two-controls">
             <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} onChange={x => edit('gameplay', { x: x + .5 })} />
@@ -387,8 +379,8 @@ export default function App() {
           <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
           <button className="text-button" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}>Center gameplay</button>
           <p className="help-text">Full frame at 1×. Aspect ratio always preserved.</p>
-        </Section>
-        <Section title="Boost HUD" icon={<Gauge size={16} />} reset={() => reset('boost')}>
+        </Section>}
+        {layer === 'boost' && <Section title="Boost HUD" icon={<Gauge size={16} />} reset={() => reset('boost')}>
           <div className="row">
             <label htmlFor="boost-enabled">Show boost cutout</label>
             <input id="boost-enabled" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
@@ -421,7 +413,7 @@ export default function App() {
             </div>
           </details>
           <p className="help-text">Width / height are canvas fractions. Scale multiplies both. Circle masks use the smaller dimension.</p>
-        </Section>
+        </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
             <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
@@ -465,7 +457,7 @@ export default function App() {
         </button>
         <small>No watermark. Just your gameplay.</small>
       </div>
-    </aside>
+    </aside>}
     {error && <div className="toast error" role="alert">
       <div>
         <strong>Something needs your attention</strong>
@@ -552,6 +544,10 @@ export default function App() {
           </div>
           <label className="field">Default preset<Dropdown label="Default preset" value={store.settings.defaultPreset} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, defaultPreset: value } }))} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
+          <div className="setting-toggle">
+            <div><strong>Wait for smooth preview</strong><small>Keep import loading until the optimized playback proxy is ready.</small></div>
+            <input className="switch" type="checkbox" aria-label="Wait for smooth preview" checked={store.settings.waitForPreview} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, waitForPreview: e.target.checked } }))} />
+          </div>
           <label className="field">Default output folder<div className="folder-picker">
             <input value={store.settings.outputFolder} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, outputFolder: e.target.value } }))} />
             <button aria-label="Choose default output folder" onClick={() => void invoke<string | null>('pick_folder').then(folder => {

@@ -1,18 +1,21 @@
-import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Dropdown } from './Dropdown';
-import { Film, LoaderCircle, Move, Scan } from 'lucide-react';
+import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
 import type { Layer, Preset, Preview, Video } from '../types';
 import { clamp } from '../lib/presets';
+import { fileUrl } from '../lib/native';
 import { corners, snapAxis, type Corner } from '../lib/geometry';
 type Gesture = {
-  layer: Layer;
+  layer: 'gameplay' | 'boost';
   resize: Corner | null;
   x: number;
   y: number;
   preset: Preset;
 };
-export function Composition({ video, preview, preset, before, guides, layer, setLayer, change, busy, importVideo, quality }: {
+export function Composition({ video, playbackPath, proxyPreparing, preview, preset, before, guides, layer, setLayer, change, busy, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange }: {
   video: Video | null;
+  playbackPath: string;
+  proxyPreparing: boolean;
   preview: Preview | null;
   preset: Preset;
   before: boolean;
@@ -23,12 +26,25 @@ export function Composition({ video, preview, preset, before, guides, layer, set
   busy: boolean;
   importVideo: () => void;
   quality: number;
+  playing: boolean;
+  timestamp: number;
+  onTimestamp: (value: number) => void;
+  onPlayingChange: (value: boolean) => void;
 }) {
-  const canvas = useRef<HTMLDivElement>(null), gesture = useRef<Gesture | null>(null);
+  const canvas = useRef<HTMLDivElement>(null), player = useRef<HTMLVideoElement>(null), gesture = useRef<Gesture | null>(null);
   const [zoom, setZoom] = useState(1);
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  function begin(e: PointerEvent, target: Layer, resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  useEffect(() => {
+    if (!player.current || !video) return;
+    if (Math.abs(player.current.currentTime - timestamp) > .18) player.current.currentTime = timestamp;
+  }, [timestamp, video]);
+  useEffect(() => {
+    if (!player.current) return;
+    if (playing) void player.current.play().catch(() => onPlayingChange(false));
+    else player.current.pause();
+  }, [playing, onPlayingChange]);
+  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function move(e: PointerEvent) {
     const g = gesture.current;
     if (!g || !canvas.current)
@@ -61,7 +77,7 @@ export function Composition({ video, preview, preset, before, guides, layer, set
     }
     change(p);
   }
-  const rect = (target: Layer): CSSProperties => {
+  const rect = (target: 'gameplay' | 'boost'): CSSProperties => {
     let width: number, height: number, x: number, y: number; if (target === 'gameplay') {
       width = preset.gameplay.scale;
       height = width * (video!.height / video!.width) * ratio;
@@ -79,7 +95,7 @@ export function Composition({ video, preview, preset, before, guides, layer, set
     return <div className="preview-stage">
       <div className="empty-preview">
         <div className="empty-icon">
-          <Film size={34} />
+          <VideoIcon size={34} strokeWidth={1.7} />
         </div>
         <h2>Your next great clip starts here.</h2>
         <p>Drop a Rocket League recording anywhere,<br />or choose a video to get started.</p>
@@ -94,9 +110,9 @@ export function Composition({ video, preview, preset, before, guides, layer, set
     </div>;
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className="preview-viewport">
-      <div className={`composition ${before ? 'source-mode' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
-        {preview && <img src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && <div className="preview-loading">
-          <LoaderCircle className="spin" />Rendering your composition…</div>}{!before && guides && preview && (['gameplay', 'boost'] as Layer[]).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
+      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('img,video')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+        {playing && playbackPath ? <video ref={player} className="playback-video" src={fileUrl(playbackPath)} preload="auto" onTimeUpdate={e => onTimestamp(e.currentTarget.currentTime)} onEnded={() => onPlayingChange(false)} /> : preview && <img src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && !playing && <div className="preview-loading">
+          <LoaderCircle className="spin" />Rendering your composition…</div>}{!playing && !before && guides && preview && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
             {layer === target && <span>
               <Move size={10} />
               {target === 'gameplay' ? 'GAMEPLAY' : 'BOOST'}
@@ -106,6 +122,7 @@ export function Composition({ video, preview, preset, before, guides, layer, set
             <LoaderCircle size={12} className="spin" />Updating</span>}
         {snaps[0] !== null && <i className="snap-line vertical" style={{ left: `${snaps[0]! * 100}%` }} />}
         {snaps[1] !== null && <i className="snap-line horizontal" style={{ top: `${snaps[1]! * 100}%` }} />}
+        {proxyPreparing && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Preparing smooth preview…</span></div>}
       </div></div>
     <span className="canvas-caption">
       <Scan size={12} />

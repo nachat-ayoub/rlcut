@@ -1,5 +1,5 @@
 use crate::{
-    model::{ExportOptions, Preset, Video},
+    model::{ExportOptions, Preset, Segment, Video},
     presets,
     settings::{self, Store},
     video::{
@@ -11,7 +11,9 @@ use crate::{
 use serde::Serialize;
 use std::{
     collections::HashMap,
+    hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
+    process::Stdio,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -132,6 +134,73 @@ pub async fn import_video(state: State<'_, AppState>, path: String) -> Result<Vi
     Ok(v)
 }
 #[tauri::command]
+pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<String, String> {
+    let video = state.video(&path)?;
+    let binaries = state.binaries.clone();
+    let proxy_dir = state.cache.join("proxies");
+    blocking(move || {
+        std::fs::create_dir_all(&proxy_dir).map_err(|e| e.to_string())?;
+        let mut hasher = DefaultHasher::new();
+        video.path.hash(&mut hasher);
+        std::fs::metadata(&video.path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .hash(&mut hasher);
+        let output = proxy_dir.join(format!("proxy-{:x}.mp4", hasher.finish()));
+        if output.is_file() && output.metadata().is_ok_and(|m| m.len() > 0) {
+            return Ok(output.to_string_lossy().into_owned());
+        }
+        let partial = output.with_extension("partial.mp4");
+        let mut process = crate::video::binaries::command(binaries.ffmpeg()?);
+        process
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+            .arg(&video.path)
+            .args([
+                "-map",
+                "0:v:0",
+                "-vf",
+                "scale='min(960,iw)':-2:flags=fast_bilinear,fps=30",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "28",
+                "-g",
+                "30",
+                "-keyint_min",
+                "30",
+                "-sc_threshold",
+                "0",
+                "-pix_fmt",
+                "yuv420p",
+            ]);
+        if video.has_audio {
+            process.args(["-map", "0:a:0?", "-c:a", "aac", "-b:a", "96k"]);
+        } else {
+            process.arg("-an");
+        }
+        let status = process
+            .args(["-movflags", "+faststart"])
+            .arg(&partial)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("Cannot create preview proxy: {e}"))?;
+        if !status.status.success() {
+            let _ = std::fs::remove_file(&partial);
+            return Err(format!(
+                "Could not create preview proxy: {}",
+                String::from_utf8_lossy(&status.stderr)
+            ));
+        }
+        std::fs::rename(&partial, &output).map_err(|e| e.to_string())?;
+        Ok(output.to_string_lossy().into_owned())
+    })
+    .await
+}
+#[tauri::command]
 pub fn invalidate_preview(state: State<AppState>) {
     state.epoch.fetch_add(1, Ordering::SeqCst);
 }
@@ -177,11 +246,13 @@ pub fn start_export(
     state: State<AppState>,
     path: String,
     preset: Preset,
+    segments: Vec<Segment>,
     options: ExportOptions,
 ) -> Result<Progress, String> {
     preset.validate()?;
     state.binaries.ffmpeg()?;
     let v = state.video(&path)?;
+    Segment::validate_all(&segments, v.duration)?;
     let out = export::destination(&v, &options)?;
     let mut slot = state.job.lock().map_err(|_| "Export busy")?;
     if let Some(j) = slot.as_ref() {
@@ -193,7 +264,8 @@ pub fn start_export(
     let result = job.snapshot()?;
     *slot = Some(job.clone());
     let b = state.binaries.clone();
-    let worker = std::thread::spawn(move || export::run(b, v, preset, options, job));
+    let worker =
+        std::thread::spawn(move || export::run_segments(b, v, preset, segments, options, job));
     *state
         .worker
         .lock()

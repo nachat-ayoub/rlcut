@@ -46,6 +46,7 @@ export type Settings = {
   fps: number;
   outputFolder: string;
   defaultPreset: string;
+  waitForPreview: boolean;
 };
 export type Store = {
   version: number;
@@ -69,6 +70,11 @@ export type Progress = {
   output: string;
   error: string | null;
 };
+export type Segment = {
+  id: string;
+  start: number;
+  end: number;
+};
 export type Init = {
   store: Store;
   binaries: {
@@ -77,4 +83,4 @@ export type Init = {
   };
   storageError: string | null;
 };
-export type Layer = 'gameplay' | 'boost';
+export type Layer = 'background' | 'gameplay' | 'boost';

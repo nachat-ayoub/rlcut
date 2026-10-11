@@ -172,6 +172,37 @@ pub struct ExportOptions {
     pub folder: String,
     pub filename: String,
 }
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
+pub struct Segment {
+    pub start: f64,
+    pub end: f64,
+}
+impl Segment {
+    pub fn validate_all(segments: &[Self], duration: f64) -> Result<(), String> {
+        if segments.is_empty() {
+            return Err("Keep at least one timeline segment".into());
+        }
+        let mut previous_end = 0.;
+        for segment in segments {
+            if !segment.start.is_finite()
+                || !segment.end.is_finite()
+                || segment.start < previous_end
+                || segment.start < 0.
+                || segment.end <= segment.start
+                || segment.end > duration + 0.001
+            {
+                return Err(
+                    "Timeline segments must be ordered, non-overlapping, and inside the video"
+                        .into(),
+                );
+            }
+            previous_end = segment.end;
+        }
+        Ok(())
+    }
+}
 impl ExportOptions {
     pub fn resolution(&self) -> Result<(u32, u32), String> {
         if self.fps != 30 && self.fps != 60 {

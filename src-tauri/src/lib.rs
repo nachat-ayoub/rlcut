@@ -27,6 +27,7 @@ pub fn run() {
             commands::pick_video,
             commands::pick_folder,
             commands::import_video,
+            commands::create_proxy,
             commands::preview,
             commands::invalidate_preview,
             commands::clear_cache,

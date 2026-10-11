@@ -2,10 +2,19 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 stage=.runtime/appimage-tools
-mkdir -p "$stage/notices"
+mkdir -p "$stage/notices" "$stage/gstreamer-1.0"
+mkdir -p "$stage/gstreamer-scanner"
 for tool in ffmpeg ffprobe; do
   cp "$(command -v "$tool")" "$stage/$tool"
   chmod 755 "$stage/$tool"
+done
+cp /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner "$stage/gstreamer-scanner/"
+# WebKit uses GStreamer for the optimized editor proxy. Explicitly stage the
+# playback elements because linuxdeploy cannot discover dynamically loaded plugins.
+gst_dir=/usr/lib/x86_64-linux-gnu/gstreamer-1.0
+for plugin in app autodetect coreelements playback audioconvert audioresample volume pulseaudio alsa libav isomp4 typefindfunctions videoconvertscale; do
+  file="$gst_dir/libgst$plugin.so"
+  [[ ! -f "$file" ]] || cp "$file" "$stage/gstreamer-1.0/"
 done
 python3 scripts/check-tools.py "$stage"
 cp THIRD_PARTY_NOTICES.md "$stage/notices/THIRD_PARTY_NOTICES.md"

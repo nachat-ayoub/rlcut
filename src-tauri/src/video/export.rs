@@ -1,8 +1,8 @@
 use super::{
-    args::{export_args, progress_seconds},
+    args::{export_args_segments, progress_seconds},
     binaries::{command, Binaries},
 };
-use crate::model::{ExportOptions, Preset, Video};
+use crate::model::{ExportOptions, Preset, Segment, Video};
 #[cfg(feature = "serialization")]
 use serde::Serialize;
 use std::{
@@ -89,6 +89,27 @@ pub fn destination(v: &Video, o: &ExportOptions) -> Result<std::path::PathBuf, S
     Ok(out)
 }
 pub fn run(b: Binaries, v: Video, p: Preset, o: ExportOptions, job: Arc<Job>) {
+    let duration = v.duration;
+    run_segments(
+        b,
+        v,
+        p,
+        vec![Segment {
+            start: 0.,
+            end: duration,
+        }],
+        o,
+        job,
+    )
+}
+pub fn run_segments(
+    b: Binaries,
+    v: Video,
+    p: Preset,
+    segments: Vec<Segment>,
+    o: ExportOptions,
+    job: Arc<Job>,
+) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
         Ok(s) => s,
@@ -98,7 +119,7 @@ pub fn run(b: Binaries, v: Video, p: Preset, o: ExportOptions, job: Arc<Job>) {
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
-        let args = export_args(&v, &p, &o, &partial)?;
+        let args = export_args_segments(&v, &p, &segments, &o, &partial)?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -116,7 +137,7 @@ pub fn run(b: Binaries, v: Video, p: Preset, o: ExportOptions, job: Arc<Job>) {
             .take()
             .ok_or("Missing FFmpeg progress stream")?;
         let progress_job = job.clone();
-        let duration = v.duration;
+        let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
         let reader = thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(seconds) = progress_seconds(&line) {
@@ -241,13 +262,14 @@ mod tests {
         let (dir, v, o) = fixture();
         let out = destination(&v, &o).unwrap();
         let job = Arc::new(Job::new("failed".into(), out.to_string_lossy().into()));
-        run(
+        run_segments(
             Binaries {
                 ffmpeg: None,
                 ffprobe: None,
             },
             v,
             Preset::default(),
+            vec![Segment { start: 0., end: 3. }],
             o,
             job.clone(),
         );
@@ -268,13 +290,14 @@ mod tests {
         let job = Arc::new(Job::new("cancel".into(), out.to_string_lossy().into()));
         let worker_job = job.clone();
         let worker = thread::spawn(move || {
-            run(
+            run_segments(
                 Binaries {
                     ffmpeg: Some(binary),
                     ffprobe: None,
                 },
                 v,
                 Preset::default(),
+                vec![Segment { start: 0., end: 3. }],
                 o,
                 worker_job,
             )

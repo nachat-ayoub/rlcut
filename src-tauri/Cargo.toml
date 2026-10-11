@@ -21,7 +21,7 @@ desktop = ["serialization", "dep:tauri", "dep:tauri-build", "dep:rfd"]
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-tauri = { version = "2", features = [], optional = true }
+tauri = { version = "2", features = ["protocol-asset"], optional = true }
 rfd = { version = "0.15", optional = true, default-features = false, features = ["gtk3"] }
 
 [build-dependencies]
