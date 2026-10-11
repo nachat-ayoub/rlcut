@@ -16,7 +16,12 @@ export const isDesktop = () => Boolean(window.__TAURI__);
 export const fileUrl = (path: string) => window.__TAURI__?.core.convertFileSrc(path) ?? '';
 export async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (!window.__TAURI__) throw new Error('Open rlcut with npm run desktop to use native video processing.');
-  return window.__TAURI__.core.invoke<T>(command, args);
+  // IDs belong to the editor's UI/history. Rust accepts only media ranges,
+  // consistently for playback open/control and export commands.
+  const payload = args && Array.isArray(args.segments)
+    ? { ...args, segments: args.segments.map(({ start, end }: { start: number; end: number }) => ({ start, end })) }
+    : args;
+  return window.__TAURI__.core.invoke<T>(command, payload);
 }
 export async function onDrop(callback: (paths: string[]) => void): Promise<() => void> {
   if (!window.__TAURI__) return Promise.resolve(() => { });

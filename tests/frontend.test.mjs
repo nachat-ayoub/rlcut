@@ -136,3 +136,20 @@ test('edited clock seeks across cuts and never lands inside deleted source inter
   assert.equal(sourceToEdited(segments,5),2);
   assert.equal(sourceToEdited(segments,8),3);
 });
+
+
+test('native commands send timeline ranges without editor IDs', async () => {
+  const previous = globalThis.window;
+  const calls = [];
+  globalThis.window = { __TAURI__: { core: { invoke: async (command, args) => { calls.push({ command, args }); } } } };
+  const segments = [{ id: 'editor-only-id', start: 0, end: 12 }];
+  try {
+    const { invoke } = await import('../src/lib/native.ts');
+    for (const command of ['playback_open', 'playback_control', 'start_export']) await invoke(command, { session: 7, segments });
+    for (const call of calls) {
+      assert.deepEqual(call.args.segments, [{ start: 0, end: 12 }]);
+      assert.equal(call.args.session, 7);
+    }
+    assert.equal(segments[0].id, 'editor-only-id');
+  } finally { globalThis.window = previous; }
+});

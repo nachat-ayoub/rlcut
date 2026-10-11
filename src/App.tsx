@@ -119,7 +119,7 @@ export default function App() {
       setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration }]);
       undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
       setPreview(null);
-      playhead.current = v.duration / 2; setTimestamp(playhead.current);
+      playhead.current = 0; setTimestamp(0);
       setBefore(false);
       setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-short.mp4`);
       setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
