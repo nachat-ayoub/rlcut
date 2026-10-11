@@ -67,7 +67,15 @@ export class NativePlayback {
     });
     void this.commands.catch(error => this.fail(error));
   }
-  seek(time: number) { if (Math.abs(time - this.latestTime) > .045) { this.latestTime = time; this.callbacks.waiting(true); this.control({ time }); } }
+  seek(time: number) {
+    if (Math.abs(time - this.latestTime) <= .045) return;
+    this.latestTime = time;
+    // Keep the local state in lockstep with the callback. Otherwise the next
+    // ready packet can look unchanged and leave the React loading overlay up.
+    this.waiting = true;
+    this.callbacks.waiting(true);
+    this.control({ time });
+  }
   snapshotCanvas() {
     const frame = this.frame;
     if (!frame) return null;

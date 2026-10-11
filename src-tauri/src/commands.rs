@@ -1,5 +1,5 @@
 use crate::{
-    model::{ExportOptions, Preset, Segment, Video},
+    model::{ExportOptions, MusicFile, Preset, Segment, Video},
     presets,
     settings::{self, Store},
     video::{
@@ -138,6 +138,20 @@ pub async fn pick_video() -> Result<Option<String>, String> {
             .add_filter("Video", &["mp4", "mov", "mkv", "webm"])
             .pick_file()
             .map(|p| p.to_string_lossy().into()))
+    })
+    .await
+}
+#[tauri::command]
+pub async fn pick_music(state: State<'_, AppState>) -> Result<Option<MusicFile>, String> {
+    let binaries = state.binaries.clone();
+    blocking(move || {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Audio", &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        metadata::probe_music(&binaries, &path).map(Some)
     })
     .await
 }

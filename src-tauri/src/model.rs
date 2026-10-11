@@ -166,6 +166,17 @@ pub struct Video {
     feature = "serialization",
     serde(rename_all = "camelCase", deny_unknown_fields)
 )]
+pub struct MusicFile {
+    pub path: String,
+    pub name: String,
+    pub duration: f64,
+}
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
 pub struct ExportOptions {
     pub quality: u32,
     pub fps: u32,

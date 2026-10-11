@@ -21,8 +21,15 @@
 }
 body {
   margin:0;
-  overflow:hidden
+  overflow:hidden;
+  user-select:none;
+  -webkit-user-select:none
 }
+input:not([type=range]):not([type=checkbox]),textarea,[contenteditable=true] {
+  user-select:text;
+  -webkit-user-select:text
+}
+img,svg { -webkit-user-drag:none }
 button,input,select {
   font:inherit
 }
@@ -756,8 +763,7 @@ h1 {
 .ruler-corner { padding:7px 9px 0; color:#64596e; font-size:7px; letter-spacing:1px }
 .track-label { min-width:0; overflow:hidden; display:flex; align-items:center; gap:7px; padding:0 9px; border-top:1px solid #29232f; color:#b8a6c7 }
 .track-label svg { color:#9d77bf; flex:none }
-.track-label span { display:flex; flex-direction:column; gap:2px; font-size:9px }
-.track-label small { color:#655b6d; font-size:7px; white-space:nowrap }
+.track-label span { font-size:9px }
 .track-label.music { color:#91849b }
 .track-label.music svg { color:#776487 }
 .timeline-scroll { min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#4c3a5c #151219 }
@@ -787,11 +793,40 @@ h1 {
 .music-track {
   position:relative;
   border-top:1px solid #29232f;
-  background:#0f0d12;
+  background:repeating-linear-gradient(90deg,#0f0e14 0 31px,#13121a 32px);
   color:#5f5568;
   font-size:8px
 }
-.music-track>span { position:sticky; left:10px; height:100%; display:inline-flex; align-items:center; gap:6px; padding:0 10px; white-space:nowrap }
+.music-clip {
+  position:absolute;
+  z-index:2;
+  top:4px;
+  left:0;
+  height:30px;
+  min-width:24px;
+  max-width:none;
+  justify-content:flex-start;
+  overflow:hidden;
+  padding:0 10px;
+  border:1px solid #55517f;
+  border-radius:4px;
+  background:#353650;
+  color:#cac8ed;
+  white-space:nowrap
+}
+.music-clip:hover { background:#414365; border-color:#7772aa }
+.music-clip svg { flex:none; color:#a7a3dc }
+.music-clip b { overflow:hidden; text-overflow:ellipsis; font-size:8px; font-weight:600 }
+.music-clip small { margin-left:auto; color:#9592be; font-size:7px }
+.music-import {
+  position:sticky;
+  left:7px;
+  height:100%;
+  padding:0 8px;
+  color:#8f8bad;
+  font-size:8px
+}
+.music-import:hover { color:#cac7e9; background:#29283a }
 .timeline-segment {
   position:absolute;
   z-index:2;
@@ -807,6 +842,7 @@ h1 {
 .timeline-segment.active { background:#533c68 }
 .timeline-segment.selected { border-color:#bf8fea; box-shadow:inset 0 0 0 1px #bf8fea55,0 0 0 1px #110e15 }
 .timeline-segment.selected { z-index:3 }
+.timeline-segment.trimming { box-shadow:inset 0 0 0 1px #d7b2f455,0 0 8px #9f71c944 }
 .clip-fill {
   position:absolute;
   inset:0 7px;
@@ -859,7 +895,6 @@ h1 {
 .trim-icon { font-weight:700; color:#c7a8df }
 @media(max-width:900px) {
   .timeline-editor { grid-template-columns:82px minmax(0,1fr) }
-  .track-label small { display:none }
   .timeline-mixer>span { display:none }
 }
 .section {

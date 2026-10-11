@@ -76,6 +76,11 @@ export type Segment = {
   end: number;
   volume: number;
 };
+export type MusicFile = {
+  path: string;
+  name: string;
+  duration: number;
+};
 export type Init = {
   store: Store;
   binaries: {

@@ -25,6 +25,7 @@ pub fn run() {
             commands::initialize,
             commands::save_store,
             commands::pick_video,
+            commands::pick_music,
             commands::pick_folder,
             commands::import_video,
             commands::create_proxy,

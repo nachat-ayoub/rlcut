@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, Preset, Preview, Progress, Segment, Store, Video } from './types';
+import type { Init, Layer, MusicFile, Preset, Preview, Progress, Segment, Store, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -24,6 +24,7 @@ export default function App() {
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
+  const [music, setMusic] = useState<MusicFile | null>(null);
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0);
   const lastPresetEdit = useRef(0);
@@ -123,6 +124,7 @@ export default function App() {
       // leaves the previous composition, timeline and undo history intact.
       setPlaying(false); setVideo(v); setProxyPath(proxy); setSourceVersion(version => version + 1);
       setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
+      setMusic(null);
       undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
       setPreview(null);
       playhead.current = 0; setTimestamp(0);
@@ -151,6 +153,15 @@ export default function App() {
       report(e);
     }
   }, [importPath, report]);
+  const importMusic = useCallback(async () => {
+    try {
+      const selected = await invoke<MusicFile | null>('pick_music');
+      if (selected) setMusic(selected);
+    }
+    catch (e) {
+      report(e);
+    }
+  }, [report]);
   useEffect(() => {
     let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPath(paths[0])).then(fn => {
       if (disposed)
@@ -351,7 +362,7 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo}
+      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
         onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end, volume: s.volume }] : [s])); }}
         onTrimLeft={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp < active.end - .05) editSegments(segments.map(s => s.id === active.id ? { ...s, start: timestamp } : s)); }}
         onTrimRight={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp > active.start + .05) editSegments(segments.map(s => s.id === active.id ? { ...s, end: timestamp } : s)); }}
