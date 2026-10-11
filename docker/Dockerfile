@@ -4,6 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev \
     librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3 \
+    gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good libgstreamer1.0-dev \
     ca-certificates curl git file desktop-file-utils squashfs-tools \
     dbus-x11 xauth xvfb x11-utils fonts-dejavu-core \
     xdg-utils shared-mime-info mesa-utils libgl1-mesa-dri \

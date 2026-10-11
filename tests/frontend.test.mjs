@@ -114,3 +114,25 @@ test('dropdown uses the app combobox rather than native select chrome', () => {
   assert.match(html, /60 FPS/);
   assert.doesNotMatch(html, /<select|<option/);
 });
+
+test('preview geometry agrees with native export fixtures', async t => {
+  const { readFile } = await import('node:fs/promises');
+  const { scene } = await import('../src/lib/compositor.ts');
+  let raw;
+  try { raw = await readFile(new URL('../.checks/scene-fixtures.json', import.meta.url), 'utf8'); }
+  catch (e) { if (e.code === 'ENOENT') { t.skip('Generate scene fixtures with the native geometry example'); return; } throw e; }
+  const fixtures = JSON.parse(raw);
+  for (const item of fixtures) assert.deepEqual(scene(item.video, item.preset, item.scene.width, item.scene.height), item.scene);
+});
+
+test('edited clock seeks across cuts and never lands inside deleted source intervals', async () => {
+  const { editedToSource, sourceToEdited, editedDuration } = await import('../src/lib/timeline.ts');
+  const segments = [{start:2,end:4}, {start:7,end:9}];
+  assert.equal(editedDuration(segments),4);
+  assert.equal(editedToSource(segments,0),2);
+  assert.equal(editedToSource(segments,2),7);
+  assert.equal(editedToSource(segments,2.5),7.5);
+  assert.equal(editedToSource(segments,99),9);
+  assert.equal(sourceToEdited(segments,5),2);
+  assert.equal(sourceToEdited(segments,8),3);
+});

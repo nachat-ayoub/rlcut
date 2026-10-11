@@ -5,54 +5,86 @@ use crate::{
     video::{
         binaries::Binaries,
         export::{self, Job, Progress},
-        metadata, preview as frames,
+        metadata,
     },
 };
 use serde::Serialize;
 use std::{
     collections::HashMap,
-    hash::{DefaultHasher, Hash, Hasher},
     path::PathBuf,
-    process::Stdio,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
 use tauri::State;
 pub struct AppState {
-    pub epoch: Arc<AtomicU64>,
     file: PathBuf,
     cache: PathBuf,
     binaries: Binaries,
     videos: Mutex<HashMap<String, Video>>,
     store_lock: Mutex<()>,
-    preview_lock: Arc<Mutex<()>>,
+    proxy_lock: Arc<Mutex<()>>,
+    decoder_epoch: Arc<AtomicU64>,
+    player: Arc<Mutex<PlayerSlot>>,
+    preparation: Arc<Mutex<Preparation>>,
+    playback_stop: Arc<AtomicBool>,
+    playback_worker: Mutex<Option<std::thread::JoinHandle<()>>>,
     pub job: Arc<Mutex<Option<Arc<Job>>>>,
     pub worker: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 impl AppState {
     pub fn new(file: PathBuf, cache: PathBuf, binaries: Binaries) -> Self {
+        let player = Arc::new(Mutex::new(PlayerSlot {
+            session: 0,
+            player: None,
+        }));
+        let playback_stop = Arc::new(AtomicBool::new(false));
+        let slot = player.clone();
+        let stop = playback_stop.clone();
+        let playback_worker = std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                if let Ok(mut slot) = slot.lock() {
+                    if let Some(player) = slot.player.as_mut() {
+                        player.pump();
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(8));
+            }
+        });
         Self {
-            epoch: Arc::new(AtomicU64::new(0)),
             file,
             cache,
             binaries,
             videos: Mutex::new(HashMap::new()),
             store_lock: Mutex::new(()),
-            preview_lock: Arc::new(Mutex::new(())),
+            proxy_lock: Arc::new(Mutex::new(())),
+            decoder_epoch: Arc::new(AtomicU64::new(0)),
+            player,
+            playback_stop,
+            playback_worker: Mutex::new(Some(playback_worker)),
+            preparation: Arc::new(Mutex::new(Preparation::default())),
             job: Arc::new(Mutex::new(None)),
             worker: Mutex::new(None),
         }
     }
     pub fn shutdown(&self) {
-        self.epoch.fetch_add(1, Ordering::SeqCst);
+        self.decoder_epoch.fetch_add(1, Ordering::SeqCst);
+        let _decoder_guard = self.proxy_lock.lock().ok();
+        self.playback_stop.store(true, Ordering::SeqCst);
+        if let Ok(mut worker) = self.playback_worker.lock() {
+            if let Some(worker) = worker.take() {
+                let _ = worker.join();
+            }
+        }
+        if let Ok(mut slot) = self.player.lock() {
+            slot.player.take();
+        }
         if let Ok(job) = self.job.lock() {
             if let Some(j) = job.as_ref() {
                 j.cancel.store(true, Ordering::SeqCst);
             }
         }
-        let _preview_guard = self.preview_lock.lock().ok();
         if let Ok(mut worker) = self.worker.lock() {
             if let Some(handle) = worker.take() {
                 let _ = handle.join();
@@ -120,6 +152,7 @@ pub async fn pick_folder() -> Result<Option<String>, String> {
 }
 #[tauri::command]
 pub async fn import_video(state: State<'_, AppState>, path: String) -> Result<Video, String> {
+    state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
     let b = state.binaries.clone();
     let v = blocking(move || {
         b.ffmpeg()?;
@@ -138,103 +171,46 @@ pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<St
     let video = state.video(&path)?;
     let binaries = state.binaries.clone();
     let proxy_dir = state.cache.join("proxies");
-    blocking(move || {
-        std::fs::create_dir_all(&proxy_dir).map_err(|e| e.to_string())?;
-        let mut hasher = DefaultHasher::new();
-        "proxy-v2".hash(&mut hasher);
-        video.path.hash(&mut hasher);
-        std::fs::metadata(&video.path)
-            .ok()
-            .and_then(|m| m.modified().ok())
-            .hash(&mut hasher);
-        let output = proxy_dir.join(format!("proxy-{:x}.mp4", hasher.finish()));
-        if output.is_file() && output.metadata().is_ok_and(|m| m.len() > 0) {
-            return Ok(output.to_string_lossy().into_owned());
-        }
-        let partial = output.with_extension("partial.mp4");
-        let mut process = crate::video::binaries::command(binaries.ffmpeg()?);
-        process
-            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
-            .arg(&video.path)
-            .args([
-                "-map",
-                "0:v:0",
-                "-vf",
-                "scale='min(960,iw)':-2:flags=fast_bilinear,fps=30",
-                "-c:v",
-                "libx264",
-                "-preset",
-                "ultrafast",
-                "-crf",
-                "28",
-                "-g",
-                "15",
-                "-keyint_min",
-                "15",
-                "-sc_threshold",
-                "0",
-                "-pix_fmt",
-                "yuv420p",
-            ]);
-        if video.has_audio {
-            process.args(["-map", "0:a:0?", "-c:a", "aac", "-b:a", "96k"]);
-        } else {
-            process.arg("-an");
-        }
-        let status = process
-            .args(["-movflags", "+faststart"])
-            .arg(&partial)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped())
-            .output()
-            .map_err(|e| format!("Cannot create preview proxy: {e}"))?;
-        if !status.status.success() {
-            let _ = std::fs::remove_file(&partial);
-            return Err(format!(
-                "Could not create preview proxy: {}",
-                String::from_utf8_lossy(&status.stderr)
-            ));
-        }
-        std::fs::rename(&partial, &output).map_err(|e| e.to_string())?;
-        Ok(output.to_string_lossy().into_owned())
-    })
-    .await
-}
-#[tauri::command]
-pub fn invalidate_preview(state: State<AppState>) {
-    state.epoch.fetch_add(1, Ordering::SeqCst);
-}
-#[tauri::command]
-pub async fn preview(
-    state: State<'_, AppState>,
-    path: String,
-    preset: Preset,
-    timestamp: f64,
-    quality: u32,
-) -> Result<frames::Preview, String> {
-    let v = state.video(&path)?;
-    let b = state.binaries.clone();
-    let cache = state.cache.clone();
-    let epoch = state.epoch.clone();
-    let lock = state.preview_lock.clone();
+    let lock = state.proxy_lock.clone();
+    let epoch = state.decoder_epoch.clone();
     let ticket = epoch.fetch_add(1, Ordering::SeqCst) + 1;
-    blocking(move || {
-        let _guard = lock.lock().map_err(|_| "Preview unavailable")?;
-        if epoch.load(Ordering::SeqCst) != ticket {
-            return Err("Preview superseded".into());
-        }
-        frames::render(&b, &v, &preset, timestamp, quality, &cache, &epoch, ticket)
+    let progress = state.preparation.clone();
+    if let Ok(mut p) = progress.lock() {
+        *p = Preparation::default();
+    }
+    let path = blocking(move || {
+        let _guard = lock.lock().map_err(|_| "Decoder preparation unavailable")?;
+        crate::video::decoder::prepare_progress(
+            &binaries,
+            &video,
+            &proxy_dir,
+            &epoch,
+            ticket,
+            |percent, elapsed, remaining| {
+                if epoch.load(Ordering::SeqCst) == ticket {
+                    if let Ok(mut p) = progress.lock() {
+                        *p = Preparation {
+                            percent,
+                            elapsed,
+                            remaining,
+                        };
+                    }
+                }
+            },
+        )
     })
-    .await
+    .await?;
+    Ok(path.to_string_lossy().into_owned())
 }
 #[tauri::command]
 pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
-    state.epoch.fetch_add(1, Ordering::SeqCst);
+    state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
     let cache = state.cache.clone();
-    let lock = state.preview_lock.clone();
+    let proxy_lock = state.proxy_lock.clone();
     blocking(move || {
-        let _guard = lock.lock().map_err(|_| "Preview unavailable")?;
+        let _proxy_guard = proxy_lock
+            .lock()
+            .map_err(|_| "Preview preparation unavailable")?;
         if cache.exists() {
             std::fs::remove_dir_all(&cache).map_err(|e| e.to_string())?;
         }
@@ -350,4 +326,146 @@ pub async fn export_preset(preset: Preset) -> Result<bool, String> {
         }
     })
     .await
+}
+
+struct PlayerSlot {
+    session: u64,
+    player: Option<crate::video::player::Player>,
+}
+#[derive(Clone, Default, Serialize)]
+pub struct Preparation {
+    percent: f64,
+    elapsed: f64,
+    remaining: Option<f64>,
+}
+#[tauri::command]
+pub fn preparation_progress(state: State<AppState>) -> Result<Preparation, String> {
+    state
+        .preparation
+        .lock()
+        .map(|p| p.clone())
+        .map_err(|_| "Preparation progress unavailable".into())
+}
+#[tauri::command]
+pub async fn playback_open(
+    state: State<'_, AppState>,
+    session: u64,
+    path: String,
+    time: f64,
+    segments: Vec<Segment>,
+) -> Result<(), String> {
+    let cache = state
+        .cache
+        .join("proxies")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let file = PathBuf::from(path)
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    if !file.starts_with(&cache) || file.extension().is_none_or(|s| s != "mp4") {
+        return Err("Playback source must be a prepared recording".into());
+    }
+    validate_segments(&segments)?;
+    let tools = state.binaries.clone();
+    let slot = state.player.clone();
+    blocking(move || {
+        let mut slot = slot.lock().map_err(|_| "Native player unavailable")?;
+        if session < slot.session {
+            return Err("Playback session superseded".into());
+        }
+        let metadata = metadata::probe(&tools, &file)?;
+        let scale = (768. / metadata.width.max(metadata.height) as f64).min(1.);
+        let w = ((metadata.width as f64 * scale / 2.).round() as u32 * 2).max(2);
+        let h = ((metadata.height as f64 * scale / 2.).round() as u32 * 2).max(2);
+        let player =
+            crate::video::player::Player::open(&file.to_string_lossy(), w, h, time, segments)?;
+        slot.player = Some(player);
+        slot.session = session;
+        Ok(())
+    })
+    .await
+}
+fn validate_segments(segments: &[Segment]) -> Result<(), String> {
+    if segments.is_empty()
+        || segments.len() > 10000
+        || segments
+            .iter()
+            .any(|s| !s.start.is_finite() || !s.end.is_finite() || s.start < 0. || s.end <= s.start)
+        || segments.windows(2).any(|s| s[0].end > s[1].start)
+    {
+        return Err("Invalid playback timeline".into());
+    }
+    Ok(())
+}
+#[tauri::command]
+pub async fn playback_control(
+    state: State<'_, AppState>,
+    session: u64,
+    playing: Option<bool>,
+    time: Option<f64>,
+    segments: Option<Vec<Segment>>,
+) -> Result<(), String> {
+    if time.is_some_and(|t| !t.is_finite() || t < 0.) {
+        return Err("Invalid playback position".into());
+    }
+    if let Some(s) = segments.as_ref() {
+        validate_segments(s)?;
+    }
+    let slot = state.player.clone();
+    blocking(move || {
+        let mut slot = slot.lock().map_err(|_| "Native player unavailable")?;
+        if slot.session != session {
+            return Ok(());
+        }
+        if let Some(p) = slot.player.as_mut() {
+            if let Some(segments) = segments {
+                p.segments(segments)?;
+            }
+            if let Some(time) = time {
+                p.seek(time)?;
+            }
+            if let Some(playing) = playing {
+                p.play(playing)?;
+            }
+        }
+        Ok(())
+    })
+    .await
+}
+#[tauri::command]
+pub async fn playback_frame(
+    state: State<'_, AppState>,
+    session: u64,
+    last: u32,
+) -> Result<tauri::ipc::Response, String> {
+    let player = state.player.clone();
+    let packet = blocking(move || {
+        let slot = player.lock().map_err(|_| "Native player unavailable")?;
+        if slot.session != session {
+            return Ok(Vec::new());
+        }
+        slot.player
+            .as_ref()
+            .ok_or("Native player is not open")?
+            .frame(last)
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(packet))
+}
+#[tauri::command]
+pub async fn playback_close(state: State<'_, AppState>, session: u64) -> Result<(), String> {
+    let slot = state.player.clone();
+    blocking(move || {
+        let mut slot = slot.lock().map_err(|_| "Native player unavailable")?;
+        if slot.session == session {
+            slot.player.take();
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn cancel_preparation(state: State<AppState>) {
+    state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
 }

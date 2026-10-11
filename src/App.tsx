@@ -9,19 +9,25 @@ import { Composition } from './components/Composition';
 import { Alignment } from './components/Alignment';
 import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
+import { editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'crop' | null;
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
   const [video, setVideo] = useState<Video | null>(null), [preview, setPreview] = useState<Preview | null>(null), [timestamp, setTimestamp] = useState(0);
   const [proxyPath, setProxyPath] = useState('');
-  const [busy, setBusy] = useState(false), [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
+  const [sourceVersion, setSourceVersion] = useState(0);
+  const [proxyPreparing, setProxyPreparing] = useState(false);
+  const [preparation, setPreparation] = useState<{ percent: number; elapsed: number; remaining: number | null } | null>(null);
+  const [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-short.mp4');
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
-  const [refresh, setRefresh] = useState(0), [saved, setSaved] = useState(true);
+  const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]);
-  const initialized = useRef(false), revision = useRef(0), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
+  const playhead = useRef(0), lastTimeReport = useRef(0);
+  const lastPresetEdit = useRef(0);
+  const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
   storeRef.current = store;
   const preset = store.activePreset === 'classic' ? classic : store.presets.find(p => p.id === store.activePreset) ?? classic;
   const allPresets = [classic, ...store.presets];
@@ -61,14 +67,21 @@ export default function App() {
     });
   }, []);
   const change = useCallback((next: Preset) => {
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    const now = performance.now();
+    if (!lastPresetEdit.current || now - lastPresetEdit.current > 350) {
+      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+      if (undoStack.current.length > 100) undoStack.current.shift();
+    }
+    lastPresetEdit.current = now;
     redoStack.current = [];
     replacePreset(next);
   }, [preset, segments, replacePreset]);
   const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[] }) => {
+    lastPresetEdit.current = 0;
     replacePreset(snapshot.preset);
     setSegments(structuredClone(snapshot.segments));
-    setPlaying(false);
+    const value = editedToSource(snapshot.segments, sourceToEdited(snapshot.segments, playhead.current));
+    playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [replacePreset]);
   const undo = useCallback(() => {
     const snapshot = undoStack.current.pop(); if (!snapshot) return;
@@ -81,45 +94,47 @@ export default function App() {
     restoreSnapshot(snapshot);
   }, [preset, segments, restoreSnapshot]);
   const editSegments = useCallback((next: Segment[]) => {
+    lastPresetEdit.current = 0;
     undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
-    redoStack.current = []; setSegments(next); setPlaying(false);
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = []; setSegments(next);
+    const value = editedToSource(next, sourceToEdited(next, playhead.current));
+    playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [preset, segments]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
     const ticket = ++importRevision.current;
-    ++revision.current;
-    setImporting(true);
-    setError(null);
-    void invoke<void>('invalidate_preview').catch(() => { });
+    setImporting(storeRef.current.settings.waitForPreview);
+    setPreparation(null); setProxyPreparing(true); setPlaying(false); setError(null);
     try {
       const v = await invoke<Video>('import_video', { path });
-      if (ticket !== importRevision.current)
-        return;
-      setVideo(v);
-      setProxyPath('');
+      if (ticket !== importRevision.current) return;
+      setPreparation({ percent: 0, elapsed: 0, remaining: null });
+      const proxy = await invoke<string>('create_proxy', { path: v.path });
+      if (ticket !== importRevision.current) return;
+      // Commit the source and its ready decoder together. A failed import
+      // leaves the previous composition, timeline and undo history intact.
+      setPlaying(false); setVideo(v); setProxyPath(proxy); setSourceVersion(version => version + 1);
       setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration }]);
-      undoStack.current = []; redoStack.current = [];
+      undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
       setPreview(null);
-      setTimestamp(v.duration / 2);
+      playhead.current = v.duration / 2; setTimestamp(playhead.current);
       setBefore(false);
       setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-short.mp4`);
       setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
-      const prepare = invoke<string>('create_proxy', { path: v.path }).then(proxy => {
-        if (ticket === importRevision.current) setProxyPath(proxy);
-      });
-      if (storeRef.current.settings.waitForPreview) await prepare;
-      else void prepare.catch(e => { if (ticket === importRevision.current) report(e); });
-    }
-    catch (e) {
-      if (ticket === importRevision.current)
-        report(e);
-    }
-    finally {
-      if (ticket === importRevision.current)
-        setImporting(false);
+    } catch (e) {
+      if (ticket === importRevision.current && !message(e).includes('superseded')) report(e);
+    } finally {
+      if (ticket === importRevision.current) { setImporting(false); setProxyPreparing(false); }
     }
   }, [report]);
+  useEffect(() => {
+    if (!proxyPreparing || !preparation) return;
+    let disposed = false;
+    const timer = setInterval(() => { invoke<typeof preparation>('preparation_progress').then(value => { if (!disposed) setPreparation(value); }).catch(() => { }); }, 250);
+    return () => { disposed = true; clearInterval(timer); };
+  }, [proxyPreparing, Boolean(preparation)]);
   const importVideo = useCallback(async () => {
     try {
       const path = await invoke<string | null>('pick_video');
@@ -139,26 +154,6 @@ export default function App() {
     }).catch(report); return () => { disposed = true; off?.(); };
   }, [importPath, report]);
   useEffect(() => {
-    if (!video || playing)
-      return;
-    const ticket = ++revision.current;
-    setBusy(true);
-    void invoke<void>('invalidate_preview').catch(report);
-    const timer = setTimeout(() => {
-      invoke<Preview>('preview', { path: video.path, preset, timestamp, quality }).then(p => {
-        if (ticket === revision.current)
-          setPreview(p);
-      }).catch(e => {
-        if (ticket === revision.current && !message(e).includes('superseded'))
-          report(e);
-      }).finally(() => {
-        if (ticket === revision.current)
-          setBusy(false);
-      });
-    }, 220);
-    return () => { clearTimeout(timer); ++revision.current; };
-  }, [video, preset, timestamp, quality, refresh, playing, report]);
-  useEffect(() => {
     if (!exporting)
       return;
     let disposed = false;
@@ -173,15 +168,31 @@ export default function App() {
     }, 450);
     return () => { disposed = true; clearInterval(timer); };
   }, [exporting, report]);
-  const jump = useCallback((delta: number) => setTimestamp(t => clamp(t + delta, 0, Math.max(0, (video?.duration ?? 0) - 1 / (video?.fps ?? 30)))), [video]);
-  const updatePlaybackTime = useCallback((value: number) => {
-    const kept = segments.find(segment => value >= segment.start && value < segment.end);
-    if (kept) { setTimestamp(value); return; }
-    const next = segments.find(segment => segment.start > value);
-    if (next) { setTimestamp(next.start); return next.start; }
-    const end = segments.at(-1)?.end ?? value;
-    setPlaying(false); setTimestamp(end); return end;
+  const jump = useCallback((delta: number) => {
+    const value = editedToSource(segments, sourceToEdited(segments, playhead.current) + delta);
+    playhead.current = value; setPlaying(false); setTimestamp(value);
   }, [segments]);
+  const togglePlayback = useCallback(() => {
+    if (!proxyPath) return;
+    if (!playing && segments.length && playhead.current >= segments[segments.length - 1].end - .04) playhead.current = segments[0].start;
+    setTimestamp(playhead.current); setPlaying(value => !value);
+  }, [proxyPath, playing, segments]);
+  const updatePlaybackTime = useCallback((value: number) => {
+    playhead.current = value;
+    const kept = segments.find(segment => value >= segment.start && value < segment.end);
+    if (kept) {
+      // The display loop remains frame-paced; update the React controls at
+      // 12 Hz instead of rebuilding the entire editor for every decoded frame.
+      const now = performance.now();
+      if (now - lastTimeReport.current >= 80) { lastTimeReport.current = now; setTimestamp(value); }
+      return;
+    }
+    const next = segments.find(segment => segment.start > value);
+    if (next) { playhead.current = next.start; setTimestamp(next.start); return next.start; }
+    const end = segments.at(-1)?.end ?? value;
+    playhead.current = end; setPlaying(false); setTimestamp(end); return end;
+  }, [segments]);
+  const updatePlaying = useCallback((value: boolean) => { if (!value) setTimestamp(playhead.current); setPlaying(value); }, []);
   const chooseFolder = useCallback(async () => {
     try {
       const folder = await invoke<string | null>('pick_folder');
@@ -232,7 +243,7 @@ export default function App() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault(); if (e.shiftKey) redo(); else undo();
       }
-      else if (e.code === 'Space' && proxyPath) { e.preventDefault(); setPlaying(p => !p); }
+      else if (e.code === 'Space' && proxyPath) { e.preventDefault(); togglePlayback(); }
       else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         jump(e.shiftKey ? -1 : -1 / (video?.fps ?? 30));
@@ -242,7 +253,7 @@ export default function App() {
         jump(e.shiftKey ? 1 : 1 / (video?.fps ?? 30));
       }
     } window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
-  }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath]);
+  }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath, togglePlayback]);
   function create() { const p = copyPreset(preset); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
   function remove() {
     if (preset.id === 'classic')
@@ -311,7 +322,7 @@ export default function App() {
       </div>
     </aside>
     <main className="workspace">
-      {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, FFmpeg previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
+      {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, live composition previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
       </div>}
       {video && <div className="preview-toolbar">
         <div className="breadcrumb">
@@ -333,12 +344,12 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} playbackPath={proxyPath} proxyPreparing={Boolean(video && !proxyPath)} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} busy={busy} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={setPlaying} />
-      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { setPlaying(false); setTimestamp(clamp(value, 0, video.duration)); }} onPlay={() => setPlaying(p => !p)} onUndo={undo} onRedo={redo}
+      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo}
         onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end }] : [s])); }}
         onTrimLeft={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp < active.end - .05) editSegments(segments.map(s => s.id === active.id ? { ...s, start: timestamp } : s)); }}
         onTrimRight={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp > active.start + .05) editSegments(segments.map(s => s.id === active.id ? { ...s, end: timestamp } : s)); }}
-        onDelete={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && segments.length > 1) { const next = segments.filter(s => s.id !== active.id); editSegments(next); setTimestamp(next[0].start); } }} />}
+        onDelete={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && segments.length > 1) { const next = segments.filter(s => s.id !== active.id); editSegments(next); } }} />}
       {video && <footer className="workspace-footer">
         <span>
           <span className="status-dot" />Offline by design</span>
@@ -386,7 +397,7 @@ export default function App() {
             <label htmlFor="boost-enabled">Show boost cutout</label>
             <input id="boost-enabled" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
           </div>
-          <button className="crop-button" disabled={!preview} onClick={() => { setLayer('boost'); setModal('crop'); }}>
+          <button className="crop-button" disabled={!preview} onClick={() => { setPlaying(false); setLayer('boost'); setModal('crop'); }}>
             <Maximize2 size={15} />Select boost area<span>↗</span>
           </button>
           <div className="segmented">
@@ -459,6 +470,11 @@ export default function App() {
         <small>No watermark. Just your gameplay.</small>
       </div>
     </aside>}
+    {proxyPreparing && <div className="preparation-status" role="status" aria-live="polite">
+      <LoaderCircle className="spin" size={18} /><div><strong>{preparation ? `Preparing recording · ${Math.floor(preparation.percent)}%` : 'Reading recording…'}</strong>
+        <progress max="100" value={preparation?.percent} /><small>{preparation?.remaining != null ? `About ${duration(preparation.remaining)} remaining` : 'Preparing a smooth editing source'}{preparation && ` · ${duration(preparation.elapsed)} elapsed`}</small></div>
+      <button title="Cancel import" aria-label="Cancel import" onClick={() => { importRevision.current++; setImporting(false); setProxyPreparing(false); void invoke('cancel_preparation').catch(report); }}><X size={16} /></button>
+    </div>}
     {error && <div className="toast error" role="alert">
       <div>
         <strong>Something needs your attention</strong>
@@ -546,7 +562,7 @@ export default function App() {
           <label className="field">Default preset<Dropdown label="Default preset" value={store.settings.defaultPreset} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, defaultPreset: value } }))} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
           <div className="setting-toggle">
-            <div><strong>Wait for smooth preview</strong><small>Keep import loading until the optimized playback proxy is ready.</small></div>
+            <div><strong>Wait for smooth preview</strong><small>Show import loading while the recording is prepared. New clips replace the editor only when ready.</small></div>
             <input className="switch" type="checkbox" aria-label="Wait for smooth preview" checked={store.settings.waitForPreview} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, waitForPreview: e.target.checked } }))} />
           </div>
           <label className="field">Default output folder<div className="folder-picker">
@@ -560,7 +576,17 @@ export default function App() {
           </div>
           </label>
           <div className="modal-actions">
-            <button onClick={() => void invoke('clear_cache').then(() => { setRefresh(n => n + 1); setNotice('Preview cache cleared'); }).catch(report)}>
+            <button onClick={() => {
+              const ticket = ++importRevision.current;
+              setPlaying(false); setProxyPath(''); setProxyPreparing(Boolean(video));
+              void invoke('clear_cache').then(async () => {
+                if (video) {
+                  const path = await invoke<string>('create_proxy', { path: video.path });
+                  if (ticket === importRevision.current) setProxyPath(path);
+                }
+                setNotice('Preview cache cleared');
+              }).catch(e => { if (ticket === importRevision.current && !message(e).includes('superseded')) report(e); }).finally(() => { if (ticket === importRevision.current) { setProxyPreparing(false); setImporting(false); } });
+            }}>
               <Trash2 size={15} />Clear preview cache</button>
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
             <button className="primary" onClick={() => { setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); }}>Apply defaults</button>

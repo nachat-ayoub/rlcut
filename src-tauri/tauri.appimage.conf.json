@@ -6,20 +6,8 @@
           "/usr/bin/ffmpeg": "../.runtime/appimage-tools/ffmpeg",
           "/usr/bin/ffprobe": "../.runtime/appimage-tools/ffprobe",
           "/usr/share/rlcut/video-tool-notices": "../.runtime/appimage-tools/notices",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstapp.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstapp.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstautodetect.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstautodetect.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstcoreelements.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstcoreelements.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstplayback.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstplayback.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstaudioconvert.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstaudioconvert.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstaudioresample.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstaudioresample.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvolume.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstvolume.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstpulseaudio.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstpulseaudio.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstalsa.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstalsa.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstlibav.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstlibav.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstisomp4.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstisomp4.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgsttypefindfunctions.so": "../.runtime/appimage-tools/gstreamer-1.0/libgsttypefindfunctions.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvideoconvertscale.so": "../.runtime/appimage-tools/gstreamer-1.0/libgstvideoconvertscale.so",
-          "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner": "../.runtime/appimage-tools/gstreamer-scanner/gst-plugin-scanner"
+          "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner": "../.runtime/appimage-tools/gstreamer-scanner/gst-plugin-scanner",
+          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0": "../.runtime/appimage-tools/gstreamer-1.0"
         }
       }
     }

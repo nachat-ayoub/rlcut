@@ -1,6 +1,7 @@
 import { Pause, Play, Redo2, Scissors, SkipBack, SkipForward, Trash2, Undo2 } from 'lucide-react';
 import type { Segment } from '../types';
 import { time } from '../lib/presets';
+import { editedDuration as durationOf, sourceToEdited as sourceTime, editedToSource as sourceOf } from '../lib/timeline';
 
 export function Timeline({ duration, timestamp, segments, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onSplit, onTrimLeft, onTrimRight, onDelete, onUndo, onRedo }: {
   duration: number;
@@ -20,25 +21,9 @@ export function Timeline({ duration, timestamp, segments, playing, playbackReady
   onRedo: () => void;
 }) {
   const active = segments.find(s => timestamp >= s.start && timestamp <= s.end);
-  const editedDuration = segments.reduce((total, segment) => total + segment.end - segment.start, 0);
-  const sourceToEdited = (source: number) => {
-    let edited = 0;
-    for (const segment of segments) {
-      if (source < segment.start) return edited;
-      if (source <= segment.end) return edited + source - segment.start;
-      edited += segment.end - segment.start;
-    }
-    return edited;
-  };
-  const editedToSource = (edited: number) => {
-    let offset = 0;
-    for (const segment of segments) {
-      const length = segment.end - segment.start;
-      if (edited <= offset + length) return segment.start + Math.max(0, edited - offset);
-      offset += length;
-    }
-    return segments.at(-1)?.end ?? 0;
-  };
+  const editedDuration = durationOf(segments);
+  const sourceToEdited = (source: number) => sourceTime(segments, source);
+  const editedToSource = (edited: number) => sourceOf(segments, edited);
   const editedTimestamp = sourceToEdited(timestamp);
   const seekFromPointer = (element: HTMLElement, clientX: number) => {
     const rect = element.getBoundingClientRect();
@@ -67,7 +52,7 @@ export function Timeline({ duration, timestamp, segments, playing, playbackReady
       <button onClick={onSplit} disabled={!active}><Scissors size={14} />Split</button>
       <button onClick={onTrimRight} disabled={!active}>Trim right<span className="trim-icon">]</span></button>
       <button className="danger" onClick={onDelete} disabled={!active || segments.length === 1}><Trash2 size={14} />Delete segment</button>
-      <small>Edits are non-destructive and applied when exporting.</small>
+      <small>Edits update the preview and exported clip.</small>
     </div>
   </section>;
 }

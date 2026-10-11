@@ -29,7 +29,7 @@ Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisi
 ```sh
 sudo apt update
 sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg
+  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libgstreamer1.0-dev gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 npm ci
 npm run desktop
 ```
@@ -137,3 +137,12 @@ Core tests compile production Rust modules directly with rustc, without Tauri/de
 
 See [VALIDATION.md](VALIDATION.md) for local results and limitations. CI checks native builds on Linux/Windows/macOS and real encoding on Linux. Platform installer and native interaction smoke tests remain necessary before shipping.
 # rlcut
+
+### Native preview engine
+
+Linux playback now uses an app-owned GStreamer decoder/audio clock and bounded
+binary frames, with live GPU/software composition. Scene edits do not transcode
+or restart playback. Import shows measured preparation progress and supports
+cancellation. See [editor architecture](docs/EDITOR_ARCHITECTURE.md).
+Windows/macOS native engine packaging is pending; the earlier installer instructions
+only describe the packaging infrastructure, not a working native preview there.

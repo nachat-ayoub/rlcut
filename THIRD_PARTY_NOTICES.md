@@ -7,3 +7,7 @@ FFmpeg/FFprobe binaries are **not included** here. If you bundle them, include n
 The configured encoder is libx264; an FFmpeg binary enabling it includes GPL-covered components. An LGPL-only build cannot satisfy the current export configuration. Do not bundle nonredistributable `--enable-nonfree` builds. Maintain notices matching the actual binaries.
 
 Authoritative reference: [FFmpeg license and legal considerations](https://ffmpeg.org/legal.html). Distributors must comply with the specific licenses of the builds they ship.
+
+Linux preview playback also bundles GStreamer and selected base, good, and libav
+plugins, plus the plugin scanner. Their Ubuntu package copyright notices and
+versions are included under `usr/share/rlcut/video-tool-notices` in the AppImage.

@@ -47,7 +47,8 @@ Use Ubuntu 24.04 or later. Install the native prerequisites once:
 ```sh
 sudo apt update
 sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3 curl
+  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3 curl \
+  libgstreamer1.0-dev gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 ```
 
 Install current stable Rust from [rustup](https://rustup.rs/) and Node 22.12+
@@ -193,3 +194,23 @@ On Linux, double-click the executable `dist/rlcut`. It contains the complete App
 On Windows, the intended end-user package is `rlcut-setup.exe`: open the installer once, then use its Start menu shortcut. The installer includes both video tools and the offline WebView2 installer. No FFmpeg or PATH setup is required. Developer packaging on a Windows machine uses `npm run desktop:build:windows`; it downloads and verifies a versioned Windows video-tool archive at build time and exports the installer to `dist/rlcut-setup.exe`. The manual GitHub Actions **Windows installer** workflow runs the same packaging process. Windows packaging has not been executed or runtime-tested from this Linux session.
 
 The local app-menu shortcut can be installed with `bash scripts/install-shortcut.sh` after building. It creates a user-owned `rlcut` entry using the generated launcher icon, with no sudo or system-wide changes. This provides a click-to-open option on desktops whose file manager does not launch executables on double-click.
+
+### Native playback and progress
+
+The Linux AppImage includes the native GStreamer playback engine, H.264/AAC
+plugins, and video tools. No codec installation or separate server is needed.
+Import shows preparation percentage, elapsed time, estimated remaining time, and
+Cancel. The first import prepares a cached SDR source; subsequent scene changes
+update live, without rendering the whole clip again.
+
+Playback displays the composed background, gameplay and boost layers. The native
+engine owns decoding, audio timing, seeking and timeline cuts; the UI receives
+bounded binary frames and uses GPU composition with a software fallback. Preview
+resolution adapts for responsiveness; export retains original media and output
+quality. See [editor architecture](docs/EDITOR_ARCHITECTURE.md).
+
+Windows/macOS native playback packaging is pending. The earlier Windows installer
+workflow has not been upgraded for this engine; do not distribute its output yet.
+
+`Failed to load module "canberra-gtk-module"` is an optional GTK desktop sound
+hook message; it is unrelated to decoding or exports.

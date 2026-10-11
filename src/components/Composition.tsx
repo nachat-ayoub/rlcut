@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
-import type { Layer, Preset, Preview, Video } from '../types';
+import type { Layer, Preset, Preview, Video, Segment } from '../types';
 import { clamp } from '../lib/presets';
-import { fileUrl } from '../lib/native';
+import { NativePlayback } from '../lib/native-playback';
+import { Compositor } from '../lib/compositor';
 import { corners, snapAxis, type Corner } from '../lib/geometry';
 type Gesture = {
   layer: 'gameplay' | 'boost';
@@ -12,10 +13,13 @@ type Gesture = {
   y: number;
   preset: Preset;
 };
-export function Composition({ video, playbackPath, proxyPreparing, preview, preset, before, guides, layer, setLayer, change, busy, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange }: {
+export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
+  sourceVersion?: number;
   playbackPath: string;
   proxyPreparing: boolean;
+  preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
+  segments?: Segment[];
   preview: Preview | null;
   preset: Preset;
   before: boolean;
@@ -23,44 +27,69 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
   layer: Layer | null;
   setLayer: (l: Layer | null) => void;
   change: (p: Preset) => void;
-  busy: boolean;
   importVideo: () => void;
   quality: number;
   playing: boolean;
   timestamp: number;
   onTimestamp: (value: number) => number | void;
   onPlayingChange: (value: boolean) => void;
+  onPlaybackError?: (error: unknown) => void;
+  onSourceFrame?: (source: string) => void;
 }) {
-  const canvas = useRef<HTMLDivElement>(null), player = useRef<HTMLVideoElement>(null), gesture = useRef<Gesture | null>(null);
+  const canvas = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null);
+  const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
+  const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [mediaReady, setMediaReady] = useState(false);
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing }; });
+  const [waiting, setWaiting] = useState(false);
+  const draw = useRef<() => void>(() => { });
+  const snapshot = useRef<() => void>(() => { });
   useEffect(() => {
-    if (!player.current || !video) return;
-    if (!playing || Math.abs(player.current.currentTime - timestamp) > .5)
-      if (Math.abs(player.current.currentTime - timestamp) > .04) player.current.currentTime = timestamp;
-  }, [timestamp, video, playing]);
+    const target = output.current;
+    if (!target || !playbackPath) return;
+    let compositor: Compositor;
+    try { compositor = new Compositor(target, forceCPU); }
+    catch { setForceCPU(true); return; }
+    renderer.current = compositor;
+    const lost = (event: Event) => { event.preventDefault(); setForceCPU(true); };
+    target.addEventListener('webglcontextlost', lost); target.addEventListener('compositionfallback', lost);
+    draw.current = () => {
+      const current = callbacks.current, source = player.current?.source;
+      if (!current.video || !source?.width) return;
+      try { compositor.draw(source, source.width, source.height, current.video, current.preset, current.quality, current.before, current.playing); }
+      catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
+    };
+    snapshot.current = () => {
+      const source = player.current?.source;
+      if (source?.width && !callbacks.current.playing) callbacks.current.onSourceFrame?.(source.toDataURL('image/jpeg', .92));
+    };
+    const observer = new ResizeObserver(() => draw.current()); observer.observe(target);
+    draw.current();
+    return () => { observer.disconnect(); target.removeEventListener('webglcontextlost', lost); target.removeEventListener('compositionfallback', lost); compositor.dispose(); renderer.current = null; };
+  }, [playbackPath, forceCPU, sourceVersion]);
   useEffect(() => {
-    const videoElement = player.current;
-    if (!videoElement) return;
-    let frame = 0, lastReport = -1;
-    if (playing) {
-      void videoElement.play().then(() => {
-        const update = () => {
-          const current = videoElement.currentTime;
-          if (Math.abs(current - lastReport) >= .04) {
-            lastReport = current;
-            const corrected = onTimestamp(current);
-            if (typeof corrected === 'number' && Math.abs(corrected - current) > .01) videoElement.currentTime = corrected;
-          }
-          if (!videoElement.paused && !videoElement.ended) frame = requestAnimationFrame(update);
-        };
-        frame = requestAnimationFrame(update);
-      }).catch(() => onPlayingChange(false));
-    } else videoElement.pause();
-    return () => cancelAnimationFrame(frame);
-  }, [playing, playbackPath, onTimestamp, onPlayingChange]);
+    if (!playbackPath || !video) return;
+    setMediaReady(false); setWaiting(true);
+    let disposed = false;
+    const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
+      frame: () => { if (disposed) return; setMediaReady(true); draw.current(); snapshot.current(); },
+      time: value => { if (!disposed) callbacks.current.onTimestamp(value); },
+      waiting: value => { if (!disposed) setWaiting(value); },
+      ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
+      error: error => { if (!disposed) { setMediaReady(false); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
+    });
+    player.current = session;
+    return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
+    // Native source lifetime is independent of scene and timeline changes.
+  }, [playbackPath, sourceVersion]);
+  useEffect(() => { player.current?.control({ segments }); }, [segments]);
+  useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
+  useEffect(() => { if (!playing) player.current?.seek(timestamp); }, [timestamp, playing]);
+  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, quality, video, playing]);
   function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function move(e: PointerEvent) {
     const g = gesture.current;
@@ -114,9 +143,9 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
         <div className="empty-icon">
           <VideoIcon size={34} strokeWidth={1.7} />
         </div>
-        <h2>Your next great clip starts here.</h2>
+        <h2>{proxyPreparing ? preparation ? `Preparing recording · ${Math.floor(preparation.percent)}%` : 'Reading your recording…' : 'Your next great clip starts here.'}</h2>
         <p>Drop a Rocket League recording anywhere,<br />or choose a video to get started.</p>
-        <button className="primary" onClick={importVideo}>Import gameplay</button>
+        <button className="primary" disabled={proxyPreparing} onClick={importVideo}>{proxyPreparing ? 'Preparing…' : 'Import gameplay'}</button>
         <small>MP4 · MOV · MKV · WEBM</small>
         <div className="layer-pills">
           <span>Blurred background</span>
@@ -127,21 +156,20 @@ export function Composition({ video, playbackPath, proxyPreparing, preview, pres
     </div>;
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className="preview-viewport">
-      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('img,video')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
-        {playbackPath && <video ref={player} className={`playback-video ${playing ? 'active' : ''}`} src={fileUrl(playbackPath)} preload="auto" playsInline onLoadedData={() => setMediaReady(true)} onCanPlay={() => setMediaReady(true)} onEnded={() => onPlayingChange(false)} />}
-        {preview && <img className={playing ? 'playback-hidden' : ''} src={before ? preview.source : preview.composed} alt={before ? 'Original source frame' : 'Rendered vertical composition'} draggable={false} />} {!preview && !playing && <div className="preview-loading">
-          <LoaderCircle className="spin" />Rendering your composition…</div>}{!playing && !before && guides && preview && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
-            {layer === target && <span>
-              <Move size={10} />
-              {target === 'gameplay' ? 'GAMEPLAY' : 'BOOST'}
-            </span>}
-            {layer === target && corners.map(corner => <button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize ${target} ${corner}`} onPointerDown={e => begin(e, target, corner)} />)}
-          </div>)}{busy && preview && <span className="render-badge">
-            <LoaderCircle size={12} className="spin" />Updating</span>}
+      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+        <canvas key={forceCPU ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} />
+        {!mediaReady && !proxyPreparing && <div className="preview-loading"><LoaderCircle className="spin" />Opening native decoder…</div>}
+        {!before && guides && (mediaReady || preview) && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
+          {layer === target && <span>
+            <Move size={10} />
+            {target === 'gameplay' ? 'GAMEPLAY' : 'BOOST'}
+          </span>}
+          {layer === target && corners.map(corner => <button key={corner} className={`resize-handle ${corner}`} aria-label={`Resize ${target} ${corner}`} onPointerDown={e => begin(e, target, corner)} />)}
+        </div>)}
         {snaps[0] !== null && <i className="snap-line vertical" style={{ left: `${snaps[0]! * 100}%` }} />}
         {snaps[1] !== null && <i className="snap-line horizontal" style={{ top: `${snaps[1]! * 100}%` }} />}
-        {proxyPreparing && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Preparing smooth preview…</span></div>}
-        {playing && !mediaReady && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Buffering preview…</span></div>}
+        {proxyPreparing && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>{preparation ? `Preparing video · ${Math.floor(preparation.percent)}%` : 'Reading recording…'}{preparation?.remaining != null && <small>About {Math.ceil(preparation.remaining)}s remaining</small>}<progress max="100" value={preparation?.percent} /></span></div>}
+        {waiting && mediaReady && !proxyPreparing && <div className="proxy-loading"><LoaderCircle className="spin" size={17} /><span>Seeking frame…</span></div>}
       </div></div>
     <span className="canvas-caption">
       <Scan size={12} />

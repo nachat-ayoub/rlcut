@@ -9,7 +9,7 @@ if [[ "$action" == doctor ]]; then
       case "$tool" in ffmpeg|ffprobe) "$tool" -version | head -n 1 ;; *) "$tool" --version ;; esac
     else echo "MISSING: $tool"; fi
   done
-  for lib in gtk+-3.0 webkit2gtk-4.1; do
+  for lib in gtk+-3.0 webkit2gtk-4.1 gstreamer-1.0; do
     pkg-config --modversion "$lib" 2>/dev/null || echo "MISSING: $lib (see RUNNING.md)"
   done
   exit
@@ -29,7 +29,7 @@ done
 node -e 'const [a,b]=process.versions.node.split(".").map(Number); if(a<22||(a===22&&b<12)) { console.error("Node 22.12+ required"); process.exit(1); }'
 node --input-type=module -e 'import {execFileSync} from "node:child_process"; const v=execFileSync("rustc",["--version"],{encoding:"utf8"}).match(/rustc (\d+)\.(\d+)/); if(!v||(+v[1]===1&&+v[2]<85)){console.error("Rust 1.85+ required; install current stable with rustup (see RUNNING.md)");process.exit(1)}'
 if [[ "$(uname -s)" == Linux ]]; then
-  for lib in gtk+-3.0 webkit2gtk-4.1; do
+  for lib in gtk+-3.0 webkit2gtk-4.1 gstreamer-1.0; do
     pkg-config --exists "$lib" 2>/dev/null || { echo "Missing $lib. See RUNNING.md for native setup or use RLCUT_ENV=docker." >&2; exit 1; }
   done
 fi
@@ -65,8 +65,10 @@ case "$action" in
       npm run desktop:build:native -- "$@"
     fi ;;
   check)
+    mkdir -p .checks
     npm run format:check
     npm run lint
+    cargo run --quiet --manifest-path src-tauri/Cargo.toml --example scene-fixtures > .checks/scene-fixtures.json
     npm test
     npm run test:environment
     npm run test:core
