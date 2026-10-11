@@ -1,6 +1,8 @@
 # rlcut
 
-Offline Rocket League vertical clip template maker, built with Tauri 2, Rust, React, TypeScript, Vite, Tailwind CSS, Lucide, FFmpeg and FFprobe. No accounts, uploads, watermarks, subscriptions or video playback timeline.
+Offline Rocket League vertical clip editor, built with Tauri 2, Rust, React,
+TypeScript, Vite, Tailwind CSS, Lucide, FFmpeg and FFprobe. No accounts, uploads,
+watermarks or subscriptions.
 
 ## Open the app
 
@@ -10,7 +12,22 @@ Windows: the installer packaging command produces `dist/rlcut-setup.exe`, includ
 
 ## Features
 
-Import MP4/MOV/MKV/WebM via native picker or drag/drop. Scrub a cached frame preview and compare before/after. Configure a blurred cover background, undistorted gameplay and a synchronized boost HUD crop. Select the HUD visually; move/resize source selection and composition layers; adjust independent width/height, **boost scale**, circular/elliptical masks and feathering. Manage immutable built-in and auto-saved custom presets; import/export validated JSON. Export full clips as H.264 MP4 with optional original audio converted to AAC, progress/ETA, cancellation and output opening.
+Import MP4/MOV/MKV/WebM via native picker or drag/drop and play an optimized
+native preview. The scrollable two-lane timeline supports zoom, seeking, split,
+ripple delete, reversible edge trimming and independent source-audio volume for
+every video segment; the music lane is reserved for the catalog workflow below.
+Configure a blurred cover background, undistorted gameplay and a synchronized
+boost HUD crop. Select the HUD visually; move/resize source selection and
+composition layers; adjust independent width/height, **boost scale**,
+circular/elliptical masks and feathering. Manage immutable built-in and
+auto-saved custom presets; import/export validated JSON. Export full clips as
+H.264 MP4 with edited source audio converted to AAC, progress/ETA, cancellation
+and output opening.
+
+Future music search, curated beat-drop/hit markers, marker-to-highlight snapping,
+offline caching and audio mixing are specified in the
+[edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md). The catalog backend
+will remain separate from the desktop application.
 
 The reference informed the lower-left circular HUD and blurred framing. Classic RL Short preserves the complete gameplay frame at 1× as required by the brief; increase gameplay scale (approximately 2.5× for 16:9 input) to approach the enlarged look in the reference. Screenshot captions and player controls are not added. The default boost crop is an initial guess and should be corrected for your HUD.
 
@@ -55,7 +72,10 @@ Browser mode explicitly reports that native video actions require the desktop ru
 2. Import gameplay. Scrub to a frame with a visible boost meter.
 3. Click **Select boost area**. Draw, move or resize the rectangle around the HUD and **Apply crop**; Cancel leaves the composition unchanged.
 4. Adjust background, gameplay and boost controls. Layer guides expose dragging and corner resize handles. **Boost scale** multiplies both configured dimensions; width and height also remain individually adjustable.
-5. Set resolution, FPS, folder and an `.mp4` filename, then export. Existing videos are never overwritten. Open the completed file/folder or cancel and discard incomplete output.
+5. In the timeline, drag a clip edge inward to trim or outward to restore source
+   footage. Split/ripple-delete clips, zoom or horizontally scroll the ruler, and
+   set selected video-clip volume to 0% when music should replace gameplay audio.
+6. Set resolution, FPS, folder and an `.mp4` filename, then export. Existing videos are never overwritten. Open the completed file/folder or cancel and discard incomplete output.
 
 Ctrl/⌘ O imports; Ctrl/⌘ E exports; ←/→ steps one nominal frame; Shift ←/→ jumps one second; Escape closes a dialog. VFR stepping uses nominal timestamps rather than indexed decoder frames.
 

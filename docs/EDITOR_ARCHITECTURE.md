@@ -33,8 +33,17 @@ and shared libraries. Windows/macOS native-engine packaging is pending; the old
 browser playback fallback has been removed. Those installers must not be published
 until the native engine/runtime has been packaged for those platforms.
 
-This revision was compiled and given a short native-frame smoke check with the
-provided recording. The full test suite and interactive acceptance testing were
-skipped at the user's request. Prior browser-player test results do not validate
-this native engine. Geometry fixtures and compositor/reference tools remain useful
-for future regression coverage.
+Timeline video segments store ordered source in/out points and per-segment gain.
+The editor packs them without gaps, so deletion and edge trims ripple later clips.
+Trim handles may expand only into unused source ranges between neighboring clips,
+which makes an accidental trim reversible without creating overlapping media.
+Native playback changes playbin gain at segment boundaries; export applies the
+same gain before audio concatenation. The second music lane is currently a UI
+scaffold for the separate catalog/marker plan in `MUSIC_LIBRARY_ROADMAP.md`.
+
+The native player has a 60 FPS smoke check, while the frontend/Rust suites cover
+timeline mapping, trim bounds, serialization, volume filters and the real export
+pipeline. Timeline selection, gain, zoom/overflow and reversible trim behavior
+also receive a local browser interaction pass. A final real-recording check in the
+packaged desktop app remains necessary because browser-only results do not validate
+the native decoder, speakers or the user's graphics driver together.

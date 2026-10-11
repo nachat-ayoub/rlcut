@@ -14,6 +14,7 @@ unsafe extern "C" {
     ) -> *mut c_void;
     fn rl_player_free(player: *mut c_void);
     fn rl_player_play(player: *mut c_void, playing: c_int) -> c_int;
+    fn rl_player_volume(player: *mut c_void, volume: f64);
     fn rl_player_seek(player: *mut c_void, time: f64) -> c_int;
     fn rl_player_position(player: *mut c_void) -> f64;
     fn rl_player_status(player: *mut c_void, error: *mut c_char, size: usize) -> c_int;
@@ -33,6 +34,7 @@ pub struct Player {
     sequence: u32,
     frame_time: f64,
     position: f64,
+    volume: f64,
     error: Option<String>,
 }
 #[cfg(not(target_os = "linux"))]
@@ -77,8 +79,10 @@ impl Player {
             sequence: 0,
             frame_time: time,
             position: time,
+            volume: -1.,
             error: None,
         };
+        player.update_volume(time);
         player.seek(time)?;
         Ok(player)
     }
@@ -99,6 +103,7 @@ impl Player {
         if unsafe { rl_player_seek(self.handle, time) } == 0 {
             return Err("Native player could not seek".into());
         }
+        self.update_volume(time);
         self.seeking = Some(time);
         self.ended = false;
         Ok(())
@@ -113,6 +118,19 @@ impl Player {
             }
         }
         None
+    }
+    fn update_volume(&mut self, time: f64) {
+        let volume = self
+            .segments
+            .iter()
+            .find(|segment| time >= segment.start && time < segment.end)
+            .or_else(|| self.segments.iter().find(|segment| time < segment.start))
+            .or_else(|| self.segments.last())
+            .map_or(1., |segment| segment.volume);
+        if (volume - self.volume).abs() > 0.001 {
+            unsafe { rl_player_volume(self.handle, volume) };
+            self.volume = volume;
+        }
     }
     pub fn segments(&mut self, segments: Vec<Segment>) -> Result<(), String> {
         self.segments = segments;
@@ -160,6 +178,7 @@ impl Player {
                 _ => {}
             }
         }
+        self.update_volume(time);
         let mut pts = 0.;
         let bytes = unsafe {
             rl_player_frame(

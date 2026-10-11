@@ -178,6 +178,11 @@ pub struct ExportOptions {
 pub struct Segment {
     pub start: f64,
     pub end: f64,
+    #[cfg_attr(feature = "serialization", serde(default = "default_volume"))]
+    pub volume: f64,
+}
+fn default_volume() -> f64 {
+    1.
 }
 impl Segment {
     pub fn validate_all(segments: &[Self], duration: f64) -> Result<(), String> {
@@ -192,6 +197,8 @@ impl Segment {
                 || segment.start < 0.
                 || segment.end <= segment.start
                 || segment.end > duration + 0.001
+                || !segment.volume.is_finite()
+                || !(0. ..=2.).contains(&segment.volume)
             {
                 return Err(
                     "Timeline segments must be ordered, non-overlapping, and inside the video"
@@ -239,6 +246,19 @@ mod tests {
             ..Preset::default()
         };
         assert!(p.validate().is_err());
+    }
+    #[test]
+    fn segment_volume_is_bounded() {
+        let mut segments = vec![Segment {
+            start: 0.,
+            end: 1.,
+            volume: 1.,
+        }];
+        Segment::validate_all(&segments, 1.).unwrap();
+        segments[0].volume = f64::NAN;
+        assert!(Segment::validate_all(&segments, 1.).is_err());
+        segments[0].volume = 2.01;
+        assert!(Segment::validate_all(&segments, 1.).is_err());
     }
     #[cfg(feature = "serialization")]
     #[test]

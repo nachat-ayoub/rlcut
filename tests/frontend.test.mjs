@@ -5,6 +5,7 @@ const { classic, copyPreset, clamp, time, duration, filename } = await import('.
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { createElement } = await import('react');
 const { Composition } = await import('../src/components/Composition.tsx');
+const { Timeline } = await import('../src/components/Timeline.tsx');
 
 test('duplicating presets preserves all values and isolates nested edits', () => {
   const original = structuredClone(classic), copy = copyPreset(classic);
@@ -35,6 +36,14 @@ test('empty workspace has an actionable import control', () => {
   const html = renderToStaticMarkup(createElement(Composition, {video:null, importVideo:()=>{}}));
   assert.match(html, /Import gameplay/);
   assert.match(html, /MP4/);
+});
+test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () => {
+  const html = renderToStaticMarkup(createElement(Timeline, {
+    duration: 20, timestamp: 2, segments: [{id:'a',start:0,end:8,volume:.5}], playing:false, playbackReady:true,
+    canUndo:false, canRedo:false, onSeek:()=>{}, onPlay:()=>{}, onSplit:()=>{}, onTrimLeft:()=>{}, onTrimRight:()=>{}, onTrim:()=>{}, onVolume:()=>{}, onDelete:()=>{}, onUndo:()=>{}, onRedo:()=>{},
+  }));
+  for (const label of ['Video','Music','Timeline zoom','Selected video clip volume','Trim or extend clip from left','Trim or extend clip from right']) assert.match(html, new RegExp(label));
+  assert.match(html, /50%/);
 });
 
 test('native drag/drop uses the Tauri 2 webview API and only imports dropped paths', async () => {
@@ -126,7 +135,7 @@ test('preview geometry agrees with native export fixtures', async t => {
 });
 
 test('edited clock seeks across cuts and never lands inside deleted source intervals', async () => {
-  const { editedToSource, sourceToEdited, editedDuration } = await import('../src/lib/timeline.ts');
+  const { editedToSource, sourceToEdited, editedDuration, trimBounds } = await import('../src/lib/timeline.ts');
   const segments = [{start:2,end:4}, {start:7,end:9}];
   assert.equal(editedDuration(segments),4);
   assert.equal(editedToSource(segments,0),2);
@@ -135,6 +144,8 @@ test('edited clock seeks across cuts and never lands inside deleted source inter
   assert.equal(editedToSource(segments,99),9);
   assert.equal(sourceToEdited(segments,5),2);
   assert.equal(sourceToEdited(segments,8),3);
+  assert.deepEqual(trimBounds(segments, 0, 12), { start: { min: 0, max: 3.95 }, end: { min: 2.05, max: 7 } });
+  assert.deepEqual(trimBounds(segments, 1, 12), { start: { min: 4, max: 8.95 }, end: { min: 7.05, max: 12 } });
 });
 
 
@@ -147,7 +158,7 @@ test('native commands send timeline ranges without editor IDs', async () => {
     const { invoke } = await import('../src/lib/native.ts');
     for (const command of ['playback_open', 'playback_control', 'start_export']) await invoke(command, { session: 7, segments });
     for (const call of calls) {
-      assert.deepEqual(call.args.segments, [{ start: 0, end: 12 }]);
+      assert.deepEqual(call.args.segments, [{ start: 0, end: 12, volume: 1 }]);
       assert.equal(call.args.session, 7);
     }
     assert.equal(segments[0].id, 'editor-only-id');

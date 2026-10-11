@@ -74,6 +74,7 @@ export type Segment = {
   id: string;
   start: number;
   end: number;
+  volume: number;
 };
 export type Init = {
   store: Store;

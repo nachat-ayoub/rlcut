@@ -97,6 +97,7 @@ pub fn run(b: Binaries, v: Video, p: Preset, o: ExportOptions, job: Arc<Job>) {
         vec![Segment {
             start: 0.,
             end: duration,
+            volume: 1.,
         }],
         o,
         job,
@@ -269,7 +270,11 @@ mod tests {
             },
             v,
             Preset::default(),
-            vec![Segment { start: 0., end: 3. }],
+            vec![Segment {
+                start: 0.,
+                end: 3.,
+                volume: 1.,
+            }],
             o,
             job.clone(),
         );
@@ -297,7 +302,11 @@ mod tests {
                 },
                 v,
                 Preset::default(),
-                vec![Segment { start: 0., end: 3. }],
+                vec![Segment {
+                    start: 0.,
+                    end: 3.,
+                    volume: 1.,
+                }],
                 o,
                 worker_job,
             )

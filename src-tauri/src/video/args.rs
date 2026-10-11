@@ -13,6 +13,7 @@ pub fn export_args(
         &[Segment {
             start: 0.,
             end: v.duration,
+            volume: 1.,
         }],
         o,
         out,
@@ -55,8 +56,8 @@ pub fn export_args_segments(
         graph.push_str(&format!(";[0:a:0]asplit={}{audio_splits}", segments.len()));
         for (index, segment) in segments.iter().enumerate() {
             graph.push_str(&format!(
-                ";[audio{index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS[a{index}]",
-                segment.start, segment.end
+                ";[audio{index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[a{index}]",
+                segment.start, segment.end, segment.volume
             ));
         }
         let audio_inputs = (0..segments.len())
@@ -175,6 +176,7 @@ mod tests {
         assert!(a.contains(&v.path));
         assert!(a.contains(&"[audio_edit]".into()));
         assert!(a.iter().any(|value| value.contains("apad[audio_edit]")));
+        assert!(a.iter().any(|value| value.contains("volume=1.0000")));
         assert!(a.contains(&"-shortest".into()));
         assert!(a.contains(&"cfr".into()));
         v.has_audio = false;

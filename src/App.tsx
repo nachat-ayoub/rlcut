@@ -101,6 +101,12 @@ export default function App() {
     const value = editedToSource(next, sourceToEdited(next, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [preset, segments]);
+  const editVolume = useCallback((id: string, volume: number) => {
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    if (undoStack.current.length > 100) undoStack.current.shift();
+    redoStack.current = [];
+    setSegments(segments.map(segment => segment.id === id ? { ...segment, volume } : segment));
+  }, [preset, segments]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
@@ -116,7 +122,7 @@ export default function App() {
       // Commit the source and its ready decoder together. A failed import
       // leaves the previous composition, timeline and undo history intact.
       setPlaying(false); setVideo(v); setProxyPath(proxy); setSourceVersion(version => version + 1);
-      setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration }]);
+      setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
       undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
       setPreview(null);
       playhead.current = 0; setTimestamp(0);
@@ -346,9 +352,11 @@ export default function App() {
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
       {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo}
-        onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end }] : [s])); }}
+        onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end, volume: s.volume }] : [s])); }}
         onTrimLeft={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp < active.end - .05) editSegments(segments.map(s => s.id === active.id ? { ...s, start: timestamp } : s)); }}
         onTrimRight={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp > active.start + .05) editSegments(segments.map(s => s.id === active.id ? { ...s, end: timestamp } : s)); }}
+        onTrim={(id, edge, value) => editSegments(segments.map(segment => segment.id === id ? { ...segment, [edge]: value } : segment))}
+        onVolume={editVolume}
         onDelete={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && segments.length > 1) { const next = segments.filter(s => s.id !== active.id); editSegments(next); } }} />}
       {video && <footer className="workspace-footer">
         <span>

@@ -19,6 +19,7 @@ fn main() {
         vec![Segment {
             start: 0.,
             end: 60.,
+            volume: 1.,
         }],
     )
     .expect("native player should open");

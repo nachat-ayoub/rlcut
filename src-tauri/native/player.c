@@ -88,6 +88,7 @@ int rl_player_play(Player *p, int playing) {
   p->playing=playing;
   return gst_element_set_state(p->pipeline,playing?GST_STATE_PLAYING:GST_STATE_PAUSED)!=GST_STATE_CHANGE_FAILURE;
 }
+void rl_player_volume(Player *p, double volume) { g_object_set(p->pipeline,"volume",volume,NULL); }
 int rl_player_seek(Player *p, double seconds) {
   gint64 duration=0;
   if(gst_element_query_duration(p->pipeline,GST_FORMAT_TIME,&duration)&&duration>0){double end=(double)duration/GST_SECOND-0.04;if(seconds<0.)seconds=0.;if(seconds>end)seconds=end;}
