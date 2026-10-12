@@ -18,9 +18,13 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
   if (!window.__TAURI__) throw new Error('Open rlcut with npm run desktop to use native video processing.');
   // IDs belong to the editor's UI/history. Rust accepts media ranges and gain,
   // consistently for playback open/control and export commands.
-  const payload = args && Array.isArray(args.segments)
+  const payload: Record<string, unknown> | undefined = args && Array.isArray(args.segments)
     ? { ...args, segments: args.segments.map(({ start, end, volume = 1 }: { start: number; end: number; volume?: number }) => ({ start, end, volume })) }
     : args;
+  if (payload?.music && typeof payload.music === 'object') {
+    const music = payload.music as { path: string; duration: number; segments: { start: number; end: number; volume: number }[] };
+    payload.music = { path: music.path, duration: music.duration, segments: music.segments.map(({ start, end, volume }) => ({ start, end, volume })) };
+  }
   return window.__TAURI__.core.invoke<T>(command, payload);
 }
 export async function onDrop(callback: (paths: string[]) => void): Promise<() => void> {

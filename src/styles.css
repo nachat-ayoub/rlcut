@@ -1557,3 +1557,8 @@ progress::-moz-progress-bar {
 .preparation-status button { border: 0; background: transparent; color: var(--muted); padding: 8px; }
 .preparation-status progress,.proxy-loading progress { width: 100%; height: 6px; accent-color: var(--accent); border: 0; border-radius: 5px; }
 .proxy-loading span { display: grid; gap: 7px; }.proxy-loading small { font-size: 11px; }
+
+.timeline-segment.music-segment { height:30px; background:#353650; border-color:#55517f; color:#cac8ed }
+.timeline-segment.music-segment.selected { border-color:#bf8fea; background:#414365 }
+.playhead.snapped { background:#6fe2df; box-shadow:0 0 7px #6fe2df88 }
+.playhead.snapped>span { background:#6fe2df }

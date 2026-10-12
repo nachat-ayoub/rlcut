@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, MusicFile, Preset, Preview, Progress, Segment, Store, Video } from './types';
+import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -24,8 +24,8 @@ export default function App() {
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
-  const [music, setMusic] = useState<MusicFile | null>(null);
-  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[] }>>([]);
+  const [music, setMusic] = useState<MusicTrack | null>(null);
+  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null }>>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0);
   const lastPresetEdit = useRef(0);
   const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
@@ -70,44 +70,40 @@ export default function App() {
   const change = useCallback((next: Preset) => {
     const now = performance.now();
     if (!lastPresetEdit.current || now - lastPresetEdit.current > 350) {
-      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
       if (undoStack.current.length > 100) undoStack.current.shift();
     }
     lastPresetEdit.current = now;
     redoStack.current = [];
     replacePreset(next);
-  }, [preset, segments, replacePreset]);
-  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[] }) => {
+  }, [preset, segments, music, replacePreset]);
+  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[]; music: MusicTrack | null }) => {
     lastPresetEdit.current = 0;
     replacePreset(snapshot.preset);
     setSegments(structuredClone(snapshot.segments));
+    setMusic(structuredClone(snapshot.music));
     const value = editedToSource(snapshot.segments, sourceToEdited(snapshot.segments, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [replacePreset]);
   const undo = useCallback(() => {
     const snapshot = undoStack.current.pop(); if (!snapshot) return;
-    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
     restoreSnapshot(snapshot);
-  }, [preset, segments, restoreSnapshot]);
+  }, [preset, segments, music, restoreSnapshot]);
   const redo = useCallback(() => {
     const snapshot = redoStack.current.pop(); if (!snapshot) return;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
     restoreSnapshot(snapshot);
-  }, [preset, segments, restoreSnapshot]);
-  const editSegments = useCallback((next: Segment[]) => {
+  }, [preset, segments, music, restoreSnapshot]);
+  const editSegments = useCallback((next: Segment[], preservePlayback = false) => {
     lastPresetEdit.current = 0;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
     if (undoStack.current.length > 100) undoStack.current.shift();
     redoStack.current = []; setSegments(next);
+    if (preservePlayback) return;
     const value = editedToSource(next, sourceToEdited(next, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
-  }, [preset, segments]);
-  const editVolume = useCallback((id: string, volume: number) => {
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments) });
-    if (undoStack.current.length > 100) undoStack.current.shift();
-    redoStack.current = [];
-    setSegments(segments.map(segment => segment.id === id ? { ...segment, volume } : segment));
-  }, [preset, segments]);
+  }, [preset, segments, music]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
@@ -156,12 +152,19 @@ export default function App() {
   const importMusic = useCallback(async () => {
     try {
       const selected = await invoke<MusicFile | null>('pick_music');
-      if (selected) setMusic(selected);
+      if (selected) {
+        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+        if (undoStack.current.length > 100) undoStack.current.shift();
+        lastPresetEdit.current = 0;
+        redoStack.current = [];
+        setMusic({ ...selected, segments: [{ id: crypto.randomUUID(), start: 0, end: selected.duration, volume: 1 }] });
+        setPlaying(false);
+      }
     }
     catch (e) {
       report(e);
     }
-  }, [report]);
+  }, [report, preset, segments, music]);
   useEffect(() => {
     let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPath(paths[0])).then(fn => {
       if (disposed)
@@ -233,7 +236,7 @@ export default function App() {
           return;
         setOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, options: { quality, fps, folder, filename: outputName } });
+      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, boostIntro: store.settings.boostIntro, options: { quality, fps, folder, filename: outputName } });
       setProgress(p);
     }
     catch (e) {
@@ -242,7 +245,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, report]);
+  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.boostIntro, report]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -361,14 +364,20 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
       {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
-        onSplit={() => { const active = segments.find(s => timestamp > s.start + .05 && timestamp < s.end - .05); if (active) editSegments(segments.flatMap(s => s.id === active.id ? [{ ...s, end: timestamp }, { id: crypto.randomUUID(), start: timestamp, end: s.end, volume: s.volume }] : [s])); }}
-        onTrimLeft={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp < active.end - .05) editSegments(segments.map(s => s.id === active.id ? { ...s, start: timestamp } : s)); }}
-        onTrimRight={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && timestamp > active.start + .05) editSegments(segments.map(s => s.id === active.id ? { ...s, end: timestamp } : s)); }}
-        onTrim={(id, edge, value) => editSegments(segments.map(segment => segment.id === id ? { ...segment, [edge]: value } : segment))}
-        onVolume={editVolume}
-        onDelete={() => { const active = segments.find(s => timestamp >= s.start && timestamp <= s.end); if (active && segments.length > 1) { const next = segments.filter(s => s.id !== active.id); editSegments(next); } }} />}
+        onEdit={(track, next) => {
+          const previous = track === 'video' ? segments : music?.segments ?? [];
+          const volumeOnly = next.length === previous.length && next.every((s, index) => s.id === previous[index].id && s.start === previous[index].start && s.end === previous[index].end);
+          if (track === 'video') { editSegments(next, volumeOnly); return; }
+          if (!music) return;
+          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+          if (undoStack.current.length > 100) undoStack.current.shift();
+          lastPresetEdit.current = 0;
+          redoStack.current = [];
+          setMusic({ ...music, segments: next });
+          if (!volumeOnly) setPlaying(false);
+        }} />}
       {video && <footer className="workspace-footer">
         <span>
           <span className="status-dot" />Offline by design</span>
@@ -451,6 +460,10 @@ export default function App() {
             </label>
             <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={[{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
+          </div>
+          <div className="setting-toggle">
+            <div><strong>Boost entrance animation</strong><small>Slide in from the left over the first 0.5 seconds. Saved for future exports.</small></div>
+            <input className="switch" type="checkbox" aria-label="Boost entrance animation" checked={store.settings.boostIntro} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, boostIntro: e.target.checked } }))} />
           </div>
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-short.mp4" />
           </label>

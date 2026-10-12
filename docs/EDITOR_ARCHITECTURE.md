@@ -38,8 +38,17 @@ The editor packs them without gaps, so deletion and edge trims ripple later clip
 Trim handles may expand only into unused source ranges between neighboring clips,
 which makes an accidental trim reversible without creating overlapping media.
 Native playback changes playbin gain at segment boundaries; export applies the
-same gain before audio concatenation. The second music lane is currently a UI
-scaffold for the separate catalog/marker plan in `MUSIC_LIBRARY_ROADMAP.md`.
+same gain before audio concatenation. The music lane stores independent ordered source intervals and gain. It supports
+the same trim, split, ripple-delete, selection and history controls as video.
+A second native audio pipeline follows the video clock in edited time, including
+seeks and cuts. FFmpeg trims/joins both lanes, mixes their gains and limits peaks.
+Deleting music never changes the video intervals. The catalog/marker plan remains
+in `MUSIC_LIBRARY_ROADMAP.md`.
+
+The saved export entrance option moves the boost only on X, from a bounding box
+5 output pixels left of the canvas to the configured position with cubic ease-in
+over the first 0.5 seconds. Video cuts join before composition, so entrance timing
+starts at the edited output origin even when the first source interval is trimmed.
 
 The native player has a 60 FPS smoke check, while the frontend/Rust suites cover
 timeline mapping, trim bounds, serialization, volume filters and the real export

@@ -1,5 +1,5 @@
 import { invoke } from './native';
-import type { Segment } from '../types';
+import type { MusicTrack, Segment } from '../types';
 let nextSession = Date.now() * 1000;
 type Callbacks = {
   frame: (source: NativeFrame, time: number) => void;
@@ -60,7 +60,7 @@ export class NativePlayback {
     // contain only the 32-byte header; image payloads remain frame-bounded.
     if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), Math.max(0, 1000 / 120 - (performance.now() - started)));
   }
-  control(values: { playing?: boolean; time?: number; segments?: Segment[] }) {
+  control(values: { playing?: boolean; time?: number; segments?: Segment[]; music?: MusicTrack }) {
     if (this.disposed) return;
     this.commands = this.commands.then(async () => {
       if (!this.disposed) await invoke<void>('playback_control', { session: this.session, ...values });

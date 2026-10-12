@@ -1,6 +1,6 @@
 //! Native-clock playback with a single bounded decoded-frame queue. The UI
 //! consumes binary RGBA packets and never starts a browser media decoder.
-use crate::model::Segment;
+use crate::model::{MusicTrack, Segment};
 #[cfg(target_os = "linux")]
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 #[cfg(target_os = "linux")]
@@ -36,6 +36,7 @@ pub struct Player {
     position: f64,
     volume: f64,
     error: Option<String>,
+    music: Option<MusicPlayer>,
 }
 #[cfg(not(target_os = "linux"))]
 pub struct Player;
@@ -81,10 +82,53 @@ impl Player {
             position: time,
             volume: -1.,
             error: None,
+            music: None,
         };
         player.update_volume(time);
         player.seek(time)?;
         Ok(player)
+    }
+    pub fn music(&mut self, track: MusicTrack) -> Result<(), String> {
+        if track.segments.is_empty() {
+            self.music = None;
+            return Ok(());
+        }
+        track.validate()?;
+        let mut seek = true;
+        if let Some(music) = self.music.as_mut().filter(|m| m.track.path == track.path) {
+            seek = music.track.segments.len() != track.segments.len()
+                || music
+                    .track
+                    .segments
+                    .iter()
+                    .zip(&track.segments)
+                    .any(|(a, b)| a.start != b.start || a.end != b.end);
+            music.track = track;
+        } else {
+            self.music = Some(MusicPlayer::open(track)?);
+        }
+        self.sync_music(seek)
+    }
+    fn sync_music(&mut self, force_seek: bool) -> Result<(), String> {
+        if self
+            .music
+            .as_ref()
+            .is_none_or(|m| !force_seek && m.last_sync.elapsed().as_millis() < 50)
+        {
+            return Ok(());
+        }
+        let source = unsafe { rl_player_position(self.handle) };
+        let mut edited = 0.;
+        for segment in &self.segments {
+            edited += (source - segment.start).clamp(0., segment.end - segment.start);
+            if source < segment.end {
+                break;
+            }
+        }
+        if let Some(music) = self.music.as_mut() {
+            music.sync(edited, self.playing && self.seeking.is_none(), force_seek)?;
+        }
+        Ok(())
     }
     pub fn play(&mut self, playing: bool) -> Result<(), String> {
         if unsafe { rl_player_play(self.handle, playing as c_int) } == 0 {
@@ -92,6 +136,7 @@ impl Player {
         }
         self.playing = playing;
         self.ended = false;
+        self.sync_music(true)?;
         Ok(())
     }
     pub fn seek(&mut self, time: f64) -> Result<(), String> {
@@ -106,6 +151,7 @@ impl Player {
         self.update_volume(time);
         self.seeking = Some(time);
         self.ended = false;
+        self.sync_music(true)?;
         Ok(())
     }
     fn kept(&self, time: f64) -> Option<f64> {
@@ -203,6 +249,7 @@ impl Player {
             unsafe { rl_frame_free(bytes) };
         }
         self.position = time;
+        self.sync_music(false)?;
         Ok(())
     }
     pub fn pump(&mut self) {
@@ -244,6 +291,88 @@ impl Player {
     }
 }
 #[cfg(target_os = "linux")]
+struct MusicPlayer {
+    handle: *mut c_void,
+    track: MusicTrack,
+    playing: bool,
+    last_sync: std::time::Instant,
+    segment: Option<usize>,
+}
+#[cfg(target_os = "linux")]
+impl MusicPlayer {
+    fn open(track: MusicTrack) -> Result<Self, String> {
+        let file = CString::new(track.path.as_str()).map_err(|_| "Invalid music path")?;
+        let mut error = [0i8; 1024];
+        let handle =
+            unsafe { rl_player_open(file.as_ptr(), 2, 2, error.as_mut_ptr(), error.len()) };
+        if handle.is_null() {
+            return Err(unsafe { CStr::from_ptr(error.as_ptr()) }
+                .to_string_lossy()
+                .into());
+        }
+        Ok(Self {
+            handle,
+            track,
+            playing: false,
+            segment: None,
+            last_sync: std::time::Instant::now() - std::time::Duration::from_secs(1),
+        })
+    }
+    fn sync(&mut self, edited: f64, playing: bool, force: bool) -> Result<(), String> {
+        self.last_sync = std::time::Instant::now();
+        let mut offset = 0.;
+        let target = self
+            .track
+            .segments
+            .iter()
+            .enumerate()
+            .find_map(|(index, s)| {
+                let length = s.end - s.start;
+                let result = if edited >= offset && edited < offset + length {
+                    Some((index, s.start + edited - offset, s.volume))
+                } else {
+                    None
+                };
+                offset += length;
+                result
+            });
+        let mut error = [0i8; 1024];
+        if unsafe { rl_player_status(self.handle, error.as_mut_ptr(), error.len()) } < 0 {
+            return Err(unsafe { CStr::from_ptr(error.as_ptr()) }
+                .to_string_lossy()
+                .into());
+        }
+        let should_play = playing && target.is_some();
+        if let Some((index, time, volume)) = target {
+            unsafe {
+                rl_player_volume(self.handle, volume);
+            }
+            let current = unsafe { rl_player_position(self.handle) };
+            if force || self.segment != Some(index) || (current - time).abs() > 0.15 {
+                if unsafe { rl_player_seek(self.handle, time) } == 0 {
+                    return Err("Could not seek music".into());
+                }
+            }
+        }
+        self.segment = target.map(|(index, _, _)| index);
+        if self.playing != should_play {
+            if unsafe { rl_player_play(self.handle, should_play as c_int) } == 0 {
+                return Err("Could not play music".into());
+            }
+            self.playing = should_play;
+        }
+        Ok(())
+    }
+}
+#[cfg(target_os = "linux")]
+impl Drop for MusicPlayer {
+    fn drop(&mut self) {
+        unsafe {
+            rl_player_free(self.handle);
+        }
+    }
+}
+#[cfg(target_os = "linux")]
 impl Drop for Player {
     fn drop(&mut self) {
         unsafe { rl_player_free(self.handle) };
@@ -251,6 +380,9 @@ impl Drop for Player {
 }
 #[cfg(not(target_os = "linux"))]
 impl Player {
+    pub fn music(&mut self, _: MusicTrack) -> Result<(), String> {
+        Err("Native playback unavailable".into())
+    }
     pub fn open(_: &str, _: u32, _: u32, _: f64, _: Vec<Segment>) -> Result<Self, String> {
         Err("Native playback packaging is currently available on Linux".into())
     }

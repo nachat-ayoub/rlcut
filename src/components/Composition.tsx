@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
-import type { Layer, Preset, Preview, Video, Segment } from '../types';
+import type { Layer, Preset, Preview, Video, Segment, MusicTrack } from '../types';
 import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
 import { Compositor } from '../lib/compositor';
@@ -13,13 +13,14 @@ type Gesture = {
   y: number;
   preset: Preset;
 };
-export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   playbackPath: string;
   proxyPreparing: boolean;
   preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
   segments?: Segment[];
+  music?: MusicTrack | null;
   preview: Preview | null;
   preset: Preset;
   before: boolean;
@@ -86,7 +87,10 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
   }, [playbackPath, sourceVersion]);
-  useEffect(() => { player.current?.control({ segments }); }, [segments]);
+  useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion]);
+  useEffect(() => {
+    player.current?.control({ music: music ?? { path: '', name: '', duration: 1, segments: [] } });
+  }, [music, playbackPath, sourceVersion]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
   useEffect(() => { if (!playing) player.current?.seek(timestamp); }, [timestamp, playing]);
   useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, quality, video, playing]);

@@ -177,6 +177,31 @@ pub struct MusicFile {
     feature = "serialization",
     serde(rename_all = "camelCase", deny_unknown_fields)
 )]
+pub struct MusicTrack {
+    pub path: String,
+    pub duration: f64,
+    pub segments: Vec<Segment>,
+}
+impl MusicTrack {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.duration.is_finite()
+            || self.duration <= 0.
+            || !std::path::Path::new(&self.path).is_file()
+        {
+            return Err("Music file is missing or invalid".into());
+        }
+        if !self.segments.is_empty() {
+            Segment::validate_all(&self.segments, self.duration)?;
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
 pub struct ExportOptions {
     pub quality: u32,
     pub fps: u32,

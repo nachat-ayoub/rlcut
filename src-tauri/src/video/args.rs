@@ -1,5 +1,5 @@
 use super::geometry::filter_graph;
-use crate::model::{ExportOptions, Preset, Segment, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, Video};
 use std::path::Path;
 pub fn export_args(
     v: &Video,
@@ -26,16 +26,27 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
+    export_args_timeline(v, p, segments, o, out, None, false)
+}
+pub fn export_args_timeline(
+    v: &Video,
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    boost_intro: bool,
+) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
     if !v.duration.is_finite() || v.duration <= 0. {
         return Err("Invalid video duration".into());
     }
     Segment::validate_all(segments, v.duration)?;
-    let mut graph = filter_graph(v, p, w, h)?;
+    let mut graph = String::new();
     let split_outputs = (0..segments.len())
         .map(|i| format!("[edit{i}]"))
         .collect::<String>();
-    graph.push_str(&format!(";[out]split={}{split_outputs}", segments.len()));
+    graph.push_str(&format!("[0:v:0]split={}{split_outputs}", segments.len()));
     for (index, segment) in segments.iter().enumerate() {
         graph.push_str(&format!(
             ";[edit{index}]trim=start={:.6}:end={:.6},setpts=PTS-STARTPTS[v{index}]",
@@ -46,9 +57,22 @@ pub fn export_args_segments(
         .map(|i| format!("[v{i}]"))
         .collect::<String>();
     graph.push_str(&format!(
-        ";{video_inputs}concat=n={}:v=1:a=0[out_edit]",
+        ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
         segments.len()
     ));
+    let mut composition = filter_graph(v, p, w, h)?
+        .replace("[0:v:0]", "[source_edit]")
+        .replace("[out]", "[out_edit]");
+    if boost_intro && p.boost.enabled {
+        let b = super::geometry::geometry(v, p, w, h)?.boost;
+        let hidden = -(b.width as i32) - 5;
+        composition = composition.replace(
+            &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
+            &format!("[base][hud]overlay=x='if(lt(t,0.5),{hidden}+({}-({hidden}))*pow(t/0.5,3),{})':y={}:eval=frame", b.x, b.x, b.y),
+        ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
+    }
+    graph.push(';');
+    graph.push_str(&composition);
     if v.has_audio {
         let audio_splits = (0..segments.len())
             .map(|i| format!("[audio{i}]"))
@@ -67,6 +91,32 @@ pub fn export_args_segments(
             ";{audio_inputs}concat=n={}:v=0:a=1[audio_join];[audio_join]apad[audio_edit]",
             segments.len()
         ));
+    }
+    let music = music.filter(|m| !m.segments.is_empty());
+    if let Some(music) = music {
+        music.validate()?;
+        let outputs = (0..music.segments.len())
+            .map(|i| format!("[ms{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(";[1:a:0]asplit={}{outputs}", music.segments.len()));
+        for (i, s) in music.segments.iter().enumerate() {
+            graph.push_str(&format!(
+                ";[ms{i}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[mt{i}]",
+                s.start, s.end, s.volume
+            ));
+        }
+        let inputs = (0..music.segments.len())
+            .map(|i| format!("[mt{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(
+            ";{inputs}concat=n={}:v=0:a=1,apad[music_edit]",
+            music.segments.len()
+        ));
+        if v.has_audio {
+            graph.push_str(";[audio_edit][music_edit]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]");
+        } else {
+            graph.push_str(";[music_edit]alimiter=limit=0.95:level=0:attack=1[audio_mix]");
+        }
     }
     let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
     let mut args = vec![
@@ -87,11 +137,22 @@ pub fn export_args_segments(
         "-map".into(),
         "[out_edit]".into(),
     ];
-    if v.has_audio {
+    if let Some(music) = music {
+        let index = args
+            .iter()
+            .position(|value| value == "-filter_complex")
+            .unwrap();
+        args.splice(index..index, ["-i".into(), music.path.clone()]);
+    }
+    if v.has_audio || music.is_some() {
         args.extend(
             [
                 "-map",
-                "[audio_edit]",
+                if music.is_some() {
+                    "[audio_mix]"
+                } else {
+                    "[audio_edit]"
+                },
                 "-c:a",
                 "aac",
                 "-b:a",

@@ -47,6 +47,7 @@ export type Settings = {
   outputFolder: string;
   defaultPreset: string;
   waitForPreview: boolean;
+  boostIntro: boolean;
 };
 export type Store = {
   version: number;
@@ -81,6 +82,7 @@ export type MusicFile = {
   name: string;
   duration: number;
 };
+export type MusicTrack = MusicFile & { segments: Segment[] };
 export type Init = {
   store: Store;
   binaries: {

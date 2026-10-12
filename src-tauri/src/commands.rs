@@ -1,5 +1,5 @@
 use crate::{
-    model::{ExportOptions, MusicFile, Preset, Segment, Video},
+    model::{ExportOptions, MusicFile, MusicTrack, Preset, Segment, Video},
     presets,
     settings::{self, Store},
     video::{
@@ -146,7 +146,10 @@ pub async fn pick_music(state: State<'_, AppState>) -> Result<Option<MusicFile>,
     let binaries = state.binaries.clone();
     blocking(move || {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"])
+            .add_filter(
+                "Audio",
+                &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"],
+            )
             .pick_file()
         else {
             return Ok(None);
@@ -239,7 +242,12 @@ pub fn start_export(
     preset: Preset,
     segments: Vec<Segment>,
     options: ExportOptions,
+    music: Option<MusicTrack>,
+    boost_intro: Option<bool>,
 ) -> Result<Progress, String> {
+    if let Some(m) = &music {
+        m.validate()?;
+    }
     preset.validate()?;
     state.binaries.ffmpeg()?;
     let v = state.video(&path)?;
@@ -255,8 +263,18 @@ pub fn start_export(
     let result = job.snapshot()?;
     *slot = Some(job.clone());
     let b = state.binaries.clone();
-    let worker =
-        std::thread::spawn(move || export::run_segments(b, v, preset, segments, options, job));
+    let worker = std::thread::spawn(move || {
+        export::run_timeline(
+            b,
+            v,
+            preset,
+            segments,
+            options,
+            job,
+            music,
+            boost_intro.unwrap_or(false),
+        )
+    });
     *state
         .worker
         .lock()
@@ -421,6 +439,7 @@ pub async fn playback_control(
     playing: Option<bool>,
     time: Option<f64>,
     segments: Option<Vec<Segment>>,
+    music: Option<MusicTrack>,
 ) -> Result<(), String> {
     if time.is_some_and(|t| !t.is_finite() || t < 0.) {
         return Err("Invalid playback position".into());
@@ -435,6 +454,9 @@ pub async fn playback_control(
             return Ok(());
         }
         if let Some(p) = slot.player.as_mut() {
+            if let Some(music) = music {
+                p.music(music)?;
+            }
             if let Some(segments) = segments {
                 p.segments(segments)?;
             }

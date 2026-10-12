@@ -1,8 +1,8 @@
 use super::{
-    args::{export_args_segments, progress_seconds},
+    args::{export_args_timeline, progress_seconds},
     binaries::{command, Binaries},
 };
-use crate::model::{ExportOptions, Preset, Segment, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, Video};
 #[cfg(feature = "serialization")]
 use serde::Serialize;
 use std::{
@@ -111,6 +111,18 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
+    run_timeline(b, v, p, segments, o, job, None, false)
+}
+pub fn run_timeline(
+    b: Binaries,
+    v: Video,
+    p: Preset,
+    segments: Vec<Segment>,
+    o: ExportOptions,
+    job: Arc<Job>,
+    music: Option<MusicTrack>,
+    boost_intro: bool,
+) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
         Ok(s) => s,
@@ -120,7 +132,8 @@ pub fn run_segments(
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
-        let args = export_args_segments(&v, &p, &segments, &o, &partial)?;
+        let args =
+            export_args_timeline(&v, &p, &segments, &o, &partial, music.as_ref(), boost_intro)?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
