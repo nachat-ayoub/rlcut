@@ -45,9 +45,16 @@ seeks and cuts. FFmpeg trims/joins both lanes, mixes their gains and limits peak
 Deleting music never changes the video intervals. The catalog/marker plan remains
 in `MUSIC_LIBRARY_ROADMAP.md`.
 
+Each lane has one editable peak marker stored in source time, so ripple edits and
+restored source ranges keep the marker attached to its media. Clip edges snap to
+the playhead, both lane markers, and every visible video/music clip boundary.
+Dragging a clip body left trims its source start; dragging right restores it while
+the right edge stays anchored. During that gesture the clip's peak can snap to the
+other lane's peak, providing direct gameplay-to-beat synchronization.
+
 The saved export entrance option moves the boost only on X, from a bounding box
-5 output pixels left of the canvas to the configured position with cubic ease-in
-over the first 0.5 seconds. Video cuts join before composition, so entrance timing
+5 output pixels left of the canvas to the configured position with cubic ease-in-out
+over the first 0.8 seconds. Video cuts join before composition, so entrance timing
 starts at the edited output origin even when the first source interval is trimmed.
 
 The native player has a 60 FPS smoke check, while the frontend/Rust suites cover

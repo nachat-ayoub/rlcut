@@ -837,12 +837,14 @@ h1 {
   border:1px solid #674b7a;
   border-radius:4px;
   overflow:visible;
-  touch-action:none
+  touch-action:none;
+  cursor:grab
 }
 .timeline-segment.active { background:#533c68 }
 .timeline-segment.selected { border-color:#bf8fea; box-shadow:inset 0 0 0 1px #bf8fea55,0 0 0 1px #110e15 }
 .timeline-segment.selected { z-index:3 }
 .timeline-segment.trimming { box-shadow:inset 0 0 0 1px #d7b2f455,0 0 8px #9f71c944 }
+.timeline-segment.trimming { cursor:ew-resize }
 .clip-fill {
   position:absolute;
   inset:0 7px;
@@ -889,6 +891,28 @@ h1 {
   pointer-events:none
 }
 .playhead>span { position:absolute; top:0; left:-4px; width:9px; height:7px; border-radius:2px 2px 4px 4px; background:#dfbaff; box-shadow:0 0 7px #bd83ef88 }
+.track-marker {
+  position:absolute;
+  z-index:6;
+  top:0;
+  bottom:0;
+  width:15px;
+  min-width:15px;
+  padding:1px 0 0;
+  transform:translateX(-50%);
+  align-items:flex-start;
+  border:0;
+  border-radius:0;
+  color:#f0b56d;
+  background:transparent;
+  cursor:ew-resize;
+  touch-action:none
+}
+.track-marker:hover { color:#ffd49d; background:transparent }
+.track-marker::after { content:''; position:absolute; top:11px; bottom:0; left:7px; border-left:1px dashed currentColor }
+.track-marker.music { color:#72d2c2 }
+.track-marker.snapped { color:#6fe2df; filter:drop-shadow(0 0 4px #6fe2df) }
+.timeline-mixer button.active { color:#e2b475; background:#2b242d }
 .edit-actions { margin-top:6px }
 .edit-actions small { margin-left:auto; color:#6f6478; font-size:8px }
 .edit-actions .danger { color:#c98fa2 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, Video } from './types';
+import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -25,7 +25,8 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
-  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null }>>([]);
+  const [markers, setMarkers] = useState<TrackMarkers>({ video: null, music: null });
+  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0);
   const lastPresetEdit = useRef(0);
   const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
@@ -70,40 +71,41 @@ export default function App() {
   const change = useCallback((next: Preset) => {
     const now = performance.now();
     if (!lastPresetEdit.current || now - lastPresetEdit.current > 350) {
-      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
       if (undoStack.current.length > 100) undoStack.current.shift();
     }
     lastPresetEdit.current = now;
     redoStack.current = [];
     replacePreset(next);
-  }, [preset, segments, music, replacePreset]);
-  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[]; music: MusicTrack | null }) => {
+  }, [preset, segments, music, markers, replacePreset]);
+  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }) => {
     lastPresetEdit.current = 0;
     replacePreset(snapshot.preset);
     setSegments(structuredClone(snapshot.segments));
     setMusic(structuredClone(snapshot.music));
+    setMarkers(structuredClone(snapshot.markers));
     const value = editedToSource(snapshot.segments, sourceToEdited(snapshot.segments, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [replacePreset]);
   const undo = useCallback(() => {
     const snapshot = undoStack.current.pop(); if (!snapshot) return;
-    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
     restoreSnapshot(snapshot);
-  }, [preset, segments, music, restoreSnapshot]);
+  }, [preset, segments, music, markers, restoreSnapshot]);
   const redo = useCallback(() => {
     const snapshot = redoStack.current.pop(); if (!snapshot) return;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
     restoreSnapshot(snapshot);
-  }, [preset, segments, music, restoreSnapshot]);
+  }, [preset, segments, music, markers, restoreSnapshot]);
   const editSegments = useCallback((next: Segment[], preservePlayback = false) => {
     lastPresetEdit.current = 0;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
     if (undoStack.current.length > 100) undoStack.current.shift();
     redoStack.current = []; setSegments(next);
     if (preservePlayback) return;
     const value = editedToSource(next, sourceToEdited(next, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
-  }, [preset, segments, music]);
+  }, [preset, segments, music, markers]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
@@ -121,6 +123,7 @@ export default function App() {
       setPlaying(false); setVideo(v); setProxyPath(proxy); setSourceVersion(version => version + 1);
       setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
       setMusic(null);
+      setMarkers({ video: null, music: null });
       undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
       setPreview(null);
       playhead.current = 0; setTimestamp(0);
@@ -153,18 +156,19 @@ export default function App() {
     try {
       const selected = await invoke<MusicFile | null>('pick_music');
       if (selected) {
-        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
         if (undoStack.current.length > 100) undoStack.current.shift();
         lastPresetEdit.current = 0;
         redoStack.current = [];
         setMusic({ ...selected, segments: [{ id: crypto.randomUUID(), start: 0, end: selected.duration, volume: 1 }] });
+        setMarkers(current => ({ ...current, music: null }));
         setPlaying(false);
       }
     }
     catch (e) {
       report(e);
     }
-  }, [report, preset, segments, music]);
+  }, [report, preset, segments, music, markers]);
   useEffect(() => {
     let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPath(paths[0])).then(fn => {
       if (disposed)
@@ -365,13 +369,20 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
+      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
+        onMarker={(track, value) => {
+          if (markers[track] === value) return;
+          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+          if (undoStack.current.length > 100) undoStack.current.shift();
+          lastPresetEdit.current = 0; redoStack.current = [];
+          setMarkers(current => ({ ...current, [track]: value }));
+        }}
         onEdit={(track, next) => {
           const previous = track === 'video' ? segments : music?.segments ?? [];
           const volumeOnly = next.length === previous.length && next.every((s, index) => s.id === previous[index].id && s.start === previous[index].start && s.end === previous[index].end);
           if (track === 'video') { editSegments(next, volumeOnly); return; }
           if (!music) return;
-          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music) });
+          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
           if (undoStack.current.length > 100) undoStack.current.shift();
           lastPresetEdit.current = 0;
           redoStack.current = [];
@@ -462,7 +473,7 @@ export default function App() {
             </label>
           </div>
           <div className="setting-toggle">
-            <div><strong>Boost entrance animation</strong><small>Slide in from the left over the first 0.5 seconds. Saved for future exports.</small></div>
+            <div><strong>Boost entrance animation</strong><small>Smoothly ease in from the left over the first 0.8 seconds. Saved for future exports.</small></div>
             <input className="switch" type="checkbox" aria-label="Boost entrance animation" checked={store.settings.boostIntro} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, boostIntro: e.target.checked } }))} />
           </div>
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-short.mp4" />

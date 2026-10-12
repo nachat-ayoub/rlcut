@@ -68,7 +68,7 @@ pub fn export_args_timeline(
         let hidden = -(b.width as i32) - 5;
         composition = composition.replace(
             &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
-            &format!("[base][hud]overlay=x='if(lt(t,0.5),{hidden}+({}-({hidden}))*pow(t/0.5,3),{})':y={}:eval=frame", b.x, b.x, b.y),
+            &format!("[base][hud]overlay=x='if(lt(t,0.8),{hidden}+({}-({hidden}))*(pow(t/0.8,2)*(3-2*t/0.8)),{})':y={}:eval=frame", b.x, b.x, b.y),
         ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
     }
     graph.push(';');

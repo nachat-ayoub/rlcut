@@ -77,7 +77,7 @@ Browser mode explicitly reports that native video actions require the desktop ru
 5. In the timeline, drag a clip edge inward to trim or outward to restore source
    footage. Split/ripple-delete clips, zoom or horizontally scroll the ruler, and
    set selected video-clip volume to 0% when music should replace gameplay audio.
-6. Set resolution, FPS, folder and an `.mp4` filename, then export. Enable **Boost entrance animation** to ease in horizontally from offscreen left over 0–0.5 seconds. Its initial right edge is 5 output pixels left of the frame; Y stays fixed. This export option is saved for future exports and remains changeable. Existing videos are never overwritten. Open the completed file/folder or cancel and discard incomplete output.
+6. Set resolution, FPS, folder and an `.mp4` filename, then export. Enable **Boost entrance animation** for a horizontal ease-in-out from offscreen left over 0–0.8 seconds. Its initial right edge is 5 output pixels left of the frame; Y stays fixed. This export option is saved for future exports and remains changeable. Existing videos are never overwritten. Open the completed file/folder or cancel and discard incomplete output.
 
 Ctrl/⌘ O imports; Ctrl/⌘ E exports; ←/→ steps one nominal frame; Shift ←/→ jumps one second; Escape closes a dialog. VFR stepping uses nominal timestamps rather than indexed decoder frames.
 

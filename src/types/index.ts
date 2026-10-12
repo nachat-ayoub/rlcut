@@ -83,6 +83,10 @@ export type MusicFile = {
   duration: number;
 };
 export type MusicTrack = MusicFile & { segments: Segment[] };
+export type TrackMarkers = {
+  video: number | null;
+  music: number | null;
+};
 export type Init = {
   store: Store;
   binaries: {
