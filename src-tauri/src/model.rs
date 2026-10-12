@@ -39,6 +39,36 @@ pub enum Shape {
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]
+pub enum BoostEasing {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct BoostIntro {
+    pub enabled: bool,
+    pub duration: f64,
+    pub easing: BoostEasing,
+}
+impl Default for BoostIntro {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            duration: 0.8,
+            easing: BoostEasing::Ease,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
 pub struct Boost {
     pub enabled: bool,
@@ -50,6 +80,8 @@ pub struct Boost {
     pub scale: f64,
     pub shape: Shape,
     pub feather: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub intro: BoostIntro,
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -98,6 +130,7 @@ impl Default for Preset {
                 scale: 1.,
                 shape: Shape::Circle,
                 feather: 0.,
+                intro: BoostIntro::default(),
             },
         }
     }
@@ -137,6 +170,7 @@ impl Preset {
         range(h.x, 0., 1., "Boost X")?;
         range(h.y, 0., 1., "Boost Y")?;
         range(h.feather, 0., 0.25, "Feather")?;
+        range(h.intro.duration, 0.1, 5., "Boost entrance duration")?;
         range(h.crop.x, 0., 1., "Crop X")?;
         range(h.crop.y, 0., 1., "Crop Y")?;
         range(h.crop.width, 0.001, 1., "Crop width")?;

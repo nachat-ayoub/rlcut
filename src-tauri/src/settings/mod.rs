@@ -14,7 +14,7 @@ pub struct Settings {
     pub default_preset: String,
     #[serde(default = "default_wait_for_preview")]
     pub wait_for_preview: bool,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub boost_intro: bool,
 }
 fn default_wait_for_preview() -> bool {

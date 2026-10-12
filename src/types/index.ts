@@ -4,6 +4,7 @@ export type Rect = {
   width: number;
   height: number;
 };
+export type BoostEasing = 'linear' | 'ease' | 'easeIn' | 'easeOut' | 'easeInOut';
 export type Preset = {
   version: number;
   id: string;
@@ -30,6 +31,11 @@ export type Preset = {
     scale: number;
     shape: 'circle' | 'ellipse';
     feather: number;
+    intro: {
+      enabled: boolean;
+      duration: number;
+      easing: BoostEasing;
+    };
   };
 };
 export type Video = {
@@ -47,7 +53,7 @@ export type Settings = {
   outputFolder: string;
   defaultPreset: string;
   waitForPreview: boolean;
-  boostIntro: boolean;
+  boostIntro?: boolean;
 };
 export type Store = {
   version: number;

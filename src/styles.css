@@ -423,6 +423,11 @@ h1 {
   background:#302639;
   border-color:#4b385e
 }
+.app-shell.preview-expanded { grid-template-columns:minmax(0,1fr) }
+.app-shell.preview-expanded>.sidebar,.app-shell.preview-expanded>.inspector { display:none }
+.app-shell.preview-expanded>.workspace { grid-column:1; position:fixed; inset:0; z-index:30 }
+.app-shell.preview-expanded .timeline,.app-shell.preview-expanded .workspace-footer { display:none }
+.app-shell.preview-expanded .preview-stage { padding:8px 18px 30px }
 .preview-stage {
   flex:1;
   min-height:0;
@@ -913,6 +918,7 @@ h1 {
 .track-marker.music { color:#72d2c2 }
 .track-marker.snapped { color:#6fe2df; filter:drop-shadow(0 0 4px #6fe2df) }
 .timeline-mixer button.active { color:#e2b475; background:#2b242d }
+.timeline-mixer .marker-action { width:27px; min-width:27px; height:24px; padding:3px }
 .edit-actions { margin-top:6px }
 .edit-actions small { margin-left:auto; color:#6f6478; font-size:8px }
 .edit-actions .danger { color:#c98fa2 }
@@ -1573,6 +1579,8 @@ progress::-moz-progress-bar {
 .setting-toggle strong { font-size:10px; color:#c7bbd1; }
 .setting-toggle small { font-size:9px; line-height:1.45; color:#817489; }
 .setting-toggle .switch { flex:none; }
+.boost-intro-settings { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; margin:-8px 0 18px; padding:12px; border:1px solid #393043; border-top:0; border-radius:0 0 8px 8px; background:#15121a; }
+.boost-intro-settings .slider-control,.boost-intro-settings .field { margin:0 }
 @media(max-width:1200px) { .app-shell.no-video { grid-template-columns:185px minmax(0,1fr); } }
 
 .preparation-status { position: fixed; left: 50%; bottom: 30px; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 14px; width: min(440px, 90vw); padding: 18px; background: #272131; border: 1px solid #584368; border-radius: 14px; box-shadow: 0 12px 40px #0006; }

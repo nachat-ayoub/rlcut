@@ -48,14 +48,17 @@ in `MUSIC_LIBRARY_ROADMAP.md`.
 Each lane has one editable peak marker stored in source time, so ripple edits and
 restored source ranges keep the marker attached to its media. Clip edges snap to
 the playhead, both lane markers, and every visible video/music clip boundary.
-Dragging a clip body left trims its source start; dragging right restores it while
-the right edge stays anchored. During that gesture the clip's peak can snap to the
-other lane's peak, providing direct gameplay-to-beat synchronization.
+Dragging a clip body left trims its source start; dragging right restores it. The
+packed lane, later clips, and source-attached peak markers preview their ripple
+positions continuously during the gesture. The selected clip determines which
+lane the single diamond marker action edits. During body drag that clip's peak can
+snap to the other lane's peak for direct gameplay-to-beat synchronization.
 
-The saved export entrance option moves the boost only on X, from a bounding box
-5 output pixels left of the canvas to the configured position with cubic ease-in-out
-over the first 0.8 seconds. Video cuts join before composition, so entrance timing
-starts at the edited output origin even when the first source interval is trimmed.
+The preset-owned export entrance option moves the boost only on X, from a bounding
+box 5 output pixels left of the canvas to the configured position. Duration is
+configurable from 0.1–5 seconds, with linear, ease, ease-in, ease-out, and
+ease-in-out curves. Video cuts join before composition, so entrance timing starts
+at the edited output origin even when the first source interval is trimmed.
 
 The native player has a 60 FPS smoke check, while the frontend/Rust suites cover
 timeline mapping, trim bounds, serialization, volume filters and the real export

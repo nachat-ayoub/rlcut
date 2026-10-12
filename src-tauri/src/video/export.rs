@@ -111,7 +111,7 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
-    run_timeline(b, v, p, segments, o, job, None, false)
+    run_timeline(b, v, p, segments, o, job, None)
 }
 pub fn run_timeline(
     b: Binaries,
@@ -121,7 +121,6 @@ pub fn run_timeline(
     o: ExportOptions,
     job: Arc<Job>,
     music: Option<MusicTrack>,
-    boost_intro: bool,
 ) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
@@ -133,7 +132,7 @@ pub fn run_timeline(
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
         let args =
-            export_args_timeline(&v, &p, &segments, &o, &partial, music.as_ref(), boost_intro)?;
+            export_args_timeline(&v, &p, &segments, &o, &partial, music.as_ref())?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
             .write(true)

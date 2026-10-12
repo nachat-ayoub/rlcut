@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Pencil, Plus, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
 import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
@@ -19,6 +19,7 @@ export default function App() {
   const [proxyPreparing, setProxyPreparing] = useState(false);
   const [preparation, setPreparation] = useState<{ percent: number; elapsed: number; remaining: number | null } | null>(null);
   const [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-short.mp4');
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
@@ -240,7 +241,7 @@ export default function App() {
           return;
         setOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, boostIntro: store.settings.boostIntro, options: { quality, fps, folder, filename: outputName } });
+      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, options: { quality, fps, folder, filename: outputName } });
       setProgress(p);
     }
     catch (e) {
@@ -249,11 +250,11 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.boostIntro, report]);
+  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, report]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
-        setModal(null);
+        if (modal) setModal(null); else setPreviewExpanded(false);
         return;
       } if (input || modal)
         return; if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
@@ -313,7 +314,7 @@ export default function App() {
       <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
       <span>Opening rlcut…</span>
     </div>;
-  return <div className={`app-shell ${video ? '' : 'no-video'}`} onPointerDownCapture={e => { const target = e.target as HTMLElement; if (target.closest('.preview-stage') && !target.closest('.composition')) setLayer(null); }}>
+  return <div className={`app-shell ${video ? '' : 'no-video'} ${previewExpanded ? 'preview-expanded' : ''}`} onPointerDownCapture={e => { const target = e.target as HTMLElement; if (target.closest('.preview-stage') && !target.closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">
         <img className="brand-logo" src="/branding/logo.png" alt="rlcut" />
@@ -363,8 +364,11 @@ export default function App() {
             <Eye size={15} />
             {before ? 'Source' : 'Before / after'}
           </button>
-          <button className={guides ? 'active' : ''} onClick={() => setGuides(!guides)} title="Toggle layer boundaries" aria-label="Toggle layer boundaries">
-            <Maximize2 size={15} />
+          <button className={guides ? 'active' : ''} onClick={() => setGuides(!guides)} title="Toggle layer outlines" aria-label="Toggle layer outlines">
+            <ScanLine size={15} />
+          </button>
+          <button className={previewExpanded ? 'active' : ''} onClick={() => setPreviewExpanded(value => !value)} title={previewExpanded ? 'Exit expanded preview (Esc)' : 'Expand preview'} aria-label={previewExpanded ? 'Exit expanded preview' : 'Expand preview'}>
+            {previewExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
         </div>
       </div>}
@@ -473,9 +477,13 @@ export default function App() {
             </label>
           </div>
           <div className="setting-toggle">
-            <div><strong>Boost entrance animation</strong><small>Smoothly ease in from the left over the first 0.8 seconds. Saved for future exports.</small></div>
-            <input className="switch" type="checkbox" aria-label="Boost entrance animation" checked={store.settings.boostIntro} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, boostIntro: e.target.checked } }))} />
+            <div><strong>Add boost entrance</strong><small>Saved with this preset and used by future exports.</small></div>
+            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
           </div>
+          {b.intro.enabled && <div className="boost-intro-settings">
+            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
+            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
+          </div>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-short.mp4" />
           </label>
           <label className="field">Destination folder<div className="folder-picker">

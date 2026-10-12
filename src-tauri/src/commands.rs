@@ -243,7 +243,6 @@ pub fn start_export(
     segments: Vec<Segment>,
     options: ExportOptions,
     music: Option<MusicTrack>,
-    boost_intro: Option<bool>,
 ) -> Result<Progress, String> {
     if let Some(m) = &music {
         m.validate()?;
@@ -272,7 +271,6 @@ pub fn start_export(
             options,
             job,
             music,
-            boost_intro.unwrap_or(false),
         )
     });
     *state

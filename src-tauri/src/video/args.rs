@@ -1,5 +1,5 @@
 use super::geometry::filter_graph;
-use crate::model::{ExportOptions, MusicTrack, Preset, Segment, Video};
+use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, Video};
 use std::path::Path;
 pub fn export_args(
     v: &Video,
@@ -26,7 +26,7 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
-    export_args_timeline(v, p, segments, o, out, None, false)
+    export_args_timeline(v, p, segments, o, out, None)
 }
 pub fn export_args_timeline(
     v: &Video,
@@ -35,7 +35,6 @@ pub fn export_args_timeline(
     o: &ExportOptions,
     out: &Path,
     music: Option<&MusicTrack>,
-    boost_intro: bool,
 ) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
     if !v.duration.is_finite() || v.duration <= 0. {
@@ -63,12 +62,23 @@ pub fn export_args_timeline(
     let mut composition = filter_graph(v, p, w, h)?
         .replace("[0:v:0]", "[source_edit]")
         .replace("[out]", "[out_edit]");
-    if boost_intro && p.boost.enabled {
+    if p.boost.intro.enabled && p.boost.enabled {
         let b = super::geometry::geometry(v, p, w, h)?.boost;
         let hidden = -(b.width as i32) - 5;
+        let duration = p.boost.intro.duration;
+        let u = format!("(t/{duration:.6})");
+        let easing = match &p.boost.intro.easing {
+            BoostEasing::Linear => u.clone(),
+            BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
+            BoostEasing::EaseIn => format!("pow({u},3)"),
+            BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
+            BoostEasing::EaseInOut => format!(
+                "if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"
+            ),
+        };
         composition = composition.replace(
             &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
-            &format!("[base][hud]overlay=x='if(lt(t,0.8),{hidden}+({}-({hidden}))*(pow(t/0.8,2)*(3-2*t/0.8)),{})':y={}:eval=frame", b.x, b.x, b.y),
+            &format!("[base][hud]overlay=x='if(lt(t,{duration:.6}),{hidden}+({}-({hidden}))*({easing}),{})':y={}:eval=frame", b.x, b.x, b.y),
         ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
     }
     graph.push(';');
