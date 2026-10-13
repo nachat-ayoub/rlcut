@@ -1,5 +1,5 @@
 use super::{
-    args::{export_args_timeline, progress_seconds},
+    args::{export_args_timeline_sources, progress_seconds},
     binaries::{command, Binaries},
 };
 use crate::model::{ExportOptions, MusicTrack, Preset, Segment, Video};
@@ -123,6 +123,18 @@ pub fn run_timeline(
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
 ) {
+    run_timeline_sources(b, vec![v], p, segments, o, job, music, music_fade_out)
+}
+pub fn run_timeline_sources(
+    b: Binaries,
+    videos: Vec<Video>,
+    p: Preset,
+    segments: Vec<Segment>,
+    o: ExportOptions,
+    job: Arc<Job>,
+    music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
+) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
         Ok(s) => s,
@@ -132,8 +144,8 @@ pub fn run_timeline(
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
-        let args = export_args_timeline(
-            &v,
+        let args = export_args_timeline_sources(
+            &videos,
             &p,
             &segments,
             &o,

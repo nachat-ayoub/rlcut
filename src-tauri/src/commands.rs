@@ -220,6 +220,60 @@ pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<St
     Ok(path.to_string_lossy().into_owned())
 }
 #[tauri::command]
+pub async fn create_timeline_proxy(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("A project needs between 1 and 100 video clips".into());
+    }
+    let videos = paths
+        .iter()
+        .map(|path| state.video(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let first = &videos[0];
+    if videos.iter().any(|video| {
+        let aspect_delta = (video.width as f64 / video.height as f64
+            - first.width as f64 / first.height as f64)
+            .abs();
+        aspect_delta > 0.002 || (video.fps >= 50.) != (first.fps >= 50.)
+    }) {
+        return Err("Added clips must use the same aspect ratio and 30/60 FPS class".into());
+    }
+    let binaries = state.binaries.clone();
+    let proxy_dir = state.cache.join("proxies");
+    let lock = state.proxy_lock.clone();
+    let epoch = state.decoder_epoch.clone();
+    let ticket = epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    let progress = state.preparation.clone();
+    if let Ok(mut value) = progress.lock() {
+        *value = Preparation::default();
+    }
+    let path = blocking(move || {
+        let _guard = lock.lock().map_err(|_| "Decoder preparation unavailable")?;
+        crate::video::decoder::prepare_timeline(
+            &binaries,
+            &videos,
+            &proxy_dir,
+            &epoch,
+            ticket,
+            |percent, elapsed, remaining| {
+                if epoch.load(Ordering::SeqCst) == ticket {
+                    if let Ok(mut value) = progress.lock() {
+                        *value = Preparation {
+                            percent,
+                            elapsed,
+                            remaining,
+                        };
+                    }
+                }
+            },
+        )
+    })
+    .await?;
+    Ok(path.to_string_lossy().into_owned())
+}
+#[tauri::command]
 pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
     state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
     let cache = state.cache.clone();
@@ -238,7 +292,7 @@ pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn start_export(
     state: State<AppState>,
-    path: String,
+    paths: Vec<String>,
     preset: Preset,
     segments: Vec<Segment>,
     options: ExportOptions,
@@ -255,9 +309,19 @@ pub fn start_export(
         }
     }
     state.binaries.ffmpeg()?;
-    let v = state.video(&path)?;
-    Segment::validate_all(&segments, v.duration)?;
-    let out = export::destination(&v, &options)?;
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("A project needs between 1 and 100 video clips".into());
+    }
+    let videos = paths
+        .iter()
+        .map(|path| state.video(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let duration: f64 = videos.iter().map(|video| video.duration).sum();
+    Segment::validate_all(&segments, duration)?;
+    let out = export::destination(&videos[0], &options)?;
+    if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
+        return Err("Output cannot replace a source video".into());
+    }
     let mut slot = state.job.lock().map_err(|_| "Export busy")?;
     if let Some(j) = slot.as_ref() {
         if j.snapshot()?.phase == "running" {
@@ -269,7 +333,16 @@ pub fn start_export(
     *slot = Some(job.clone());
     let b = state.binaries.clone();
     let worker = std::thread::spawn(move || {
-        export::run_timeline(b, v, preset, segments, options, job, music, music_fade_out)
+        export::run_timeline_sources(
+            b,
+            videos,
+            preset,
+            segments,
+            options,
+            job,
+            music,
+            music_fade_out,
+        )
     });
     *state
         .worker

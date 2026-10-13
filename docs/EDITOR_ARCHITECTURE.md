@@ -21,19 +21,22 @@ preview. Unavailable or slow graphics contexts use the software compositor.
 Preview filtering and resolution prioritize interactive performance. Export uses
 the original recording and the existing full-resolution FFmpeg pipeline.
 
-Import prepares one cached, seekable SDR source, including consistent HDR tone
-mapping. FFmpeg reports processed duration; the UI displays actual percentage,
-elapsed time and an approximate remaining time. Cancel kills the preparation job
-and removes its incomplete output. An import only replaces the current source
-when preparation succeeds. Metadata probing and native decoder opening use an
-activity indicator because they do not expose measurable percentage progress.
+Import prepares one cached, seekable SDR proxy per source, including consistent
+HDR tone mapping. Imported videos append to the packed video lane. Existing
+proxies are reused and the editor reel is rebuilt with stream copy, so only a new
+source needs encoding. Proxy preparation uses the available CPU cores. FFmpeg
+reports processed duration; the UI displays percentage, elapsed time and an
+approximate remaining time. Cancel kills preparation and removes incomplete
+output. Metadata probing and native decoder opening use an activity indicator.
 
 The native engine is shipped in the Linux AppImage with its decoder/audio plugins
 and shared libraries. Windows/macOS native-engine packaging is pending; the old
 browser playback fallback has been removed. Those installers must not be published
 until the native engine/runtime has been packaged for those platforms.
 
-Timeline video segments store ordered source in/out points and per-segment gain.
+Timeline video segments store ordered virtual-source in/out points and per-segment gain.
+Each original occupies a fixed range in that virtual source; trim restoration is
+bounded to its own file and final export reads every original directly.
 The editor packs them without gaps, so deletion and edge trims ripple later clips.
 Trim handles may expand only into unused source ranges between neighboring clips,
 which makes an accidental trim reversible without creating overlapping media.

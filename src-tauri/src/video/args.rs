@@ -37,20 +37,98 @@ pub fn export_args_timeline(
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
 ) -> Result<Vec<String>, String> {
+    export_args_timeline_sources(
+        std::slice::from_ref(v),
+        p,
+        segments,
+        o,
+        out,
+        music,
+        music_fade_out,
+    )
+}
+pub fn export_args_timeline_sources(
+    videos: &[Video],
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
+) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
-    if !v.duration.is_finite() || v.duration <= 0. {
+    if videos.is_empty()
+        || videos
+            .iter()
+            .any(|video| !video.duration.is_finite() || video.duration <= 0.)
+    {
         return Err("Invalid video duration".into());
     }
-    Segment::validate_all(segments, v.duration)?;
+    let total_duration: f64 = videos.iter().map(|video| video.duration).sum();
+    Segment::validate_all(segments, total_duration)?;
+    let mut offsets = Vec::with_capacity(videos.len());
+    let mut offset = 0.;
+    for video in videos {
+        offsets.push(offset);
+        offset += video.duration;
+    }
+    let resolved = segments
+        .iter()
+        .map(|segment| {
+            let source = offsets
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, offset)| segment.start >= **offset)
+                .map(|(index, _)| index)
+                .ok_or("Timeline clip has no source")?;
+            let local_start = segment.start - offsets[source];
+            let local_end = segment.end - offsets[source];
+            if local_start < -0.001 || local_end > videos[source].duration + 0.001 {
+                return Err("A timeline clip cannot cross between source videos".into());
+            }
+            Ok((
+                source,
+                local_start.max(0.),
+                local_end.min(videos[source].duration),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut v = videos[0].clone();
+    v.duration = total_duration;
+    v.has_audio = videos.iter().any(|video| video.has_audio);
     let mut graph = String::new();
-    let split_outputs = (0..segments.len())
-        .map(|i| format!("[edit{i}]"))
-        .collect::<String>();
-    graph.push_str(&format!("[0:v:0]split={}{split_outputs}", segments.len()));
-    for (index, segment) in segments.iter().enumerate() {
+    for source in 0..videos.len() {
+        let indices = resolved
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| (value.0 == source).then_some(index))
+            .collect::<Vec<_>>();
+        if indices.is_empty() {
+            continue;
+        }
+        let outputs = indices
+            .iter()
+            .map(|index| format!("[edit{index}]"))
+            .collect::<String>();
+        if !graph.is_empty() {
+            graph.push(';');
+        }
+        graph.push_str(&format!("[{source}:v:0]split={}{outputs}", indices.len()));
+    }
+    for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
+        let normalize = if videos[source].width == videos[0].width
+            && videos[source].height == videos[0].height
+        {
+            ",setsar=1".to_string()
+        } else {
+            format!(
+                ",scale={}:{}:flags=lanczos,setsar=1",
+                videos[0].width, videos[0].height
+            )
+        };
         graph.push_str(&format!(
-            ";[edit{index}]trim=start={:.6}:end={:.6},setpts=PTS-STARTPTS[v{index}]",
-            segment.start, segment.end
+            ";[edit{index}]trim=start={start:.6}:end={end:.6},setpts=PTS-STARTPTS{normalize}[v{index}]"
         ));
     }
     let video_inputs = (0..segments.len())
@@ -60,11 +138,11 @@ pub fn export_args_timeline(
         ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
         segments.len()
     ));
-    let mut composition = filter_graph(v, p, w, h)?
+    let mut composition = filter_graph(&v, p, w, h)?
         .replace("[0:v:0]", "[source_edit]")
         .replace("[out]", "[out_edit]");
     if p.boost.intro.enabled && p.boost.enabled {
-        let b = super::geometry::geometry(v, p, w, h)?.boost;
+        let b = super::geometry::geometry(&v, p, w, h)?.boost;
         let hidden = -(b.width as i32) - 5;
         let duration = p.boost.intro.duration;
         let u = format!("(t/{duration:.6})");
@@ -83,15 +161,36 @@ pub fn export_args_timeline(
     graph.push(';');
     graph.push_str(&composition);
     if v.has_audio {
-        let audio_splits = (0..segments.len())
-            .map(|i| format!("[audio{i}]"))
-            .collect::<String>();
-        graph.push_str(&format!(";[0:a:0]asplit={}{audio_splits}", segments.len()));
-        for (index, segment) in segments.iter().enumerate() {
-            graph.push_str(&format!(
-                ";[audio{index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[a{index}]",
-                segment.start, segment.end, segment.volume
-            ));
+        for source in 0..videos.len() {
+            if !videos[source].has_audio {
+                continue;
+            }
+            let indices = resolved
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| (value.0 == source).then_some(index))
+                .collect::<Vec<_>>();
+            if indices.is_empty() {
+                continue;
+            }
+            let outputs = indices
+                .iter()
+                .map(|index| format!("[audio{index}]"))
+                .collect::<String>();
+            graph.push_str(&format!(";[{source}:a:0]asplit={}{outputs}", indices.len()));
+        }
+        for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
+            if videos[source].has_audio {
+                graph.push_str(&format!(
+                    ";[audio{index}]atrim=start={start:.6}:end={end:.6},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={:.4}[a{index}]",
+                    segments[index].volume
+                ));
+            } else {
+                graph.push_str(&format!(
+                    ";anullsrc=r=48000:cl=stereo,atrim=duration={:.6},asetpts=PTS-STARTPTS,volume={:.4}[a{index}]",
+                    end - start, segments[index].volume
+                ));
+            }
         }
         let audio_inputs = (0..segments.len())
             .map(|i| format!("[a{i}]"))
@@ -107,7 +206,11 @@ pub fn export_args_timeline(
         let outputs = (0..music.segments.len())
             .map(|i| format!("[ms{i}]"))
             .collect::<String>();
-        graph.push_str(&format!(";[1:a:0]asplit={}{outputs}", music.segments.len()));
+        graph.push_str(&format!(
+            ";[{}:a:0]asplit={}{outputs}",
+            videos.len(),
+            music.segments.len()
+        ));
         for (i, s) in music.segments.iter().enumerate() {
             graph.push_str(&format!(
                 ";[ms{i}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[mt{i}]",
@@ -151,20 +254,19 @@ pub fn export_args_timeline(
             .map(|n| n.get())
             .unwrap_or(1)
             .to_string(),
-        "-i".into(),
-        v.path.clone(),
+    ];
+    for video in videos {
+        args.extend(["-i".into(), video.path.clone()]);
+    }
+    if let Some(music) = music {
+        args.extend(["-i".into(), music.path.clone()]);
+    }
+    args.extend([
         "-filter_complex".into(),
         graph,
         "-map".into(),
         "[out_edit]".into(),
-    ];
-    if let Some(music) = music {
-        let index = args
-            .iter()
-            .position(|value| value == "-filter_complex")
-            .unwrap();
-        args.splice(index..index, ["-i".into(), music.path.clone()]);
-    }
+    ]);
     if v.has_audio || music.is_some() {
         args.extend(
             [

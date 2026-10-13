@@ -71,7 +71,7 @@ Browser mode explicitly reports that native video actions require the desktop ru
 ## Usage
 
 1. Choose Classic RL Short or create a custom copy on first launch.
-2. Import gameplay. Scrub to a frame with a visible boost meter.
+2. Import gameplay. Use **Add video** to append more recordings to the video lane; cached previews for existing clips are reused. Scrub to a frame with a visible boost meter.
 3. Click **Select boost area**. Draw, move or resize the rectangle around the HUD and **Apply crop**; Cancel leaves the composition unchanged.
 4. Adjust background, gameplay and boost controls. Layer guides expose dragging and corner resize handles. **Boost scale** multiplies both configured dimensions; width and height also remain individually adjustable.
 5. In the timeline, drag a clip edge inward to trim or outward to restore source

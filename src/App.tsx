@@ -14,6 +14,7 @@ type Modal = 'settings' | 'presets' | 'crop' | null;
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
   const [video, setVideo] = useState<Video | null>(null), [preview, setPreview] = useState<Preview | null>(null), [timestamp, setTimestamp] = useState(0);
+  const [videoSources, setVideoSources] = useState<Video[]>([]);
   const [proxyPath, setProxyPath] = useState('');
   const [sourceVersion, setSourceVersion] = useState(0);
   const [proxyPreparing, setProxyPreparing] = useState(false);
@@ -117,26 +118,34 @@ export default function App() {
       const v = await invoke<Video>('import_video', { path });
       if (ticket !== importRevision.current) return;
       setPreparation({ percent: 0, elapsed: 0, remaining: null });
-      const proxy = await invoke<string>('create_proxy', { path: v.path });
+      const nextSources = videoSources.length ? [...videoSources, v] : [v];
+      const proxy = await invoke<string>('create_timeline_proxy', { paths: nextSources.map(source => source.path) });
       if (ticket !== importRevision.current) return;
-      // Commit the source and its ready decoder together. A failed import
-      // leaves the previous composition, timeline and undo history intact.
-      setPlaying(false); setVideo(v); setProxyPath(proxy); setSourceVersion(version => version + 1);
-      setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
-      setMusic(null);
-      setMarkers({ video: null, music: null });
-      undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
+      const sourceOffset = videoSources.reduce((sum, source) => sum + source.duration, 0);
+      const projectVideo = { ...nextSources[0], duration: sourceOffset + v.duration, hasAudio: nextSources.some(source => source.hasAudio) };
+      // Commit sources only after the new cached reel is ready. Failed appends
+      // leave the current project and decoder untouched.
+      setPlaying(false); setVideoSources(nextSources); setVideo(projectVideo); setProxyPath(proxy); setSourceVersion(version => version + 1);
+      if (videoSources.length) {
+        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+        if (undoStack.current.length > 100) undoStack.current.shift();
+        redoStack.current = []; lastPresetEdit.current = 0;
+        setSegments(current => [...current, { id: crypto.randomUUID(), start: sourceOffset, end: sourceOffset + v.duration, volume: 1 }]);
+      } else {
+        setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
+        setMusic(null); setMarkers({ video: null, music: null });
+        undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
+        playhead.current = 0; setTimestamp(0); setBefore(false);
+        setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-edit.mp4`);
+      }
       setPreview(null);
-      playhead.current = 0; setTimestamp(0);
-      setBefore(false);
-      setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-edit.mp4`);
       setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
     } catch (e) {
       if (ticket === importRevision.current && !message(e).includes('superseded')) report(e);
     } finally {
       if (ticket === importRevision.current) { setImporting(false); setProxyPreparing(false); }
     }
-  }, [report]);
+  }, [report, videoSources, preset, segments, music, markers]);
   useEffect(() => {
     if (!proxyPreparing || !preparation) return;
     let disposed = false;
@@ -246,7 +255,7 @@ export default function App() {
           return;
         rememberOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } });
+      const p = await invoke<Progress>('start_export', { paths: videoSources.map(source => source.path), preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } });
       setProgress(p);
     }
     catch (e) {
@@ -255,7 +264,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -326,7 +335,7 @@ export default function App() {
         <small>DESKTOP</small>
       </div>
       <button className="import-button" onClick={() => void importVideo()} disabled={importing}>
-        {importing ? <LoaderCircle className="spin" size={17} /> : <Plus size={18} />}Import video<kbd>⌘ O</kbd>
+        {importing ? <LoaderCircle className="spin" size={17} /> : <Plus size={18} />}{video ? 'Add video' : 'Import video'}<kbd>⌘ O</kbd>
       </button>
       <div className="nav-label presets-label">YOUR PRESETS<button aria-label="Create preset" title="Copy current preset" onClick={create}>
         <Plus size={15} />
@@ -361,7 +370,7 @@ export default function App() {
             {video ? filename(video.path) : 'No video selected'}
           </span>
           {video && <small>
-            {video.width} × {video.height} · {video.fps.toFixed(2)} fps · {video.hasAudio ? 'Audio' : 'No audio'}
+            {videoSources.length} {videoSources.length === 1 ? 'clip' : 'clips'} · {video.width} × {video.height} · {video.fps.toFixed(2)} fps · {video.hasAudio ? 'Audio' : 'No audio'}
           </small>}
         </div>
         <div className="toolbar-actions">
@@ -378,7 +387,7 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
         onMarker={(track, value) => {
           if (markers[track] === value) return;
           undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
@@ -625,7 +634,7 @@ export default function App() {
           <label className="field">Default preset<Dropdown label="Default preset" value={store.settings.defaultPreset} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, defaultPreset: value } }))} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
           <div className="setting-toggle">
-            <div><strong>Wait for smooth preview</strong><small>Show import loading while the recording is prepared. New clips replace the editor only when ready.</small></div>
+            <div><strong>Wait for smooth preview</strong><small>Show import loading while clips are prepared. Additional videos append only when ready.</small></div>
             <input className="switch" type="checkbox" aria-label="Wait for smooth preview" checked={store.settings.waitForPreview} onChange={e => setStore(s => ({ ...s, settings: { ...s.settings, waitForPreview: e.target.checked } }))} />
           </div>
           <label className="field">Default output folder<div className="folder-picker">
@@ -644,7 +653,7 @@ export default function App() {
               setPlaying(false); setProxyPath(''); setProxyPreparing(Boolean(video));
               void invoke('clear_cache').then(async () => {
                 if (video) {
-                  const path = await invoke<string>('create_proxy', { path: video.path });
+                  const path = await invoke<string>('create_timeline_proxy', { paths: videoSources.map(source => source.path) });
                   if (ticket === importRevision.current) setProxyPath(path);
                 }
                 setNotice('Preview cache cleared');

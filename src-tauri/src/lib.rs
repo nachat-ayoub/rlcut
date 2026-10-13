@@ -29,6 +29,7 @@ pub fn run() {
             commands::pick_folder,
             commands::import_video,
             commands::create_proxy,
+            commands::create_timeline_proxy,
             commands::preparation_progress,
             commands::cancel_preparation,
             commands::playback_open,

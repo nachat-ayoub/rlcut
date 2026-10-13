@@ -17,8 +17,9 @@ const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
 const unique = (values: number[]) => values.filter((value, index) => values.findIndex(other => Math.abs(other - value) < .0001) === index);
 
-export function Timeline({ duration, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onUndo, onRedo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onUndo, onRedo, onImportMusic }: {
   duration: number;
+  sourceDurations: number[];
   timestamp: number;
   segments: Segment[];
   music: MusicTrack | null;
@@ -43,6 +44,8 @@ export function Timeline({ duration, timestamp, segments, music, markers, playin
   const [volumeOpen, setVolumeOpen] = useState(false);
   const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
   const musicSegments = music?.segments ?? [], videoOffsets = offsetsOf(segments), musicOffsets = offsetsOf(musicSegments);
+  let sourceCursor = 0;
+  const sourceRanges = sourceDurations.map(length => { const start = sourceCursor; sourceCursor += length; return { start, end: sourceCursor }; });
   const editedDuration = durationOf(segments), musicDuration = durationOf(musicSegments);
   const mappedTimestamp = sourceToEdited(segments, timestamp), editedTimestamp = mappedTimestamp < .025 ? 0 : mappedTimestamp;
   const lanes = { video: segments, music: musicSegments }, offsets = { video: videoOffsets, music: musicOffsets };
@@ -107,7 +110,9 @@ export function Timeline({ duration, timestamp, segments, music, markers, playin
   };
   const beginClip = (event: PointerEvent<HTMLElement>, mode: 'edge' | 'body', track: Track, clip: Segment, edge: 'start' | 'end', index: number, offset: number) => {
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); select(track, clip);
-    const bounds = trimBounds(lanes[track], index, track === 'video' ? duration : music?.duration ?? 0, MIN_CLIP)[edge];
+    const range = track === 'video' ? sourceRanges.find(source => clip.start >= source.start - .001 && clip.end <= source.end + .001) : null;
+    const base = trimBounds(lanes[track], index, track === 'video' ? duration : music?.duration ?? 0, MIN_CLIP)[edge];
+    const bounds = range ? { min: Math.max(base.min, range.start), max: Math.min(base.max, range.end) } : base;
     gesture.current = { mode, track, id: clip.id, edge, pointer: event.pointerId, x: event.clientX, value: clip[edge], min: bounds.min, max: bounds.max, offset, clipStart: clip.start, moved: false };
   };
   const gestureValue = (event: PointerEvent<HTMLElement>, state: ClipGesture) => {
@@ -141,7 +146,9 @@ export function Timeline({ duration, timestamp, segments, music, markers, playin
   const nudgeTrim = (event: KeyboardEvent<HTMLButtonElement>, track: Track, clip: Segment, edge: 'start' | 'end', index: number) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault(); event.stopPropagation(); select(track, clip);
-    const bounds = trimBounds(lanes[track], index, track === 'video' ? duration : music?.duration ?? 0, MIN_CLIP)[edge];
+    const range = track === 'video' ? sourceRanges.find(source => clip.start >= source.start - .001 && clip.end <= source.end + .001) : null;
+    const base = trimBounds(lanes[track], index, track === 'video' ? duration : music?.duration ?? 0, MIN_CLIP)[edge];
+    const bounds = range ? { min: Math.max(base.min, range.start), max: Math.min(base.max, range.end) } : base;
     const value = Math.max(bounds.min, Math.min(bounds.max, clip[edge] + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 1 : .1)));
     if (Math.abs(value - clip[edge]) > .001) onEdit(track, lanes[track].map(segment => segment.id === clip.id ? { ...segment, [edge]: value } : segment));
   };
