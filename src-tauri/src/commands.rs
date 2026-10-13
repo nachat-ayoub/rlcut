@@ -243,11 +243,17 @@ pub fn start_export(
     segments: Vec<Segment>,
     options: ExportOptions,
     music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
 ) -> Result<Progress, String> {
     if let Some(m) = &music {
         m.validate()?;
     }
     preset.validate()?;
+    if let Some(duration) = music_fade_out {
+        if !duration.is_finite() || !(0.1..=10.).contains(&duration) {
+            return Err("Music fade duration must be between 0.1 and 10 seconds".into());
+        }
+    }
     state.binaries.ffmpeg()?;
     let v = state.video(&path)?;
     Segment::validate_all(&segments, v.duration)?;
@@ -263,15 +269,7 @@ pub fn start_export(
     *slot = Some(job.clone());
     let b = state.binaries.clone();
     let worker = std::thread::spawn(move || {
-        export::run_timeline(
-            b,
-            v,
-            preset,
-            segments,
-            options,
-            job,
-            music,
-        )
+        export::run_timeline(b, v, preset, segments, options, job, music, music_fade_out)
     });
     *state
         .worker

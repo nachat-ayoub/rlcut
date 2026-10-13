@@ -54,11 +54,15 @@ positions continuously during the gesture. The selected clip determines which
 lane the single diamond marker action edits. During body drag that clip's peak can
 snap to the other lane's peak for direct gameplay-to-beat synchronization.
 
-The preset-owned export entrance option moves the boost only on X, from a bounding
+The preset-owned entrance option moves the boost only on X, from a bounding
 box 5 output pixels left of the canvas to the configured position. Duration is
 configurable from 0.1–5 seconds, with linear, ease, ease-in, ease-out, and
 ease-in-out curves. Video cuts join before composition, so entrance timing starts
-at the edited output origin even when the first source interval is trimmed.
+at the edited output origin even when the first source interval is trimmed. The
+canvas compositor evaluates the same curve from the edited playhead time during
+normal timeline playback. Optional music fade-out is also applied by the native
+preview player, ends at the earlier of the edited video or edited music ending,
+and defaults to a 0.5-second duration.
 
 The native player has a 60 FPS smoke check, while the frontend/Rust suites cover
 timeline mapping, trim bounds, serialization, volume filters and the real export

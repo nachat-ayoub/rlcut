@@ -111,7 +111,7 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
-    run_timeline(b, v, p, segments, o, job, None)
+    run_timeline(b, v, p, segments, o, job, None, None)
 }
 pub fn run_timeline(
     b: Binaries,
@@ -121,6 +121,7 @@ pub fn run_timeline(
     o: ExportOptions,
     job: Arc<Job>,
     music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
 ) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
@@ -131,8 +132,15 @@ pub fn run_timeline(
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
-        let args =
-            export_args_timeline(&v, &p, &segments, &o, &partial, music.as_ref())?;
+        let args = export_args_timeline(
+            &v,
+            &p,
+            &segments,
+            &o,
+            &partial,
+            music.as_ref(),
+            music_fade_out,
+        )?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
             .write(true)

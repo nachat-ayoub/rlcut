@@ -126,7 +126,13 @@ impl Player {
             }
         }
         if let Some(music) = self.music.as_mut() {
-            music.sync(edited, self.playing && self.seeking.is_none(), force_seek)?;
+            let timeline_duration = self.segments.iter().map(|s| s.end - s.start).sum();
+            music.sync(
+                edited,
+                timeline_duration,
+                self.playing && self.seeking.is_none(),
+                force_seek,
+            )?;
         }
         Ok(())
     }
@@ -318,7 +324,13 @@ impl MusicPlayer {
             last_sync: std::time::Instant::now() - std::time::Duration::from_secs(1),
         })
     }
-    fn sync(&mut self, edited: f64, playing: bool, force: bool) -> Result<(), String> {
+    fn sync(
+        &mut self,
+        edited: f64,
+        timeline_duration: f64,
+        playing: bool,
+        force: bool,
+    ) -> Result<(), String> {
         self.last_sync = std::time::Instant::now();
         let mut offset = 0.;
         let target = self
@@ -344,8 +356,18 @@ impl MusicPlayer {
         }
         let should_play = playing && target.is_some();
         if let Some((index, time, volume)) = target {
+            let music_duration: f64 = self.track.segments.iter().map(|s| s.end - s.start).sum();
+            let fade_end = timeline_duration.min(music_duration);
+            let fade_gain = self.track.fade_out.map_or(1., |duration| {
+                let duration = duration.min(fade_end);
+                if duration <= 0. || edited <= fade_end - duration {
+                    1.
+                } else {
+                    ((fade_end - edited) / duration).clamp(0., 1.)
+                }
+            });
             unsafe {
-                rl_player_volume(self.handle, volume);
+                rl_player_volume(self.handle, volume * fade_gain);
             }
             let current = unsafe { rl_player_position(self.handle) };
             if force || self.segment != Some(index) || (current - time).abs() > 0.15 {

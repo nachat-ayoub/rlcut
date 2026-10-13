@@ -54,6 +54,8 @@ export type Settings = {
   defaultPreset: string;
   waitForPreview: boolean;
   boostIntro?: boolean;
+  musicFadeOut: boolean;
+  musicFadeDuration: number;
 };
 export type Store = {
   version: number;
@@ -88,7 +90,7 @@ export type MusicFile = {
   name: string;
   duration: number;
 };
-export type MusicTrack = MusicFile & { segments: Segment[] };
+export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | null };
 export type TrackMarkers = {
   video: number | null;
   music: number | null;

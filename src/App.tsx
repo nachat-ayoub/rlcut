@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Pencil, Plus, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Pencil, Plus, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
 import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
@@ -21,14 +21,14 @@ export default function App() {
   const [importing, setImporting] = useState(false), [before, setBefore] = useState(false), [guides, setGuides] = useState(true), [layer, setLayer] = useState<Layer | null>('boost');
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-short.mp4');
+  const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-edit.mp4');
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: null, music: null });
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
-  const playhead = useRef(0), lastTimeReport = useRef(0);
+  const playhead = useRef(0), lastTimeReport = useRef(0), manualSeekUntil = useRef(0);
   const lastPresetEdit = useRef(0);
   const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
   storeRef.current = store;
@@ -53,7 +53,7 @@ export default function App() {
     if (json === lastSaved.current)
       return;
     setSaved(false);
-    const timer = setTimeout(() => { invoke<void>('save_store', { store }).then(() => { lastSaved.current = json; setSaved(JSON.stringify(storeRef.current) === json); }).catch(report); }, 600);
+    const timer = setTimeout(() => { invoke<void>('save_store', { store }).then(() => { lastSaved.current = json; setSaved(JSON.stringify(storeRef.current) === json); }).catch(report); }, 250);
     return () => clearTimeout(timer);
   }, [store, ready, init?.storageError, report]);
   useEffect(() => {
@@ -129,7 +129,7 @@ export default function App() {
       setPreview(null);
       playhead.current = 0; setTimestamp(0);
       setBefore(false);
-      setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-short.mp4`);
+      setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-edit.mp4`);
       setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
     } catch (e) {
       if (ticket === importRevision.current && !message(e).includes('superseded')) report(e);
@@ -203,6 +203,7 @@ export default function App() {
     setTimestamp(playhead.current); setPlaying(value => !value);
   }, [proxyPath, playing, segments]);
   const updatePlaybackTime = useCallback((value: number) => {
+    if (performance.now() < manualSeekUntil.current) return playhead.current;
     playhead.current = value;
     const kept = segments.find(segment => value >= segment.start && value < segment.end);
     if (kept) {
@@ -218,16 +219,20 @@ export default function App() {
     playhead.current = end; setPlaying(false); setTimestamp(end); return end;
   }, [segments]);
   const updatePlaying = useCallback((value: boolean) => { if (!value) setTimestamp(playhead.current); setPlaying(value); }, []);
+  const rememberOutputFolder = useCallback((folder: string) => {
+    setOutputFolder(folder);
+    setStore(current => ({ ...current, settings: { ...current.settings, outputFolder: folder } }));
+  }, []);
   const chooseFolder = useCallback(async () => {
     try {
       const folder = await invoke<string | null>('pick_folder');
       if (folder)
-        setOutputFolder(folder);
+        rememberOutputFolder(folder);
     }
     catch (e) {
       report(e);
     }
-  }, [report]);
+  }, [report, rememberOutputFolder]);
   const startExport = useCallback(async () => {
     if (!video || exporting || exportStarting)
       return;
@@ -239,9 +244,9 @@ export default function App() {
         folder = await invoke<string | null>('pick_folder') ?? '';
         if (!folder)
           return;
-        setOutputFolder(folder);
+        rememberOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, options: { quality, fps, folder, filename: outputName } });
+      const p = await invoke<Progress>('start_export', { path: video.path, preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } });
       setProgress(p);
     }
     catch (e) {
@@ -250,7 +255,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, report]);
+  }, [video, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -372,8 +377,8 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { playhead.current = clamp(value, 0, video.duration); setPlaying(false); setTimestamp(playhead.current); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
+      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
         onMarker={(track, value) => {
           if (markers[track] === value) return;
           undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
@@ -458,6 +463,14 @@ export default function App() {
           </div>
           <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
           <Slider label="Edge feather" value={b.feather} max={.25} step={.005} onChange={feather => edit('boost', { feather })} />
+          <div className="setting-toggle compact">
+            <div><strong>Entrance animation</strong><small>Previewed directly from the timeline start.</small></div>
+            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
+          </div>
+          {b.intro.enabled && <div className="boost-intro-settings">
+            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
+            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
+          </div>}
           <details className="crop-numbers">
             <summary>Source crop coordinates</summary>
             <div className="two-controls">
@@ -469,6 +482,13 @@ export default function App() {
           </details>
           <p className="help-text">Width / height are canvas fractions. Scale multiplies both. Circle masks use the smaller dimension.</p>
         </Section>}
+        {music && <Section title="Music" icon={<Music2 size={16} />}>
+          <div className="setting-toggle compact">
+            <div><strong>Fade at timeline end</strong><small>Heard during normal preview and applied on export.</small></div>
+            <input className="switch" type="checkbox" aria-label="Fade music at end" checked={store.settings.musicFadeOut} onChange={e => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeOut: e.target.checked } }))} />
+          </div>
+          {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
+        </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
             <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
@@ -476,18 +496,10 @@ export default function App() {
             <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={[{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
-          <div className="setting-toggle">
-            <div><strong>Add boost entrance</strong><small>Saved with this preset and used by future exports.</small></div>
-            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
-          </div>
-          {b.intro.enabled && <div className="boost-intro-settings">
-            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
-            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
-          </div>}
-          <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-short.mp4" />
+          <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
           <label className="field">Destination folder<div className="folder-picker">
-            <input value={outputFolder} onChange={e => setOutputFolder(e.target.value)} placeholder="Choose a folder…" />
+            <input value={outputFolder} onChange={e => rememberOutputFolder(e.target.value)} placeholder="Choose a folder…" />
             <button aria-label="Choose export folder" onClick={() => void chooseFolder()}>
               <FolderOpen size={16} />
             </button>

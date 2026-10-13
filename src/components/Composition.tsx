@@ -6,6 +6,8 @@ import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
 import { Compositor } from '../lib/compositor';
 import { corners, snapAxis, type Corner } from '../lib/geometry';
+import { ease } from '../lib/easing';
+import { sourceToEdited } from '../lib/timeline';
 type Gesture = {
   layer: 'gameplay' | 'boost';
   resize: Corner | null;
@@ -13,7 +15,7 @@ type Gesture = {
   y: number;
   preset: Preset;
 };
-export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   playbackPath: string;
@@ -21,6 +23,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
   segments?: Segment[];
   music?: MusicTrack | null;
+  musicFadeOut?: number | null;
   preview: Preview | null;
   preset: Preset;
   before: boolean;
@@ -39,13 +42,14 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
 }) {
   const canvas = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
+  const playbackTimestamp = useRef(timestamp);
   const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [mediaReady, setMediaReady] = useState(false);
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing });
-  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing }; });
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing, segments });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing, segments }; });
   const [waiting, setWaiting] = useState(false);
   const draw = useRef<() => void>(() => { });
   const snapshot = useRef<() => void>(() => { });
@@ -61,7 +65,17 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     draw.current = () => {
       const current = callbacks.current, source = player.current?.frame;
       if (!current.video || !source) return;
-      try { compositor.draw(source, source.width, source.height, current.video, current.preset, current.quality, current.before, current.playing); }
+      try {
+        let drawingPreset = current.preset;
+        const editedTime = sourceToEdited(current.segments, playbackTimestamp.current);
+        if (current.preset.boost.intro.enabled && current.preset.boost.enabled && !current.before && editedTime < current.preset.boost.intro.duration) {
+          const boost = current.preset.boost;
+          const hidden = -(boost.width * boost.scale) / 2 - 5 / current.quality;
+          const progress = ease(editedTime / boost.intro.duration, boost.intro.easing);
+          drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
+        }
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing);
+      }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
     snapshot.current = () => {
@@ -77,8 +91,8 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     setMediaReady(false); setWaiting(true);
     let disposed = false;
     const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
-      frame: () => { if (disposed) return; setMediaReady(true); draw.current(); snapshot.current(); },
-      time: value => { if (!disposed) callbacks.current.onTimestamp(value); },
+      frame: (_source, time) => { if (disposed) return; playbackTimestamp.current = time; setMediaReady(true); draw.current(); snapshot.current(); },
+      time: value => { if (!disposed) { playbackTimestamp.current = value; callbacks.current.onTimestamp(value); } },
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
@@ -89,10 +103,10 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   }, [playbackPath, sourceVersion]);
   useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion]);
   useEffect(() => {
-    player.current?.control({ music: music ?? { path: '', name: '', duration: 1, segments: [] } });
-  }, [music, playbackPath, sourceVersion]);
+    player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, segments: [], fadeOut: null } });
+  }, [music, musicFadeOut, playbackPath, sourceVersion]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
-  useEffect(() => { if (!playing) player.current?.seek(timestamp); }, [timestamp, playing]);
+  useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; player.current?.seek(timestamp); } }, [timestamp, playing]);
   useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, quality, video, playing]);
   function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function move(e: PointerEvent) {

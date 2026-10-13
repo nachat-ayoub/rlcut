@@ -215,6 +215,8 @@ pub struct MusicTrack {
     pub path: String,
     pub duration: f64,
     pub segments: Vec<Segment>,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub fade_out: Option<f64>,
 }
 impl MusicTrack {
     pub fn validate(&self) -> Result<(), String> {
@@ -226,6 +228,12 @@ impl MusicTrack {
         }
         if !self.segments.is_empty() {
             Segment::validate_all(&self.segments, self.duration)?;
+        }
+        if self
+            .fade_out
+            .is_some_and(|duration| !duration.is_finite() || !(0.1..=10.).contains(&duration))
+        {
+            return Err("Invalid music fade duration".into());
         }
         Ok(())
     }

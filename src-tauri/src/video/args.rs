@@ -26,7 +26,7 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
-    export_args_timeline(v, p, segments, o, out, None)
+    export_args_timeline(v, p, segments, o, out, None, None)
 }
 pub fn export_args_timeline(
     v: &Video,
@@ -35,6 +35,7 @@ pub fn export_args_timeline(
     o: &ExportOptions,
     out: &Path,
     music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
 ) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
     if !v.duration.is_finite() || v.duration <= 0. {
@@ -72,9 +73,7 @@ pub fn export_args_timeline(
             BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
             BoostEasing::EaseIn => format!("pow({u},3)"),
             BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
-            BoostEasing::EaseInOut => format!(
-                "if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"
-            ),
+            BoostEasing::EaseInOut => format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"),
         };
         composition = composition.replace(
             &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
@@ -118,9 +117,21 @@ pub fn export_args_timeline(
         let inputs = (0..music.segments.len())
             .map(|i| format!("[mt{i}]"))
             .collect::<String>();
+        let music_duration: f64 = music.segments.iter().map(|s| s.end - s.start).sum();
+        let fade = music_fade_out.map(|requested| {
+            let end = segments
+                .iter()
+                .map(|s| s.end - s.start)
+                .sum::<f64>()
+                .min(music_duration);
+            let duration = requested.min(end);
+            (end - duration, duration)
+        });
         graph.push_str(&format!(
-            ";{inputs}concat=n={}:v=0:a=1,apad[music_edit]",
-            music.segments.len()
+            ";{inputs}concat=n={}:v=0:a=1,apad{}[music_edit]",
+            music.segments.len(),
+            fade.map(|(start, duration)| format!(",afade=t=out:st={start:.6}:d={duration:.6}"))
+                .unwrap_or_default()
         ));
         if v.has_audio {
             graph.push_str(";[audio_edit][music_edit]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]");
@@ -137,7 +148,7 @@ pub fn export_args_timeline(
         "-n".into(),
         "-filter_complex_threads".into(),
         std::thread::available_parallelism()
-            .map(|n| n.get().min(4))
+            .map(|n| n.get())
             .unwrap_or(1)
             .to_string(),
         "-i".into(),
@@ -187,7 +198,7 @@ pub fn export_args_timeline(
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "veryfast",
             "-crf",
             "20",
             "-pix_fmt",

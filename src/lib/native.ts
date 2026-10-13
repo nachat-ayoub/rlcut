@@ -22,8 +22,8 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
     ? { ...args, segments: args.segments.map(({ start, end, volume = 1 }: { start: number; end: number; volume?: number }) => ({ start, end, volume })) }
     : args;
   if (payload?.music && typeof payload.music === 'object') {
-    const music = payload.music as { path: string; duration: number; segments: { start: number; end: number; volume: number }[] };
-    payload.music = { path: music.path, duration: music.duration, segments: music.segments.map(({ start, end, volume }) => ({ start, end, volume })) };
+    const music = payload.music as { path: string; duration: number; fadeOut?: number | null; segments: { start: number; end: number; volume: number }[] };
+    payload.music = { path: music.path, duration: music.duration, fadeOut: music.fadeOut ?? null, segments: music.segments.map(({ start, end, volume }) => ({ start, end, volume })) };
   }
   return window.__TAURI__.core.invoke<T>(command, payload);
 }

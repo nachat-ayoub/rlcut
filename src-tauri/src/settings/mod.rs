@@ -16,9 +16,16 @@ pub struct Settings {
     pub wait_for_preview: bool,
     #[serde(default, skip_serializing)]
     pub boost_intro: bool,
+    #[serde(default)]
+    pub music_fade_out: bool,
+    #[serde(default = "default_music_fade_duration")]
+    pub music_fade_duration: f64,
 }
 fn default_wait_for_preview() -> bool {
     true
+}
+fn default_music_fade_duration() -> f64 {
+    0.5
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -29,6 +36,8 @@ impl Default for Settings {
             default_preset: "classic".into(),
             wait_for_preview: true,
             boost_intro: false,
+            music_fade_out: false,
+            music_fade_duration: default_music_fade_duration(),
         }
     }
 }
@@ -80,6 +89,11 @@ impl Store {
             filename: String::new(),
         }
         .resolution()?;
+        if !self.settings.music_fade_duration.is_finite()
+            || !(0.1..=10.).contains(&self.settings.music_fade_duration)
+        {
+            return Err("Music fade duration must be between 0.1 and 10 seconds".into());
+        }
         Ok(())
     }
 }

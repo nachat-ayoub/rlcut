@@ -78,8 +78,8 @@ Browser mode explicitly reports that native video actions require the desktop ru
    footage. Split/ripple-delete clips, zoom or horizontally scroll the ruler, and
    set selected video-clip volume to 0% when music should replace gameplay audio.
    The diamond marker control targets whichever video or music clip is selected.
-   Clip-body trims preview their ripple layout live so peak-to-peak snapping is visible before release.
-6. Set resolution, FPS, folder and an `.mp4` filename, then export. Enable **Add boost entrance** to choose a 0.1–5 second duration and a basic easing curve. The HUD starts with its right edge 5 output pixels left of the frame while Y stays fixed. Entrance settings are part of the selected preset, including preset JSON import/export. Existing videos are never overwritten. Open the completed file/folder or cancel and discard incomplete output.
+   Clip-body trims preview their ripple layout live so peak-to-peak snapping is visible before release. Timeline editing tools use compact icon controls with accessible labels and tooltips.
+6. Configure the boost entrance in **Boost HUD** and music fade in **Music**. Both effects are part of normal timeline playback, so play or seek through the edited beginning/end to judge them before exporting. The HUD starts with its right edge 5 output pixels left of the frame while Y stays fixed. Entrance settings are part of the selected preset, including preset JSON import/export; music fade defaults to 0.5 seconds. Set resolution, FPS, folder and an `.mp4` filename, then export. The last export folder is remembered and new imports default to the `-edit.mp4` suffix. Existing videos are never overwritten.
 
 Ctrl/⌘ O imports; Ctrl/⌘ E exports; ←/→ steps one nominal frame; Shift ←/→ jumps one second; Escape closes a dialog. VFR stepping uses nominal timestamps rather than indexed decoder frames.
 
@@ -116,7 +116,7 @@ This keeps exported canvas dimensions correct in players and on re-import.
 
 Previews render at 360 × 640, or 240 × 428 for 480p. Cache keys include source path/modification time, timestamp, preset and quality. One preview process runs at a time; obsolete processes are killed. Cached PNGs are bounded to 128 files / 256 MiB. Only reduced preview images enter frontend memory.
 
-Exports use structured process arguments, no shell. Resolution options: 480 × 854 (explicit approximate 9:16), 720 × 1280 and 1080 × 1920. libx264 CRF 20 / medium; AAC 192 kbps when audio exists, padded with silence if shorter than video and trimmed at the video end. 30/60 CFR uses duplication/drop, no interpolation. The worker parses machine-readable microsecond progress, keeps the UI responsive and estimates remaining time when enough progress exists.
+Exports use structured process arguments, no shell. Resolution options: 480 × 854 (explicit approximate 9:16), 720 × 1280 and 1080 × 1920. libx264 keeps CRF 20 with the `veryfast` preset and the composition graph can use every CPU available to the app. This preserves the configured visual quality/resolution/FPS while trading compression efficiency (and potentially file size) for speed. AAC is 192 kbps when audio exists, padded with silence if shorter than video and trimmed at the video end. 30/60 CFR uses duplication/drop, no interpolation. The worker parses machine-readable microsecond progress, keeps the UI responsive and estimates remaining time when enough progress exists.
 
 Exports encode to a hidden `.rlcut-*.partial.mp4` in the chosen folder, then publish atomically with a no-clobber hard link. Use a local filesystem supporting hard links; unsupported filesystems receive an error and partial output is removed. Cancel/failure never touches the input or another output. App close requests cancellation and joins the worker. Unexpected OS termination can leave a hidden partial file for manual removal.
 
