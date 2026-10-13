@@ -1,6 +1,6 @@
 import type { Preset, Store } from '../types';
 export const classic: Preset = {
-  version: 1, id: 'classic', name: 'Classic RL Short',
+  version: 1, id: 'classic', name: 'Default Preset',
   background: { blur: 30, scale: 1, x: 0.5, y: 0.5, brightness: 0 },
   gameplay: { scale: 1, x: 0.5, y: 0.5 },
   boost: { enabled: true, crop: { x: 0.88, y: 0.77, width: 0.115, height: 0.205 }, x: 0.19, y: 0.8, width: 0.12, height: 0.0675, scale: 1, shape: 'circle', feather: 0, intro: { enabled: false, duration: 0.8, easing: 'ease' } },

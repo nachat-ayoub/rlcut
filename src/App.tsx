@@ -11,6 +11,21 @@ import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
 import { editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'crop' | null;
+const customPresetName = (presets: Preset[]) => {
+  const names = new Set(presets.map(preset => preset.name));
+  if (!names.has('Custom Preset')) return 'Custom Preset';
+  let index = 1;
+  while (names.has(`Custom Preset ${index}`)) index++;
+  return `Custom Preset ${index}`;
+};
+const migratePresetNames = (store: Store): Store => {
+  const renamed: Preset[] = [];
+  for (const preset of store.presets) {
+    const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
+    renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
+  }
+  return { ...store, presets: renamed };
+};
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
   const [video, setVideo] = useState<Video | null>(null), [preview, setPreview] = useState<Preview | null>(null), [timestamp, setTimestamp] = useState(0);
@@ -45,7 +60,7 @@ export default function App() {
       setReady(true);
       return;
     }
-    invoke<Init>('initialize').then(data => { setInit(data); setStore(data.store); lastSaved.current = JSON.stringify(data.store); setOutputFolder(data.store.settings.outputFolder); setQuality(data.store.settings.quality); setFps(data.store.settings.fps); setError(data.storageError); setReady(true); }).catch(e => { report(e); setReady(true); });
+    invoke<Init>('initialize').then(data => { const migrated = migratePresetNames(data.store); setInit(data); setStore(migrated); lastSaved.current = JSON.stringify(data.store); setOutputFolder(migrated.settings.outputFolder); setQuality(migrated.settings.quality); setFps(migrated.settings.fps); setError(data.storageError); setReady(true); }).catch(e => { report(e); setReady(true); });
   }, [report]);
   useEffect(() => {
     if (!ready || !isDesktop() || !init || init.storageError)
@@ -64,7 +79,7 @@ export default function App() {
   const replacePreset = useCallback((next: Preset) => {
     setStore(s => {
       if (s.activePreset === 'classic') {
-        const p = copyPreset(next, 'Classic RL Short — custom');
+        const p = copyPreset(next, customPresetName(s.presets));
         return { ...s, activePreset: p.id, presets: [...s.presets, p] };
       }
       return { ...s, presets: s.presets.map(p => p.id === s.activePreset ? { ...next, id: p.id, name: p.name } : p) };
@@ -293,7 +308,7 @@ export default function App() {
       }
     } window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
   }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath, togglePlayback]);
-  function create() { const p = copyPreset(preset); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
+  function create() { const p = copyPreset(preset, customPresetName(store.presets)); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
   function remove() {
     if (preset.id === 'classic')
       return; setStore(s => ({ ...s, presets: s.presets.filter(p => p.id !== preset.id), activePreset: 'classic', settings: { ...s.settings, defaultPreset: s.settings.defaultPreset === preset.id ? 'classic' : s.settings.defaultPreset } })); setRename('');
@@ -321,7 +336,7 @@ export default function App() {
       report(e);
     }
   }
-  function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, 'My RL Short') : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
+  function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
   const b = preset.boost;
   if (!ready)
     return <div className="boot">
@@ -387,7 +402,7 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportMusic={() => void importMusic()}
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()}
         onMarker={(track, value) => {
           if (markers[track] === value) return;
           undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
@@ -430,24 +445,23 @@ export default function App() {
       <div className="inspector-scroll">
         {!layer && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, or boost element in the preview to edit it.</span></div>}
         {layer === 'background' && <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
-          <Slider label="Blur" value={preset.background.blur} max={100} step={1} onChange={blur => edit('background', { blur })} />
-          <Slider label="Scale" value={preset.background.scale} min={1} max={2} onChange={scale => edit('background', { scale })} suffix="×" />
+          <Slider label="Blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
+          <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />
           <div className="two-controls">
-            <Slider label="X offset" value={preset.background.x - .5} min={-.5} max={.5} onChange={x => edit('background', { x: x + .5 })} />
-            <Slider label="Y offset" value={preset.background.y - .5} min={-.5} max={.5} onChange={y => edit('background', { y: y + .5 })} />
+            <Slider label="X offset" value={preset.background.x - .5} min={-.5} max={.5} defaultValue={classic.background.x - .5} onChange={x => edit('background', { x: x + .5 })} />
+            <Slider label="Y offset" value={preset.background.y - .5} min={-.5} max={.5} defaultValue={classic.background.y - .5} onChange={y => edit('background', { y: y + .5 })} />
           </div>
           <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
-          <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} onChange={brightness => edit('background', { brightness })} />
+          <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} defaultValue={classic.background.brightness} onChange={brightness => edit('background', { brightness })} />
         </Section>}
         {layer === 'gameplay' && <Section title="Gameplay" icon={<Film size={16} />} reset={() => reset('gameplay')}>
-          <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} onChange={scale => edit('gameplay', { scale })} suffix="×" />
+          <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
           <div className="two-controls">
-            <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} onChange={x => edit('gameplay', { x: x + .5 })} />
-            <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} onChange={y => edit('gameplay', { y: y + .5 })} />
+            <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />
+            <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} defaultValue={classic.gameplay.y - .5} onChange={y => edit('gameplay', { y: y + .5 })} />
           </div>
           <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
           <button className="text-button" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}>Center gameplay</button>
-          <p className="help-text">Full frame at 1×. Aspect ratio always preserved.</p>
         </Section>}
         {layer === 'boost' && <Section title="Boost HUD" icon={<Gauge size={16} />} reset={() => reset('boost')}>
           <div className="row">
@@ -463,21 +477,21 @@ export default function App() {
             <button className={b.shape === 'ellipse' ? 'active' : ''} onClick={() => edit('boost', { shape: 'ellipse' })}>
               <Circle size={12} style={{ transform: 'scaleX(1.3)' }} />Ellipse</button>
           </div>
-          <Slider label="Boost scale" value={b.scale} min={.25} max={4} onChange={scale => edit('boost', { scale })} suffix="×" />
+          <Slider label="Boost scale" value={b.scale} min={.25} max={4} defaultValue={classic.boost.scale} onChange={scale => edit('boost', { scale })} suffix="×" />
           <div className="two-controls">
-            <Slider label="Width" value={b.width} min={.01} max={1} step={.001} onChange={width => edit('boost', { width })} />
-            <Slider label="Height" value={b.height} min={.005} max={1} step={.001} onChange={height => edit('boost', { height })} />
-            <Slider label="X position" value={b.x - .5} min={-.5} max={.5} onChange={x => edit('boost', { x: x + .5 })} />
-            <Slider label="Y position" value={b.y - .5} min={-.5} max={.5} onChange={y => edit('boost', { y: y + .5 })} />
+            <Slider label="Width" value={b.width} min={.01} max={1} step={.001} defaultValue={classic.boost.width} onChange={width => edit('boost', { width })} />
+            <Slider label="Height" value={b.height} min={.005} max={1} step={.001} defaultValue={classic.boost.height} onChange={height => edit('boost', { height })} />
+            <Slider label="X position" value={b.x - .5} min={-.5} max={.5} defaultValue={classic.boost.x - .5} onChange={x => edit('boost', { x: x + .5 })} />
+            <Slider label="Y position" value={b.y - .5} min={-.5} max={.5} defaultValue={classic.boost.y - .5} onChange={y => edit('boost', { y: y + .5 })} />
           </div>
           <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
-          <Slider label="Edge feather" value={b.feather} max={.25} step={.005} onChange={feather => edit('boost', { feather })} />
+          <Slider label="Edge feather" value={b.feather} max={.25} step={.005} defaultValue={classic.boost.feather} onChange={feather => edit('boost', { feather })} />
           <div className="setting-toggle compact">
-            <div><strong>Entrance animation</strong><small>Previewed directly from the timeline start.</small></div>
+            <div><strong>Entrance animation</strong></div>
             <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
           </div>
           {b.intro.enabled && <div className="boost-intro-settings">
-            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
+            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} defaultValue={classic.boost.intro.duration} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
             <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
           </div>}
           <details className="crop-numbers">
@@ -489,14 +503,13 @@ export default function App() {
               <Slider label="Crop height" value={b.crop.height} min={.001} max={1 - b.crop.y} step={.001} onChange={height => edit('boost', { crop: { ...b.crop, height } })} />
             </div>
           </details>
-          <p className="help-text">Width / height are canvas fractions. Scale multiplies both. Circle masks use the smaller dimension.</p>
         </Section>}
         {music && <Section title="Music" icon={<Music2 size={16} />}>
           <div className="setting-toggle compact">
-            <div><strong>Fade at timeline end</strong><small>Heard during normal preview and applied on export.</small></div>
+            <div><strong>Fade at timeline end</strong></div>
             <input className="switch" type="checkbox" aria-label="Fade music at end" checked={store.settings.musicFadeOut} onChange={e => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeOut: e.target.checked } }))} />
           </div>
-          {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
+          {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
         </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
@@ -514,8 +527,6 @@ export default function App() {
             </button>
           </div>
           </label>
-          <p className="help-text">MP4 · H.264 · {video?.hasAudio ? 'Original audio → AAC' : 'AAC when audio is present'}{quality === 480 ? ' · 480p uses approximate 9:16 dimensions.' : ''}
-          </p>
         </Section>
       </div>
       <div className="export-bottom">
@@ -573,7 +584,7 @@ export default function App() {
           <button onClick={() => finishSetup(false)}>
             <LayoutTemplate size={23} />
             <strong>Use Default Preset</strong>
-            <span>Start with Classic RL Short.</span>
+            <span>Start with the built-in layout.</span>
             <ArrowRight size={17} />
           </button>
           <button onClick={() => finishSetup(true)}>

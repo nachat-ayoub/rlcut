@@ -31,7 +31,7 @@ offline caching and audio mixing are specified in the
 [edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md). The catalog backend
 will remain separate from the desktop application.
 
-The reference informed the lower-left circular HUD and blurred framing. Classic RL Short preserves the complete gameplay frame at 1× as required by the brief; increase gameplay scale (approximately 2.5× for 16:9 input) to approach the enlarged look in the reference. Screenshot captions and player controls are not added. The default boost crop is an initial guess and should be corrected for your HUD.
+The reference informed the lower-left circular HUD and blurred framing. Default Preset preserves the complete gameplay frame at 1× as required by the brief; increase gameplay scale (approximately 2.5× for 16:9 input) to approach the enlarged look in the reference. Screenshot captions and player controls are not added. The default boost crop is an initial guess and should be corrected for your HUD.
 
 ## Requirements and development
 
@@ -70,7 +70,7 @@ Browser mode explicitly reports that native video actions require the desktop ru
 
 ## Usage
 
-1. Choose Classic RL Short or create a custom copy on first launch.
+1. Choose Default Preset or create a Custom Preset on first launch.
 2. Import gameplay. Use **Add video** to append more recordings to the video lane; cached previews for existing clips are reused. Scrub to a frame with a visible boost meter.
 3. Click **Select boost area**. Draw, move or resize the rectangle around the HUD and **Apply crop**; Cancel leaves the composition unchanged.
 4. Adjust background, gameplay and boost controls. Layer guides expose dragging and corner resize handles. **Boost scale** multiplies both configured dimensions; width and height also remain individually adjustable.
