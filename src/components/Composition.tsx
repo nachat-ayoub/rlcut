@@ -16,7 +16,7 @@ type Gesture = {
   preset: Preset;
 };
 type PanGesture = { pointer: number; x: number; y: number; originX: number; originY: number };
-export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   playbackPath: string;
@@ -28,6 +28,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   preview: Preview | null;
   preset: Preset;
   before: boolean;
+  colorPreviewBefore?: boolean;
   guides: boolean;
   layer: Layer | null;
   setLayer: (l: Layer | null) => void;
@@ -50,8 +51,8 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   const [mediaReady, setMediaReady] = useState(false);
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing, segments });
-  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing, segments }; });
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments }; });
   const [waiting, setWaiting] = useState(false);
   const draw = useRef<() => void>(() => { });
   const snapshot = useRef<() => void>(() => { });
@@ -77,7 +78,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
           drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
         }
         const activeClip = current.segments.find(segment => playbackTimestamp.current >= segment.start - .001 && playbackTimestamp.current <= segment.end + .001);
-        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, activeClip?.colorFix ?? 0);
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0);
       }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
@@ -110,7 +111,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   }, [music, musicFadeOut, playbackPath, sourceVersion]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; player.current?.seek(timestamp); } }, [timestamp, playing]);
-  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, quality, video, playing]);
+  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments]);
   const updateZoom = (next: number) => {
     const bounded = Math.max(1, Math.min(4, next));
     const snapped = Math.abs(bounded - 1) < .08 ? 1 : bounded;

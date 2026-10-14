@@ -135,10 +135,11 @@ pub fn export_args_timeline_sources(
         let fix = segments[index].color_fix;
         let correction = if fix > 0.0001 {
             format!(
-                ",eq=contrast={:.5}:saturation={:.5}:gamma={:.5}",
-                1. + 0.16 * fix,
-                1. + 0.22 * fix,
-                1. - 0.06 * fix
+                ",eq=brightness={:.5}:contrast={:.5}:saturation={:.5}:gamma={:.5}",
+                -0.018 * fix,
+                1. + 0.32 * fix,
+                1. + 0.28 * fix,
+                1. / (1. + 0.20 * fix)
             )
         } else {
             String::new()

@@ -57,6 +57,7 @@ export default function App() {
   const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
   const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
+  const [colorPreviewBefore, setColorPreviewBefore] = useState(false);
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0), manualSeekUntil = useRef(0);
   const lastPresetEdit = useRef(0);
@@ -302,7 +303,15 @@ export default function App() {
           return;
         rememberOutputFolder(folder);
       }
-      const p = await invoke<Progress>('start_export', { paths: videoSources.map(source => source.path), preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } });
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } };
+      let p: Progress;
+      try {
+        p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
+      } catch (error) {
+        if (message(error) !== 'OUTPUT_EXISTS') throw error;
+        if (!window.confirm(`“${outputName}” already exists. Replace it?`)) return;
+        p = await invoke<Progress>('start_export', { ...payload, overwrite: true });
+      }
       setProgress(p);
     }
     catch (e) {
@@ -500,7 +509,7 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
       {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => setSelectedClip({ track, id })}
         onMarker={(track, values) => {
           if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
@@ -612,8 +621,8 @@ export default function App() {
         </Section>}
         {selectedVideoSegment && <Section title="Color recovery" icon={<Palette size={16} />}>
           <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
-          <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => setColorFix(event.target.checked ? .65 : 0)} /></div>
-          {colorFixValue > 0 && <Slider label="Strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" />}
+          <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .65 : 0); }} /></div>
+          {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Current playhead frame</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
         </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">

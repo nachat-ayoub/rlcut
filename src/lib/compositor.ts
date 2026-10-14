@@ -76,14 +76,14 @@ class CPUCompositor {
     if ('pixels' in source) {
       const pixels = colorFix > .0001 ? new Uint8ClampedArray(source.pixels) : new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
       if (colorFix > .0001 && !before) {
-        const contrast = 1 + .16 * colorFix, saturation = 1 + .22 * colorFix, gamma = 1 - .06 * colorFix;
+        const contrast = 1 + .32 * colorFix, saturation = 1 + .28 * colorFix, gamma = 1 + .20 * colorFix, brightness = -.018 * colorFix;
         for (let i = 0; i < pixels.length; i += 4) {
           let r = Math.pow(pixels[i] / 255, gamma), g = Math.pow(pixels[i + 1] / 255, gamma), b = Math.pow(pixels[i + 2] / 255, gamma);
           r = (r - .5) * contrast + .5; g = (g - .5) * contrast + .5; b = (b - .5) * contrast + .5;
           const luma = r * .2126 + g * .7152 + b * .0722;
-          pixels[i] = (luma + (r - luma) * saturation) * 255;
-          pixels[i + 1] = (luma + (g - luma) * saturation) * 255;
-          pixels[i + 2] = (luma + (b - luma) * saturation) * 255;
+          pixels[i] = (luma + (r - luma) * saturation + brightness) * 255;
+          pixels[i + 1] = (luma + (g - luma) * saturation + brightness) * 255;
+          pixels[i + 2] = (luma + (b - luma) * saturation + brightness) * 255;
         }
       }
       this.frameContext.putImageData(new ImageData(pixels, sourceWidth, sourceHeight), 0, 0);

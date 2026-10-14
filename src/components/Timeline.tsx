@@ -17,11 +17,11 @@ const MIN_CLIP = .05;
 const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
 const unique = (values: number[]) => values.filter((value, index) => values.findIndex(other => Math.abs(other - value) < .0001) === index);
-const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 2.5v13M8 4.5v9M8 9h6" /></svg>;
-const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M13 2.5v13M10 4.5v9M10 9H4" /></svg>;
-const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v3M9 7v4M9 13v3M3.5 4.5h3v9h-3M14.5 4.5h-3v9h3" /></svg>;
+const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 2.5v2M5 7v2M5 11.5v2M5 15.5v.1M12.5 2.5h-2v13h2" /></svg>;
+const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M13 2.5v2M13 7v2M13 11.5v2M13 15.5v.1M5.5 2.5h2v13h-2" /></svg>;
+const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M7 2.5H5v13h2M11 2.5h2v13h-2" /></svg>;
 const RippleDeleteIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4 5h10M6 5l.6 10h4.8L12 5M7 5V3h4v2M8 7.5v5M10 7.5v5" /></svg>;
-const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.5 14.5 5v4c0 3.2-2.2 5.4-5.5 6.5C5.7 14.4 3.5 12.2 3.5 9V5z" /><path d="M9 5.5v5M6.5 8h5" /></svg>;
+const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.5 14.5 5v4c0 3.2-2.2 5.4-5.5 6.5C5.7 14.4 3.5 12.2 3.5 9V5z" /></svg>;
 
 export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
@@ -277,8 +277,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button onClick={onPlay} disabled={!duration || !playbackReady} title={playbackReady ? undefined : 'Preparing optimized preview…'} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
       <button onClick={() => seekEdited(editedTimestamp + 5)} disabled={!duration} title="Forward 5 seconds" aria-label="Forward 5 seconds"><SkipForward size={15} /></button>
       <span className="timecode">{time(editedTimestamp)} <i>/</i> {time(editedDuration)}</span><span className="timeline-divider" />
-      <button className="editor-tool" onClick={() => cut('start')} disabled={!canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
       <button className="editor-tool" onClick={() => cut('split')} disabled={!canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
+      <button className="editor-tool" onClick={() => cut('start')} disabled={!canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={!canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
       <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><RippleDeleteIcon /></button>
       <button className={`editor-tool marker-action ${selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={!selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>

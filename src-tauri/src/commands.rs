@@ -301,6 +301,7 @@ pub fn start_export(
     options: ExportOptions,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
+    overwrite: bool,
 ) -> Result<Progress, String> {
     if let Some(m) = &music {
         m.validate()?;
@@ -321,7 +322,7 @@ pub fn start_export(
         .collect::<Result<Vec<_>, _>>()?;
     let duration: f64 = videos.iter().map(|video| video.duration).sum();
     Segment::validate_all(&segments, duration)?;
-    let out = export::destination(&videos[0], &options)?;
+    let out = export::destination(&videos[0], &options, overwrite)?;
     if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
         return Err("Output cannot replace a source video".into());
     }
@@ -331,7 +332,11 @@ pub fn start_export(
             return Err("An export is already running".into());
         }
     }
-    let job = Arc::new(Job::new(presets::id(), out.to_string_lossy().into()));
+    let job = Arc::new(Job::new(
+        presets::id(),
+        out.to_string_lossy().into(),
+        overwrite,
+    ));
     let result = job.snapshot()?;
     *slot = Some(job.clone());
     let b = state.binaries.clone();

@@ -741,8 +741,8 @@ h1 {
 .timecode { margin:0 5px; color:#c8bbd2; font-size:8px; font-variant-numeric:tabular-nums; white-space:nowrap }
 .timecode i { color:#62596c; font-style:normal }
 .timeline-divider { height:18px; width:1px; background:#38313f; margin:0 3px }
-.timeline-zoom-wrap { position:relative; display:flex; width:52px; align-items:center }
-.timeline-zoom { width:52px; height:3px; padding:0; accent-color:#a781d3 }
+.timeline-zoom-wrap { position:relative; display:flex; width:clamp(110px,18vw,240px); align-items:center }
+.timeline-zoom { width:100%; height:3px; padding:0; accent-color:#a781d3 }
 .timeline-zoom-wrap>i { position:absolute; z-index:2; left:calc(22.807% + 2.447px); top:50%; width:1px; height:8px; transform:translate(-.5px,-50%); background:#877991; pointer-events:none }
 .volume-popover {
   position:absolute;
@@ -1640,6 +1640,10 @@ progress::-moz-progress-bar {
 .color-scope { display:grid; grid-template-columns:1fr 1fr; gap:3px; margin:0 0 9px; padding:3px; border:1px solid #302a37; border-radius:7px; background:#111016 }
 .color-scope button { min-height:28px; font-size:9px }
 .color-scope button.active { color:#d9c7ff; border-color:#554267; background:#2a2134 }
+.color-preview-toggle { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 0 8px; color:#8f8299; font-size:9px }
+.color-preview-toggle>div { display:flex; padding:2px; border:1px solid #302a37; border-radius:6px; background:#111016 }
+.color-preview-toggle button { min-width:48px; min-height:25px; padding:3px 8px; border-radius:4px; font-size:9px }
+.color-preview-toggle button.active { color:#e0ceff; background:#342642; border-color:#604878 }
 
 .project-home { min-height:100dvh; overflow:auto; padding:0 6vw 60px; background:radial-gradient(circle at 75% -20%,#2c203d 0,transparent 38%),#111116; color:#dedde8 }
 .project-home>header { height:82px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #292731 }
