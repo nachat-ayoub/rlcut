@@ -76,7 +76,8 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
           const progress = ease(editedTime / boost.intro.duration, boost.intro.easing);
           drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
         }
-        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing);
+        const activeClip = current.segments.find(segment => playbackTimestamp.current >= segment.start - .001 && playbackTimestamp.current <= segment.end + .001);
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, activeClip?.colorFix ?? 0);
       }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };

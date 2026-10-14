@@ -102,7 +102,7 @@ impl Default for Preset {
         Self {
             version: 1,
             id: "classic".into(),
-            name: "Classic RL Short".into(),
+            name: "Default Preset".into(),
             background: Background {
                 blur: 30.,
                 scale: 1.,
@@ -258,6 +258,8 @@ pub struct Segment {
     pub end: f64,
     #[cfg_attr(feature = "serialization", serde(default = "default_volume"))]
     pub volume: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub color_fix: f64,
 }
 fn default_volume() -> f64 {
     1.
@@ -267,23 +269,22 @@ impl Segment {
         if segments.is_empty() {
             return Err("Keep at least one timeline segment".into());
         }
-        let mut previous_end = 0.;
         for segment in segments {
             if !segment.start.is_finite()
                 || !segment.end.is_finite()
-                || segment.start < previous_end
                 || segment.start < 0.
                 || segment.end <= segment.start
                 || segment.end > duration + 0.001
                 || !segment.volume.is_finite()
                 || !(0. ..=2.).contains(&segment.volume)
+                || !segment.color_fix.is_finite()
+                || !(0. ..=1.).contains(&segment.color_fix)
             {
                 return Err(
-                    "Timeline segments must be ordered, non-overlapping, and inside the video"
+                    "Timeline clips must have valid source ranges, volume, and color settings"
                         .into(),
                 );
             }
-            previous_end = segment.end;
         }
         Ok(())
     }
@@ -331,6 +332,7 @@ mod tests {
             start: 0.,
             end: 1.,
             volume: 1.,
+            color_fix: 0.,
         }];
         Segment::validate_all(&segments, 1.).unwrap();
         segments[0].volume = f64::NAN;

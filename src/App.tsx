@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Pencil, Plus, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Segment, Store, TrackMarkers, Video } from './types';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
+import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -9,6 +9,7 @@ import { Composition } from './components/Composition';
 import { Alignment } from './components/Alignment';
 import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
+import { ProjectHome } from './components/ProjectHome';
 import { editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'crop' | null;
 const customPresetName = (presets: Preset[]) => {
@@ -18,13 +19,14 @@ const customPresetName = (presets: Preset[]) => {
   while (names.has(`Custom Preset ${index}`)) index++;
   return `Custom Preset ${index}`;
 };
+const matchesHdr = (transfer?: string) => transfer === 'smpte2084' || transfer === 'arib-std-b67';
 const migratePresetNames = (store: Store): Store => {
   const renamed: Preset[] = [];
   for (const preset of store.presets) {
     const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
-  return { ...store, presets: renamed };
+  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => ({ ...project, segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) })) };
 };
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
@@ -43,6 +45,8 @@ export default function App() {
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: null, music: null });
+  const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0), manualSeekUntil = useRef(0);
   const lastPresetEdit = useRef(0);
@@ -126,6 +130,7 @@ export default function App() {
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPath = useCallback(async (path: string) => {
+    setHome(false);
     const ticket = ++importRevision.current;
     setImporting(storeRef.current.settings.waitForPreview);
     setPreparation(null); setProxyPreparing(true); setPlaying(false); setError(null);
@@ -145,9 +150,10 @@ export default function App() {
         undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
         if (undoStack.current.length > 100) undoStack.current.shift();
         redoStack.current = []; lastPresetEdit.current = 0;
-        setSegments(current => [...current, { id: crypto.randomUUID(), start: sourceOffset, end: sourceOffset + v.duration, volume: 1 }]);
+        setSegments(current => [...current, { id: crypto.randomUUID(), start: sourceOffset, end: sourceOffset + v.duration, volume: current[0]?.volume ?? 1, colorFix: 0 }]);
       } else {
-        setSegments([{ id: crypto.randomUUID(), start: 0, end: v.duration, volume: 1 }]);
+        const id = crypto.randomUUID();
+        setSegments([{ id, start: 0, end: v.duration, volume: 1, colorFix: 0 }]); setSelectedClip({ track: 'video', id });
         setMusic(null); setMarkers({ video: null, music: null });
         undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
         playhead.current = 0; setTimestamp(0); setBefore(false);
@@ -185,7 +191,7 @@ export default function App() {
         if (undoStack.current.length > 100) undoStack.current.shift();
         lastPresetEdit.current = 0;
         redoStack.current = [];
-        setMusic({ ...selected, segments: [{ id: crypto.randomUUID(), start: 0, end: selected.duration, volume: 1 }] });
+        const id = crypto.randomUUID(); setMusic({ ...selected, segments: [{ id, start: 0, end: selected.duration, volume: 1, colorFix: 0 }] }); setSelectedClip({ track: 'music', id });
         setMarkers(current => ({ ...current, music: null }));
         setPlaying(false);
       }
@@ -237,11 +243,12 @@ export default function App() {
       if (now - lastTimeReport.current >= 80) { lastTimeReport.current = now; setTimestamp(value); }
       return;
     }
+    if (playing) return;
     const next = segments.find(segment => segment.start > value);
     if (next) { playhead.current = next.start; setTimestamp(next.start); return next.start; }
     const end = segments.at(-1)?.end ?? value;
     playhead.current = end; setPlaying(false); setTimestamp(end); return end;
-  }, [segments]);
+  }, [segments, playing]);
   const updatePlaying = useCallback((value: boolean) => { if (!value) setTimestamp(playhead.current); setPlaying(value); }, []);
   const rememberOutputFolder = useCallback((folder: string) => {
     setOutputFolder(folder);
@@ -283,7 +290,7 @@ export default function App() {
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
-        if (modal) setModal(null); else setPreviewExpanded(false);
+        if (modal) { setModal(null); if (!video) setHome(true); } else setPreviewExpanded(false);
         return;
       } if (input || modal)
         return; if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
@@ -293,6 +300,9 @@ export default function App() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e') {
         e.preventDefault();
         void startExport();
+      }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault(); saveCurrentProject();
       }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault(); if (e.shiftKey) redo(); else undo();
@@ -337,18 +347,81 @@ export default function App() {
     }
   }
   function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
+  function resetProject() {
+    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: null, music: null }); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
+  }
+  function projectSnapshot(id: string, name: string, createdAt: number): Project {
+    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), preset: structuredClone(preset), quality, fps, outputFolder, outputName };
+  }
+  function saveCurrentProject(showNotice = true) {
+    if (!video || !videoSources.length) return;
+    const existing = storeRef.current.projects.find(project => project.id === currentProjectId);
+    const id = existing?.id ?? crypto.randomUUID(), createdAt = existing?.createdAt ?? Date.now();
+    const name = existing?.name ?? (filename(videoSources[0].path).replace(/\.[^.]+$/, '') || 'Untitled project');
+    const project = projectSnapshot(id, name, createdAt);
+    setCurrentProjectId(id);
+    setStore(current => ({ ...current, projects: [...current.projects.filter(item => item.id !== id), project] }));
+    if (showNotice) setNotice(existing ? 'Project saved' : 'Project added to your library');
+  }
+  useEffect(() => {
+    if (!video || !videoSources.length || proxyPreparing) return;
+    if (!currentProjectId) { saveCurrentProject(false); return; }
+    const timer = setTimeout(() => saveCurrentProject(false), 650);
+    return () => clearTimeout(timer);
+    // Project edits are saved after a short idle period.
+  }, [currentProjectId, video, videoSources, segments, music, markers, preset, quality, fps, outputFolder, outputName, proxyPreparing]);
+  async function openProject(project: Project) {
+    if (!project.videoPaths.length) { setError('This project has no video files.'); return; }
+    const ticket = ++importRevision.current; setProjectLoading(true); setError(null); setPlaying(false);
+    try {
+      const sources: Video[] = [];
+      for (const path of project.videoPaths) sources.push(await invoke<Video>('import_video', { path }));
+      if (ticket !== importRevision.current) return;
+      const proxy = await invoke<string>('create_timeline_proxy', { paths: project.videoPaths });
+      if (ticket !== importRevision.current) return;
+      const total = sources.reduce((sum, source) => sum + source.duration, 0);
+      const restoredSegments = project.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 }));
+      const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
+      setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(project.markers); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+    } catch (error) { if (ticket === importRevision.current) report(error); }
+    finally { if (ticket === importRevision.current) setProjectLoading(false); }
+  }
+  async function importProjectFile() {
+    try {
+      const imported = await invoke<Project | null>('import_project'); if (!imported) return;
+      const project = { ...imported, id: crypto.randomUUID(), name: store.projects.some(item => item.name === imported.name) ? `${imported.name} (Imported)` : imported.name, createdAt: Date.now(), updatedAt: Date.now() };
+      setStore(current => ({ ...current, projects: [...current.projects, project] }));
+      await openProject(project);
+    } catch (error) { report(error); }
+  }
+  async function exportProjectFile(project: Project) { try { if (await invoke<boolean>('export_project', { project })) setNotice('Project file exported'); } catch (error) { report(error); } }
   const b = preset.boost;
+  const selectedVideoSegment = selectedClip?.track === 'video' ? segments.find(segment => segment.id === selectedClip.id) ?? null : null;
+  const colorFixValue = colorScope === 'all' ? (segments.every(segment => Math.abs(segment.colorFix - (segments[0]?.colorFix ?? 0)) < .001) ? segments[0]?.colorFix ?? 0 : selectedVideoSegment?.colorFix ?? 0) : selectedVideoSegment?.colorFix ?? 0;
+  const setColorFix = (value: number) => {
+    if (!selectedVideoSegment) return;
+    editSegments(segments.map(segment => colorScope === 'all' || segment.id === selectedVideoSegment.id ? { ...segment, colorFix: value } : segment), true);
+  };
+  let selectedSource: Video | null = null, sourceOffset = 0;
+  if (selectedVideoSegment) for (const source of videoSources) { if (selectedVideoSegment.start >= sourceOffset && selectedVideoSegment.start < sourceOffset + source.duration) { selectedSource = source; break; } sourceOffset += source.duration; }
   if (!ready)
     return <div className="boot">
       <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
       <span>Opening rlcut…</span>
     </div>;
+  if (store.setupComplete && home) return <ProjectHome projects={store.projects} busy={projectLoading} alert={error ?? notice} onDismissAlert={() => { setError(null); setNotice(null); }} onNew={() => { resetProject(); setHome(false); }} onOpen={project => void openProject(project)} onImport={() => void importProjectFile()} onExport={project => void exportProjectFile(project)} onDelete={project => {
+    if (!window.confirm(`Delete “${project.name}”? The source videos will not be deleted.`)) return;
+    setStore(current => ({ ...current, projects: current.projects.filter(item => item.id !== project.id) }));
+    if (currentProjectId === project.id) resetProject();
+  }} onSettings={() => { setHome(false); setModal('settings'); }} />;
   return <div className={`app-shell ${video ? '' : 'no-video'} ${previewExpanded ? 'preview-expanded' : ''}`} onPointerDownCapture={e => { const target = e.target as HTMLElement; if (target.closest('.preview-stage') && !target.closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">
         <img className="brand-logo" src="/branding/logo.png" alt="rlcut" />
         <small>DESKTOP</small>
       </div>
+      <button className="nav-item home-button" onClick={() => { setPlaying(false); setHome(true); }}><Home size={17} />Projects</button>
       <button className="import-button" onClick={() => void importVideo()} disabled={importing}>
         {importing ? <LoaderCircle className="spin" size={17} /> : <Plus size={18} />}{video ? 'Add video' : 'Import video'}<kbd>⌘ O</kbd>
       </button>
@@ -389,6 +462,7 @@ export default function App() {
           </small>}
         </div>
         <div className="toolbar-actions">
+          <button onClick={() => saveCurrentProject()} title="Save project (Ctrl+S)"><Save size={15} />Save</button>
           <button className={before ? 'active' : ''} onClick={() => setBefore(!before)} disabled={!preview} title="Before / after">
             <Eye size={15} />
             {before ? 'Source' : 'Before / after'}
@@ -402,7 +476,7 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()}
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => setSelectedClip({ track, id })}
         onMarker={(track, value) => {
           if (markers[track] === value) return;
           undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
@@ -511,6 +585,11 @@ export default function App() {
           </div>
           {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
         </Section>}
+        {selectedVideoSegment && <Section title="Color recovery" icon={<Palette size={16} />}>
+          <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
+          <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => setColorFix(event.target.checked ? .65 : 0)} /></div>
+          {colorFixValue > 0 && <Slider label="Strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" />}
+        </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
             <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
@@ -608,7 +687,7 @@ export default function App() {
               {modal === 'presets' ? 'Manage presets' : 'Settings'}
             </h2>
           </div>
-          <button aria-label="Close dialog" onClick={() => setModal(null)}>
+          <button aria-label="Close dialog" onClick={() => { setModal(null); if (!video) setHome(true); }}>
             <X size={20} />
           </button>
         </div>
@@ -672,7 +751,7 @@ export default function App() {
             }}>
               <Trash2 size={15} />Clear preview cache</button>
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
-            <button className="primary" onClick={() => { setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); }}>Apply defaults</button>
+            <button className="primary" onClick={() => { setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
           </div>
           <p className="help-text">Shortcuts: Ctrl / ⌘ O import · Ctrl / ⌘ E export · ← / → frame · Shift ← / → one second</p>
         </>}

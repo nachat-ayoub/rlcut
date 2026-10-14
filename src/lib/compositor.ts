@@ -66,7 +66,7 @@ class CPUCompositor {
     this.ctx = ctx;
     this.frameContext = this.frame.getContext('2d', { alpha: false })!;
   }
-  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
     const width = playing ? 360 : Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
     const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
     if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
@@ -74,7 +74,18 @@ class CPUCompositor {
     // WebKit does not need to download the video texture three separate times.
     if (this.frame.width !== sourceWidth || this.frame.height !== sourceHeight) { this.frame.width = sourceWidth; this.frame.height = sourceHeight; }
     if ('pixels' in source) {
-      const pixels = new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
+      const pixels = colorFix > .0001 ? new Uint8ClampedArray(source.pixels) : new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
+      if (colorFix > .0001 && !before) {
+        const contrast = 1 + .16 * colorFix, saturation = 1 + .22 * colorFix, gamma = 1 - .06 * colorFix;
+        for (let i = 0; i < pixels.length; i += 4) {
+          let r = Math.pow(pixels[i] / 255, gamma), g = Math.pow(pixels[i + 1] / 255, gamma), b = Math.pow(pixels[i + 2] / 255, gamma);
+          r = (r - .5) * contrast + .5; g = (g - .5) * contrast + .5; b = (b - .5) * contrast + .5;
+          const luma = r * .2126 + g * .7152 + b * .0722;
+          pixels[i] = (luma + (r - luma) * saturation) * 255;
+          pixels[i + 1] = (luma + (g - luma) * saturation) * 255;
+          pixels[i + 2] = (luma + (b - luma) * saturation) * 255;
+        }
+      }
       this.frameContext.putImageData(new ImageData(pixels, sourceWidth, sourceHeight), 0, 0);
     } else this.frameContext.drawImage(source, 0, 0);
     source = this.frame;
@@ -149,13 +160,13 @@ export class Compositor {
     this.stats = { frames: 0, costs: [], backend: gl ? 'gpu' : 'cpu' };
     (canvas as CompositionCanvas).compositionStats = this.stats;
   }
-  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
     const start = performance.now();
     if (this.gpu) {
       const width = Math.min(playing ? 540 : 720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
       const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
-      this.gpu.draw(source, video, preset, scene(video, preset, width, height), before);
-    } else this.cpu!.draw(source, sourceWidth, sourceHeight, video, preset, quality, before, playing);
+      this.gpu.draw(source, video, preset, scene(video, preset, width, height), before, colorFix);
+    } else this.cpu!.draw(source, sourceWidth, sourceHeight, video, preset, quality, before, playing, colorFix);
     this.stats.frames++;
     if (this.stats.costs.length === 120) this.stats.costs.shift();
     const cost = performance.now() - start;

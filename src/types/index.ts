@@ -64,6 +64,7 @@ export type Store = {
   presets: Preset[];
   settings: Settings;
   recentFiles: string[];
+  projects: Project[];
 };
 export type Preview = {
   source: string;
@@ -84,6 +85,7 @@ export type Segment = {
   start: number;
   end: number;
   volume: number;
+  colorFix: number;
 };
 export type MusicFile = {
   path: string;
@@ -94,6 +96,22 @@ export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | n
 export type TrackMarkers = {
   video: number | null;
   music: number | null;
+};
+export type Project = {
+  version: 1;
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  videoPaths: string[];
+  segments: Segment[];
+  music: MusicTrack | null;
+  markers: TrackMarkers;
+  preset: Preset;
+  quality: number;
+  fps: number;
+  outputFolder: string;
+  outputName: string;
 };
 export type Init = {
   store: Store;

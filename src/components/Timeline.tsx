@@ -8,10 +8,11 @@ type Track = 'video' | 'music';
 type ClipGesture = {
   mode: 'edge' | 'body'; track: Track; id: string; edge: 'start' | 'end'; pointer: number;
   x: number; value: number; min: number; max: number; offset: number; clipStart: number;
-  moved: boolean;
+  index: number; moved: boolean;
 };
 type MarkerGesture = { track: Track; pointer: number; x: number; value: number };
 type TrimPreview = { mode: 'edge' | 'body'; track: Track; id: string; edge: 'start' | 'end'; value: number; snapped: boolean };
+type ReorderPreview = { track: Track; id: string; target: number; offset: number; width: number };
 const MIN_CLIP = .05;
 const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
@@ -21,7 +22,7 @@ const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v3M9 7.5v3M9 13v3M3 4.5h3v9H3M15 4.5h-3v9h3" /></svg>;
 const RippleDeleteIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h4v8H3M15 5h-4v8h4M7 7l4 4M11 7l-4 4" /></svg>;
 
-export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onUndo, onRedo, onImportVideo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
@@ -36,6 +37,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   onPlay: () => void;
   onEdit: (track: Track, segments: Segment[]) => void;
   onMarker: (track: Track, value: number) => void;
+  onSelectionChange: (track: Track, id: string) => void;
   onUndo: () => void;
   onRedo: () => void;
   onImportVideo: () => void;
@@ -44,6 +46,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const [pixelsPerSecond, setPixelsPerSecond] = useState(64);
   const [selection, setSelection] = useState<{ track: Track; id: string }>({ track: 'video', id: segments[0]?.id ?? '' });
   const [trimPreview, setTrimPreview] = useState<TrimPreview | null>(null);
+  const [reorderPreview, setReorderPreview] = useState<ReorderPreview | null>(null);
   const [markerPreview, setMarkerPreview] = useState<{ track: Track; edited: number; snapped: boolean } | null>(null);
   const [volume, setVolume] = useState(1);
   const [volumeOpen, setVolumeOpen] = useState(false);
@@ -87,7 +90,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   useEffect(() => {
     if (!segments.some(s => selection.track === 'video' && s.id === selection.id) && !musicSegments.some(s => selection.track === 'music' && s.id === selection.id)) setSelection({ track: 'video', id: segments[0]?.id ?? '' });
   }, [segments, musicSegments, selection]);
-  useEffect(() => { volumeDirty.current = false; setVolume(selected?.volume ?? 1); }, [selection, selected?.volume]);
+  const selectedVolume = selection.track === 'video' ? segments[0]?.volume ?? 1 : selected?.volume ?? 1;
+  useEffect(() => { volumeDirty.current = false; setVolume(selectedVolume); }, [selection, selectedVolume]);
   useEffect(() => {
     if (!volumeOpen) return;
     const close = (event: globalThis.PointerEvent) => {
@@ -117,7 +121,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     lastRulerSeek.current = value;
     seekEdited(value);
   };
-  const select = (track: Track, clip: Segment) => { volumeDirty.current = false; setVolume(clip.volume); setSelection({ track, id: clip.id }); };
+  const select = (track: Track, clip: Segment) => { volumeDirty.current = false; setVolume(track === 'video' ? segments[0]?.volume ?? 1 : clip.volume); setSelection({ track, id: clip.id }); onSelectionChange(track, clip.id); };
   const nearest = (raw: number, candidates: number[]) => {
     const candidate = candidates.filter(Number.isFinite).sort((a, b) => Math.abs(a - raw) - Math.abs(b - raw))[0];
     return candidate != null && Math.abs(candidate - raw) * pixelsPerSecond <= SNAP_PIXELS ? candidate : null;
@@ -127,7 +131,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     const range = track === 'video' ? sourceRanges.find(source => clip.start >= source.start - .001 && clip.end <= source.end + .001) : null;
     const base = trimBounds(lanes[track], index, track === 'video' ? duration : music?.duration ?? 0, MIN_CLIP)[edge];
     const bounds = range ? { min: Math.max(base.min, range.start), max: Math.min(base.max, range.end) } : base;
-    gesture.current = { mode, track, id: clip.id, edge, pointer: event.pointerId, x: event.clientX, value: clip[edge], min: bounds.min, max: bounds.max, offset, clipStart: clip.start, moved: false };
+    gesture.current = { mode, track, id: clip.id, edge, pointer: event.pointerId, x: event.clientX, value: clip[edge], min: bounds.min, max: bounds.max, offset, clipStart: clip.start, index, moved: false };
   };
   const gestureValue = (event: PointerEvent<HTMLElement>, state: ClipGesture) => {
     const delta = (event.clientX - state.x) / pixelsPerSecond;
@@ -148,15 +152,35 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     const state = gesture.current; if (!state || state.pointer !== event.pointerId) return;
     if (Math.abs(event.clientX - state.x) < 2 && !state.moved) return;
     state.moved = true;
+    if (state.mode === 'body') {
+      const lane = lanes[state.track], clip = lane[state.index], remaining = lane.filter(segment => segment.id !== state.id);
+      const center = state.offset + (clip.end - clip.start) / 2 + (event.clientX - state.x) / pixelsPerSecond;
+      let cursor = 0, target = 0;
+      for (const segment of remaining) {
+        const length = segment.end - segment.start;
+        if (center >= cursor + length / 2) target++;
+        cursor += length;
+      }
+      const ghostOffset = remaining.slice(0, target).reduce((sum, segment) => sum + segment.end - segment.start, 0);
+      setReorderPreview({ track: state.track, id: state.id, target, offset: ghostOffset, width: clip.end - clip.start });
+      return;
+    }
     setTrimPreview({ mode: state.mode, track: state.track, id: state.id, edge: state.edge, ...gestureValue(event, state) });
   };
   const finishClip = (event: PointerEvent<HTMLElement>) => {
     const state = gesture.current; if (!state || state.pointer !== event.pointerId) return;
+    if (state.mode === 'body') {
+      const preview = reorderPreview; gesture.current = null; setReorderPreview(null);
+      if (!state.moved || !preview) return;
+      const reordered = lanes[state.track].filter(segment => segment.id !== state.id);
+      reordered.splice(preview.target, 0, lanes[state.track][state.index]);
+      if (reordered.some((segment, index) => segment.id !== lanes[state.track][index]?.id)) onEdit(state.track, reordered);
+      return;
+    }
     const result = gestureValue(event, state); gesture.current = null; setTrimPreview(null);
-    if (state.mode === 'body' && !state.moved) return;
     if (Math.abs(result.value - state.value) > .001) onEdit(state.track, lanes[state.track].map(clip => clip.id === state.id ? { ...clip, [state.edge]: result.value } : clip));
   };
-  const cancelClip = () => { gesture.current = null; setTrimPreview(null); };
+  const cancelClip = () => { gesture.current = null; setTrimPreview(null); setReorderPreview(null); };
   const nudgeTrim = (event: KeyboardEvent<HTMLButtonElement>, track: Track, clip: Segment, edge: 'start' | 'end', index: number) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     event.preventDefault(); event.stopPropagation(); select(track, clip);
@@ -191,7 +215,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     if (!lanes[track].length) return;
     onMarker(track, track === 'video' ? timestamp : editedToSource(musicSegments, Math.min(musicDuration, editedTimestamp)));
   };
-  const setGain = (gain: number) => { if (selected) onEdit(selection.track, clips.map(segment => segment.id === selected.id ? { ...segment, volume: gain } : segment)); };
+  const setGain = (gain: number) => { if (selected) onEdit(selection.track, clips.map(segment => selection.track === 'video' || segment.id === selected.id ? { ...segment, volume: gain } : segment)); };
   const commitVolume = () => { if (selected && volumeDirty.current) { volumeDirty.current = false; setGain(volume); } };
   const cut = (operation: 'start' | 'end' | 'split') => {
     if (!selected || !canCut) return;
@@ -236,7 +260,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     const inset = trimPreview?.mode === 'edge' && trimPreview.track === track && trimPreview.id === clip.id && trimPreview.edge === 'start' ? trimPreview.value - clip.start : 0;
     const Icon = track === 'video' ? Film : Music2;
     const offset = trimPreview?.mode === 'body' ? displayOffsets[track][index] : offsets[track][index];
-    return <div key={clip.id} className={`timeline-segment ${track === 'music' ? 'music-segment' : ''} ${selection.track === track && selection.id === clip.id ? 'selected' : ''} ${trimPreview?.track === track && trimPreview.id === clip.id ? 'trimming' : ''}`} style={{ left: `${(offset + inset) * pixelsPerSecond}px`, width: `${(preview.end - preview.start) * pixelsPerSecond}px` }} title="Drag clip body left to shorten from its start; drag right to restore" onPointerDown={event => beginClip(event, 'body', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip}>
+    return <div key={clip.id} className={`timeline-segment ${track === 'music' ? 'music-segment' : ''} ${selection.track === track && selection.id === clip.id ? 'selected' : ''} ${trimPreview?.track === track && trimPreview.id === clip.id ? 'trimming' : ''} ${reorderPreview?.id === clip.id ? 'reordering' : ''}`} style={{ left: `${(offset + inset) * pixelsPerSecond}px`, width: `${(preview.end - preview.start) * pixelsPerSecond}px` }} title="Drag to reorder · use edge handles to trim" onPointerDown={event => beginClip(event, 'body', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip}>
       <button className="trim-handle start" aria-label={`Trim or extend ${track} clip from left`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'start', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
       <span className="clip-fill"><Icon size={12} /><b>{track === 'music' ? music?.name : `Clip ${index + 1}`}</b><small>{time(preview.start)} – {time(preview.end)}</small>{clip.volume === 0 && <VolumeX size={11} />}</span>
       <button className="trim-handle end" aria-label={`Trim or extend ${track} clip from right`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'end', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'end', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
@@ -246,6 +270,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     const value = visibleMarkerEdited(track); if (value == null) return null;
     return <button className={`track-marker ${track} ${markerPreview?.track === track && markerPreview.snapped ? 'snapped' : ''}`} style={{ left: `${value * pixelsPerSecond}px` }} aria-label={`Drag ${track} peak marker`} title={`${track === 'video' ? 'Video' : 'Music'} peak · drag to move, Alt for no snapping`} onPointerDown={event => beginMarker(event, track, value)} onPointerMove={moveMarker} onPointerUp={finishMarker} onPointerCancel={() => { markerGesture.current = null; setMarkerPreview(null); }}><Diamond size={9} fill="currentColor" /></button>;
   };
+  const renderReorderGhost = (track: Track) => reorderPreview?.track === track ? <div className={`reorder-ghost ${track}`} style={{ left: `${reorderPreview.offset * pixelsPerSecond}px`, width: `${reorderPreview.width * pixelsPerSecond}px` }} /> : null;
   const addPosition = (track: Track) => durationOf(displayLanes[track]) * pixelsPerSecond + 9;
   return <section className="timeline" aria-label="Editor timeline" onWheel={wheelZoom}>
     <div className="transport">
@@ -263,14 +288,15 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     </div>
     {volumeOpen && selected && <div className="volume-popover" ref={volumePopover}>
       <button onClick={() => { const next = volume > 0 ? 0 : 1; volumeDirty.current = false; setVolume(next); setGain(next); }} aria-label={volume > 0 ? 'Mute selected clip' : 'Unmute selected clip'}>{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
-      <input aria-label="Selected clip volume" type="range" min="0" max="2" step=".01" value={volume} onChange={event => { const raw = Number(event.target.value); volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .08 ? 1 : raw); }} onPointerUp={commitVolume} onKeyUp={commitVolume} onBlur={commitVolume} /><i className="volume-default" /><strong>{Math.round(volume * 100)}%</strong>
+      <div className="volume-range"><input aria-label="Volume" type="range" min="0" max="2" step=".01" value={volume} style={{ '--range-fill': `${volume / 2 * 100}%` } as React.CSSProperties} onChange={event => { const raw = Number(event.target.value); volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .06 ? 1 : raw); }} onPointerUp={commitVolume} onKeyUp={commitVolume} onBlur={commitVolume} /><i /></div>
+      <label className="volume-value"><input aria-label="Volume percent" type="number" min="0" max="200" step="1" value={Math.round(volume * 100)} onChange={event => { const raw = Math.max(0, Math.min(200, event.target.valueAsNumber || 0)) / 100; volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .02 ? 1 : raw); }} onKeyDown={event => { if (event.key === 'Enter') { commitVolume(); event.currentTarget.blur(); } }} onBlur={commitVolume} /><span>%</span></label>
     </div>}
     <div className="timeline-editor">
       <div className="track-labels" aria-hidden="true"><div className="ruler-corner" /><div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div></div>
       <div className="timeline-scroll" ref={scroll}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
-        <div className="video-track">{renderClips('video')}{renderMarker('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
-        <div className="music-track">{renderClips('music')}{renderMarker('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
+        <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarker('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
+        <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarker('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
         <i className={`playhead ${trimPreview?.snapped || markerPreview?.snapped ? 'snapped' : ''}`} style={{ left: `${editedTimestamp * pixelsPerSecond}px` }}><span /></i>
       </div></div>
     </div>

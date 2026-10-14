@@ -42,7 +42,9 @@ pub fn run() {
             commands::cancel_export,
             commands::open_export,
             commands::import_preset,
-            commands::export_preset
+            commands::export_preset,
+            commands::import_project,
+            commands::export_project
         ])
         .build(tauri::generate_context!())
         .expect("Unable to build rlcut")

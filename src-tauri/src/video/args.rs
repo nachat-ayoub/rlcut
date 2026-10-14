@@ -14,6 +14,7 @@ pub fn export_args(
             start: 0.,
             end: v.duration,
             volume: 1.,
+            color_fix: 0.,
         }],
         o,
         out,
@@ -127,8 +128,19 @@ pub fn export_args_timeline_sources(
                 videos[0].width, videos[0].height
             )
         };
+        let fix = segments[index].color_fix;
+        let correction = if fix > 0.0001 {
+            format!(
+                ",eq=contrast={:.5}:saturation={:.5}:gamma={:.5}",
+                1. + 0.16 * fix,
+                1. + 0.22 * fix,
+                1. - 0.06 * fix
+            )
+        } else {
+            String::new()
+        };
         graph.push_str(&format!(
-            ";[edit{index}]trim=start={start:.6}:end={end:.6},setpts=PTS-STARTPTS{normalize}[v{index}]"
+            ";[edit{index}]trim=start={start:.6}:end={end:.6},setpts=PTS-STARTPTS{normalize}{correction}[v{index}]"
         ));
     }
     let video_inputs = (0..segments.len())

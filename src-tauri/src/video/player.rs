@@ -30,6 +30,7 @@ pub struct Player {
     seeking: Option<f64>,
     ended: bool,
     segments: Vec<Segment>,
+    segment_index: usize,
     rgba: Vec<u8>,
     sequence: u32,
     frame_time: f64,
@@ -76,6 +77,7 @@ impl Player {
             seeking: None,
             ended: false,
             segments,
+            segment_index: 0,
             rgba: Vec::new(),
             sequence: 0,
             frame_time: time,
@@ -84,7 +86,6 @@ impl Player {
             error: None,
             music: None,
         };
-        player.update_volume(time);
         player.seek(time)?;
         Ok(player)
     }
@@ -118,13 +119,15 @@ impl Player {
             return Ok(());
         }
         let source = unsafe { rl_player_position(self.handle) };
-        let mut edited = 0.;
-        for segment in &self.segments {
-            edited += (source - segment.start).clamp(0., segment.end - segment.start);
-            if source < segment.end {
-                break;
-            }
-        }
+        let edited = self
+            .segments
+            .iter()
+            .take(self.segment_index)
+            .map(|segment| segment.end - segment.start)
+            .sum::<f64>()
+            + self.segments.get(self.segment_index).map_or(0., |segment| {
+                (source - segment.start).clamp(0., segment.end - segment.start)
+            });
         if let Some(music) = self.music.as_mut() {
             let timeline_duration = self.segments.iter().map(|s| s.end - s.start).sum();
             music.sync(
@@ -146,38 +149,30 @@ impl Player {
         Ok(())
     }
     pub fn seek(&mut self, time: f64) -> Result<(), String> {
-        let time = self.kept(time).unwrap_or_else(|| {
-            self.segments
-                .last()
-                .map_or(0., |s| (s.end - 0.001).max(s.start))
-        });
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| time >= segment.start && time < segment.end)
+            .unwrap_or_else(|| self.segments.len().saturating_sub(1));
+        let segment = self.segments.get(index).ok_or("Timeline has no clips")?;
+        let time = time.clamp(segment.start, (segment.end - 0.001).max(segment.start));
+        self.seek_segment(index, time)
+    }
+    fn seek_segment(&mut self, index: usize, time: f64) -> Result<(), String> {
         if unsafe { rl_player_seek(self.handle, time) } == 0 {
             return Err("Native player could not seek".into());
         }
-        self.update_volume(time);
+        self.segment_index = index;
+        self.update_volume();
         self.seeking = Some(time);
         self.ended = false;
         self.sync_music(true)?;
         Ok(())
     }
-    fn kept(&self, time: f64) -> Option<f64> {
-        for s in &self.segments {
-            if time < s.start {
-                return Some(s.start);
-            }
-            if time < s.end {
-                return Some(time);
-            }
-        }
-        None
-    }
-    fn update_volume(&mut self, time: f64) {
+    fn update_volume(&mut self) {
         let volume = self
             .segments
-            .iter()
-            .find(|segment| time >= segment.start && time < segment.end)
-            .or_else(|| self.segments.iter().find(|segment| time < segment.start))
-            .or_else(|| self.segments.last())
+            .get(self.segment_index)
             .map_or(1., |segment| segment.volume);
         if (volume - self.volume).abs() > 0.001 {
             unsafe { rl_player_volume(self.handle, volume) };
@@ -185,16 +180,21 @@ impl Player {
         }
     }
     pub fn segments(&mut self, segments: Vec<Segment>) -> Result<(), String> {
-        self.segments = segments;
         let time = unsafe { rl_player_position(self.handle) };
-        if let Some(next) = self.kept(time) {
-            if (next - time).abs() > 0.01 {
-                self.seek(next)?;
-            }
-        } else {
-            self.play(false)?;
-            self.seek(time)?;
+        self.segments = segments;
+        self.segment_index = self
+            .segments
+            .iter()
+            .position(|segment| time >= segment.start && time < segment.end)
+            .unwrap_or(0);
+        let segment = self
+            .segments
+            .get(self.segment_index)
+            .ok_or("Timeline has no clips")?;
+        if time < segment.start || time >= segment.end {
+            self.seek_segment(self.segment_index, segment.start)?;
         }
+        self.update_volume();
         Ok(())
     }
     pub fn tick(&mut self) -> Result<(), String> {
@@ -206,8 +206,19 @@ impl Player {
                 .into());
         }
         if status == 1 {
-            self.play(false)?;
-            self.ended = true;
+            if let Some(next) = self.segments.get(self.segment_index + 1) {
+                let index = self.segment_index + 1;
+                let next_time = next.start;
+                self.seek_segment(index, next_time)?;
+                if unsafe { rl_player_play(self.handle, 1) } == 0 {
+                    return Err("Native player could not continue to the next clip".into());
+                }
+                self.playing = true;
+                self.ended = false;
+            } else {
+                self.play(false)?;
+                self.ended = true;
+            }
         }
         // During steady playback PTS is the media-clocked position we display
         // and use for segment boundaries. Avoid a synchronous pipeline query
@@ -218,19 +229,23 @@ impl Player {
             unsafe { rl_player_position(self.handle) }
         };
         if self.playing && self.seeking.is_none() {
-            match self.kept(time) {
-                Some(next) if (next - time).abs() > 0.01 => {
-                    self.seek(next)?;
-                    time = next;
-                }
-                None => {
+            if self
+                .segments
+                .get(self.segment_index)
+                .is_some_and(|segment| time >= segment.end - 0.001)
+            {
+                if let Some(next) = self.segments.get(self.segment_index + 1) {
+                    let index = self.segment_index + 1;
+                    let next_time = next.start;
+                    self.seek_segment(index, next_time)?;
+                    time = next_time;
+                } else {
                     self.play(false)?;
                     self.ended = true;
                 }
-                _ => {}
             }
         }
-        self.update_volume(time);
+        self.update_volume();
         let mut pts = 0.;
         let bytes = unsafe {
             rl_player_frame(

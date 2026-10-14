@@ -50,6 +50,8 @@ pub struct Store {
     pub presets: Vec<Preset>,
     pub settings: Settings,
     pub recent_files: Vec<String>,
+    #[serde(default)]
+    pub projects: Vec<serde_json::Value>,
 }
 impl Default for Store {
     fn default() -> Self {
@@ -60,6 +62,7 @@ impl Default for Store {
             presets: Vec::new(),
             settings: Settings::default(),
             recent_files: Vec::new(),
+            projects: Vec::new(),
         }
     }
 }
@@ -68,8 +71,15 @@ impl Store {
         if self.version != 1 {
             return Err("Unsupported settings version".into());
         }
-        if self.presets.len() > 200 || self.recent_files.len() > 12 {
+        if self.presets.len() > 200 || self.recent_files.len() > 12 || self.projects.len() > 100 {
             return Err("Too many presets or recent files".into());
+        }
+        if self
+            .projects
+            .iter()
+            .any(|project| serde_json::to_vec(project).map_or(true, |data| data.len() > 2_000_000))
+        {
+            return Err("A saved project is too large".into());
         }
         let mut ids = std::collections::HashSet::new();
         ids.insert("classic".to_string());

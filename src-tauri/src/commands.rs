@@ -429,6 +429,104 @@ pub async fn export_preset(preset: Preset) -> Result<bool, String> {
     .await
 }
 
+fn validate_project(project: &serde_json::Value) -> Result<(), String> {
+    let object = project.as_object().ok_or("Invalid rlcut project")?;
+    if object.get("version").and_then(|value| value.as_u64()) != Some(1)
+        || object
+            .get("id")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        || object
+            .get("name")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        || object
+            .get("videoPaths")
+            .and_then(|value| value.as_array())
+            .is_none()
+        || object
+            .get("segments")
+            .and_then(|value| value.as_array())
+            .is_none()
+        || object
+            .get("preset")
+            .and_then(|value| value.as_object())
+            .is_none()
+        || object
+            .get("markers")
+            .and_then(|value| value.as_object())
+            .is_none()
+        || object
+            .get("quality")
+            .and_then(|value| value.as_u64())
+            .is_none()
+        || object.get("fps").and_then(|value| value.as_u64()).is_none()
+    {
+        return Err("This is not a supported rlcut project".into());
+    }
+    let size = serde_json::to_vec(project)
+        .map_err(|error| error.to_string())?
+        .len();
+    if size > 2_000_000 {
+        return Err("Project file is too large".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_project() -> Result<Option<serde_json::Value>, String> {
+    blocking(|| {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("rlcut project", &["rlcut", "json"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.len() > 2_000_000 {
+            return Err("Project file is too large".into());
+        }
+        let project: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("Cannot read project: {error}"))?;
+        validate_project(&project)?;
+        Ok(Some(project))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn export_project(project: serde_json::Value) -> Result<bool, String> {
+    blocking(move || {
+        validate_project(&project)?;
+        let name = project
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("rlcut-project");
+        let safe = name
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("rlcut project", &["rlcut"])
+            .set_file_name(format!("{}.rlcut", safe.trim_matches('-')))
+            .save_file()
+        else {
+            return Ok(false);
+        };
+        let bytes = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
+        std::fs::write(path, bytes).map_err(|error| error.to_string())?;
+        Ok(true)
+    })
+    .await
+}
+
 struct PlayerSlot {
     session: u64,
     player: Option<crate::video::player::Player>,
@@ -495,7 +593,6 @@ fn validate_segments(segments: &[Segment]) -> Result<(), String> {
         || segments
             .iter()
             .any(|s| !s.start.is_finite() || !s.end.is_finite() || s.start < 0. || s.end <= s.start)
-        || segments.windows(2).any(|s| s[0].end > s[1].start)
     {
         return Err("Invalid playback timeline".into());
     }
