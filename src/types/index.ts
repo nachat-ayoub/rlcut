@@ -94,8 +94,8 @@ export type MusicFile = {
 };
 export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | null };
 export type TrackMarkers = {
-  video: number | null;
-  music: number | null;
+  video: number[];
+  music: number[];
 };
 export type Project = {
   version: 1;

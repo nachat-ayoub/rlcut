@@ -10,17 +10,17 @@ type ClipGesture = {
   x: number; value: number; min: number; max: number; offset: number; clipStart: number;
   index: number; moved: boolean;
 };
-type MarkerGesture = { track: Track; pointer: number; x: number; value: number };
+type MarkerGesture = { track: Track; index: number; pointer: number; x: number; value: number };
 type TrimPreview = { mode: 'edge' | 'body'; track: Track; id: string; edge: 'start' | 'end'; value: number; snapped: boolean };
 type ReorderPreview = { track: Track; id: string; target: number; offset: number; width: number };
 const MIN_CLIP = .05;
 const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
 const unique = (values: number[]) => values.filter((value, index) => values.findIndex(other => Math.abs(other - value) < .0001) === index);
-const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4 3v12M6.5 9h7M10.5 6l3 3-3 3" /></svg>;
-const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M14 3v12M11.5 9h-7M7.5 6l-3 3 3 3" /></svg>;
+const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3v12M8 5.5v7M8 9h6" /><path d="m11.5 6.5 3 2.5-3 2.5" /></svg>;
+const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M13 3v12M10 5.5v7M10 9H4" /><path d="m6.5 6.5-3 2.5 3 2.5" /></svg>;
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2v3M9 7.5v3M9 13v3M3 4.5h3v9H3M15 4.5h-3v9h3" /></svg>;
-const RippleDeleteIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3 5h4v8H3M15 5h-4v8h4M7 7l4 4M11 7l-4 4" /></svg>;
+const RippleDeleteIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M3.5 5.5h4v7h-4zM10.5 5.5h4v7h-4zM7.5 9h3" /><path d="m8.5 7.5 2 1.5-2 1.5" /></svg>;
 
 export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
@@ -36,7 +36,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   onSeek: (value: number) => void;
   onPlay: () => void;
   onEdit: (track: Track, segments: Segment[]) => void;
-  onMarker: (track: Track, value: number) => void;
+  onMarker: (track: Track, values: number[]) => void;
   onSelectionChange: (track: Track, id: string) => void;
   onUndo: () => void;
   onRedo: () => void;
@@ -47,7 +47,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const [selection, setSelection] = useState<{ track: Track; id: string }>({ track: 'video', id: segments[0]?.id ?? '' });
   const [trimPreview, setTrimPreview] = useState<TrimPreview | null>(null);
   const [reorderPreview, setReorderPreview] = useState<ReorderPreview | null>(null);
-  const [markerPreview, setMarkerPreview] = useState<{ track: Track; edited: number; snapped: boolean } | null>(null);
+  const [markerPreview, setMarkerPreview] = useState<{ track: Track; index: number; edited: number; snapped: boolean } | null>(null);
   const [volume, setVolume] = useState(1);
   const [volumeOpen, setVolumeOpen] = useState(false);
   const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), volumePopover = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
@@ -62,23 +62,16 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     music: trimPreview?.mode === 'body' && trimPreview.track === 'music' ? musicSegments.map(clip => clip.id === trimPreview.id ? { ...clip, [trimPreview.edge]: trimPreview.value } : clip) : musicSegments,
   };
   const displayOffsets = { video: offsetsOf(displayLanes.video), music: offsetsOf(displayLanes.music) };
-  const storedMarkerEdited = (track: Track) => {
-    const marker = markers[track];
-    return marker == null ? null : sourceToEdited(lanes[track], marker);
-  };
-  const visibleMarkerEdited = (track: Track) => {
-    if (markerPreview?.track === track) return markerPreview.edited;
-    const marker = markers[track];
-    return marker == null ? null : sourceToEdited(displayLanes[track], marker);
-  };
-  const videoMarkerEdited = storedMarkerEdited('video'), musicMarkerEdited = storedMarkerEdited('music');
+  const storedMarkersEdited = (track: Track) => markers[track].map(marker => sourceToEdited(lanes[track], marker));
+  const visibleMarkersEdited = (track: Track) => markers[track].map((marker, index) => markerPreview?.track === track && markerPreview.index === index ? markerPreview.edited : sourceToEdited(displayLanes[track], marker));
+  const videoMarkersEdited = storedMarkersEdited('video'), musicMarkersEdited = storedMarkersEdited('music');
   const clipEdges = (track: Track) => offsets[track].flatMap((offset, index) => [offset, offset + lanes[track][index].end - lanes[track][index].start]);
   const snapPoints = (excludeMarker?: Track) => unique([
     editedTimestamp,
     ...clipEdges('video'),
     ...clipEdges('music'),
-    ...(excludeMarker === 'video' || videoMarkerEdited == null ? [] : [videoMarkerEdited]),
-    ...(excludeMarker === 'music' || musicMarkerEdited == null ? [] : [musicMarkerEdited]),
+    ...(excludeMarker === 'video' ? [] : videoMarkersEdited),
+    ...(excludeMarker === 'music' ? [] : musicMarkersEdited),
   ]);
   const clips = lanes[selection.track], selected = clips.find(clip => clip.id === selection.id);
   const selectedIndex = clips.findIndex(clip => clip.id === selection.id), selectedOffset = offsets[selection.track][selectedIndex] ?? 0;
@@ -116,6 +109,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       value = 0;
     } else {
       value = Math.max(0, Math.min(editedDuration, (clientX - element.getBoundingClientRect().left) / pixelsPerSecond));
+      const snapped = nearest(value, unique([...clipEdges('video'), ...clipEdges('music'), ...videoMarkersEdited, ...musicMarkersEdited]));
+      if (snapped != null) value = snapped;
     }
     if (lastRulerSeek.current != null && Math.abs(lastRulerSeek.current - value) < .001) return;
     lastRulerSeek.current = value;
@@ -139,8 +134,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     if (event.altKey) return { value, snapped: false };
     const candidates = snapPoints().map(target => state.clipStart + target - state.offset);
     if (state.mode === 'body') {
-      const ownMarker = markers[state.track];
-      if (ownMarker != null && ownMarker >= state.clipStart && ownMarker <= (lanes[state.track].find(clip => clip.id === state.id)?.end ?? state.clipStart)) {
+      const ownMarkers = markers[state.track].filter(marker => marker >= state.clipStart && marker <= (lanes[state.track].find(clip => clip.id === state.id)?.end ?? state.clipStart));
+      for (const ownMarker of ownMarkers) {
         for (const target of snapPoints(state.track)) candidates.push(state.offset + ownMarker - target);
       }
     }
@@ -197,23 +192,28 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
     if (snapped != null) value = snapped;
     return { value, snapped: snapped != null };
   };
-  const beginMarker = (event: PointerEvent<HTMLButtonElement>, track: Track, value: number) => {
+  const beginMarker = (event: PointerEvent<HTMLButtonElement>, track: Track, index: number, value: number) => {
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
-    markerGesture.current = { track, pointer: event.pointerId, x: event.clientX, value };
+    markerGesture.current = { track, index, pointer: event.pointerId, x: event.clientX, value };
   };
   const moveMarker = (event: PointerEvent<HTMLButtonElement>) => {
     const state = markerGesture.current; if (!state || state.pointer !== event.pointerId) return;
     const result = markerValue(event, state);
-    setMarkerPreview({ track: state.track, edited: result.value, snapped: result.snapped });
+    setMarkerPreview({ track: state.track, index: state.index, edited: result.value, snapped: result.snapped });
   };
   const finishMarker = (event: PointerEvent<HTMLButtonElement>) => {
     const state = markerGesture.current; if (!state || state.pointer !== event.pointerId) return;
     const { value } = markerValue(event, state); markerGesture.current = null; setMarkerPreview(null);
-    onMarker(state.track, editedToSource(lanes[state.track], value));
+    const next = [...markers[state.track]];
+    next[state.index] = editedToSource(lanes[state.track], value);
+    onMarker(state.track, next);
   };
   const setMarkerAtCursor = (track: Track) => {
     if (!lanes[track].length) return;
-    onMarker(track, track === 'video' ? timestamp : editedToSource(musicSegments, Math.min(musicDuration, editedTimestamp)));
+    const edited = Math.min(durationOf(lanes[track]), editedTimestamp);
+    const existing = storedMarkersEdited(track).findIndex(value => Math.abs(value - edited) * pixelsPerSecond <= SNAP_PIXELS);
+    if (existing >= 0) onMarker(track, markers[track].filter((_, index) => index !== existing));
+    else onMarker(track, [...markers[track], editedToSource(lanes[track], edited)].sort((a, b) => a - b));
   };
   const setGain = (gain: number) => { if (selected) onEdit(selection.track, clips.map(segment => selection.track === 'video' || segment.id === selected.id ? { ...segment, volume: gain } : segment)); };
   const commitVolume = () => { if (selected && volumeDirty.current) { volumeDirty.current = false; setGain(volume); } };
@@ -245,7 +245,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       if ((event.ctrlKey || event.metaKey) && key === 'k') { event.preventDefault(); cut('split'); }
       else if (key === 'q') { event.preventDefault(); cut('start'); }
       else if (key === 'w') { event.preventDefault(); cut('end'); }
-      else if ((event.key === 'Delete' || event.key === 'Backspace') && selected && !(selection.track === 'video' && clips.length === 1)) { event.preventDefault(); onEdit(selection.track, clips.filter(segment => segment.id !== selected.id)); }
+      else if ((event.key === 'Delete' || event.key === 'Backspace') && selected) { event.preventDefault(); onEdit(selection.track, clips.filter(segment => segment.id !== selected.id)); }
       else if (key === 'm' && selected) { event.preventDefault(); setMarkerAtCursor(selection.track); }
       else if (event.key === '-' || event.key === '_') { event.preventDefault(); zoom(pixelsPerSecond / 1.2); }
       else if (event.key === '=' || event.key === '+') { event.preventDefault(); zoom(pixelsPerSecond * 1.2); }
@@ -266,10 +266,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button className="trim-handle end" aria-label={`Trim or extend ${track} clip from right`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'end', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'end', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
     </div>;
   });
-  const renderMarker = (track: Track) => {
-    const value = visibleMarkerEdited(track); if (value == null) return null;
-    return <button className={`track-marker ${track} ${markerPreview?.track === track && markerPreview.snapped ? 'snapped' : ''}`} style={{ left: `${value * pixelsPerSecond}px` }} aria-label={`Drag ${track} peak marker`} title={`${track === 'video' ? 'Video' : 'Music'} peak · drag to move, Alt for no snapping`} onPointerDown={event => beginMarker(event, track, value)} onPointerMove={moveMarker} onPointerUp={finishMarker} onPointerCancel={() => { markerGesture.current = null; setMarkerPreview(null); }}><Diamond size={9} fill="currentColor" /></button>;
-  };
+  const renderMarkers = (track: Track) => visibleMarkersEdited(track).map((value, index) => <button key={`${track}-${index}`} className={`track-marker ${track} ${markerPreview?.track === track && markerPreview.index === index && markerPreview.snapped ? 'snapped' : ''}`} style={{ left: `${value * pixelsPerSecond}px` }} aria-label={`Drag ${track} marker`} title={`${track === 'video' ? 'Video' : 'Music'} marker · drag to move, Alt for no snapping`} onPointerDown={event => beginMarker(event, track, index, value)} onPointerMove={moveMarker} onPointerUp={finishMarker} onPointerCancel={() => { markerGesture.current = null; setMarkerPreview(null); }}><Diamond size={9} fill="currentColor" /></button>);
   const renderReorderGhost = (track: Track) => reorderPreview?.track === track ? <div className={`reorder-ghost ${track}`} style={{ left: `${reorderPreview.offset * pixelsPerSecond}px`, width: `${reorderPreview.width * pixelsPerSecond}px` }} /> : null;
   const addPosition = (track: Track) => durationOf(displayLanes[track]) * pixelsPerSecond + 9;
   return <section className="timeline" aria-label="Editor timeline" onWheel={wheelZoom}>
@@ -280,8 +277,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button className="editor-tool" onClick={() => cut('start')} disabled={!canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
       <button className="editor-tool" onClick={() => cut('split')} disabled={!canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={!canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
-      <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected || (selection.track === 'video' && clips.length === 1)} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><RippleDeleteIcon /></button>
-      <button className={selected && markers[selection.track] != null ? 'active marker-action' : 'marker-action'} disabled={!selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Set ${selection.track} peak at the playhead` : 'Select a clip to set its peak'} aria-label={selected ? `Set ${selection.track} peak marker at playhead` : 'Set peak marker'}><DiamondPlus size={15} /></button>
+      <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><RippleDeleteIcon /></button>
+      <button className={selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active marker-action' : 'marker-action'} disabled={!selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><DiamondPlus size={15} /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
       <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} onChange={event => zoom(Number(event.target.value))} /><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
       <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={!selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
@@ -295,8 +292,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <div className="track-labels" aria-hidden="true"><div className="ruler-corner" /><div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div></div>
       <div className="timeline-scroll" ref={scroll}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
-        <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarker('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
-        <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarker('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
+        <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarkers('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
+        <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarkers('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
         <i className={`playhead ${trimPreview?.snapped || markerPreview?.snapped ? 'snapped' : ''}`} style={{ left: `${editedTimestamp * pixelsPerSecond}px` }}><span /></i>
       </div></div>
     </div>

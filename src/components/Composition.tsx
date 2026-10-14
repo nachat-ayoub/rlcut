@@ -90,7 +90,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     return () => { observer.disconnect(); target.removeEventListener('webglcontextlost', lost); target.removeEventListener('compositionfallback', lost); compositor.dispose(); renderer.current = null; };
   }, [playbackPath, forceCPU, sourceVersion]);
   useEffect(() => {
-    if (!playbackPath || !video) return;
+    if (!playbackPath || !video || !segments.length) { setMediaReady(false); setWaiting(false); return; }
     setMediaReady(false); setWaiting(true);
     let disposed = false;
     const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
@@ -103,7 +103,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
-  }, [playbackPath, sourceVersion]);
+  }, [playbackPath, sourceVersion, segments.length > 0]);
   useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion]);
   useEffect(() => {
     player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, segments: [], fadeOut: null } });

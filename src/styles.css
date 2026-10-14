@@ -768,7 +768,7 @@ h1 {
 .volume-value span { padding-right:5px; font-size:9px }
 .timeline-editor {
   margin-top:6px;
-  height:104px;
+  height:118px;
   display:grid;
   grid-template-columns:34px minmax(0,1fr);
   border:1px solid #302939;
@@ -776,18 +776,22 @@ h1 {
   overflow:hidden;
   background:#0d0c10
 }
-.track-labels { z-index:6; min-width:0; display:grid; grid-template-rows:22px 42px 39px; overflow:hidden; background:#151219; border-right:1px solid #352d3d }
+.track-labels { z-index:6; min-width:0; display:grid; grid-template-rows:22px 42px 39px 15px; overflow:hidden; background:#151219; border-right:1px solid #352d3d }
 .ruler-corner { min-width:0 }
 .track-label { min-width:0; overflow:hidden; display:flex; align-items:center; justify-content:center; padding:0; border-top:1px solid #29232f; color:#b8a6c7 }
 .track-label svg { color:#9d77bf; flex:none }
 .track-label span { font-size:9px }
 .track-label.music { color:#91849b }
 .track-label.music svg { color:#776487 }
-.timeline-scroll { min-width:0; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; scrollbar-color:#4c3a5c #151219 }
+.timeline-scroll { min-width:0; display:flex; flex-direction:column; overflow-x:scroll; overflow-y:hidden; scrollbar-gutter:stable; scrollbar-width:thin; scrollbar-color:#4c3a5c #151219; background:#151219 }
+.timeline-scroll::-webkit-scrollbar { height:11px }
+.timeline-scroll::-webkit-scrollbar-track { background:#151219; border-top:1px solid #29232f }
+.timeline-scroll::-webkit-scrollbar-thumb { background:#4c3a5c; border:3px solid #151219; border-radius:8px }
 .timeline-content {
   min-width:calc(100% - 12px);
   margin:0 6px;
-  height:91px;
+  height:103px;
+  flex:none;
   position:relative;
   display:grid;
   grid-template-rows:22px 42px 39px

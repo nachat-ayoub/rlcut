@@ -20,13 +20,17 @@ const customPresetName = (presets: Preset[]) => {
   return `Custom Preset ${index}`;
 };
 const matchesHdr = (transfer?: string) => transfer === 'smpte2084' || transfer === 'arib-std-b67';
+const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | number | null>>): TrackMarkers => ({
+  video: Array.isArray(value?.video) ? value.video.filter(Number.isFinite) : Number.isFinite(value?.video) ? [value!.video as number] : [],
+  music: Array.isArray(value?.music) ? value.music.filter(Number.isFinite) : Number.isFinite(value?.music) ? [value!.music as number] : [],
+});
 const migratePresetNames = (store: Store): Store => {
   const renamed: Preset[] = [];
   for (const preset of store.presets) {
     const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
-  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => ({ ...project, segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) })) };
+  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => ({ ...project, markers: normalizeMarkers(project.markers as never), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) })) };
 };
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
@@ -44,7 +48,7 @@ export default function App() {
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
-  const [markers, setMarkers] = useState<TrackMarkers>({ video: null, music: null });
+  const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
   const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
   const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
@@ -129,20 +133,25 @@ export default function App() {
   }, [preset, segments, music, markers]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
-  const importPath = useCallback(async (path: string) => {
+  const importPaths = useCallback(async (paths: string[]) => {
+    if (!paths.length) return;
     setHome(false);
     const ticket = ++importRevision.current;
     setImporting(storeRef.current.settings.waitForPreview);
     setPreparation(null); setProxyPreparing(true); setPlaying(false); setError(null);
     try {
-      const v = await invoke<Video>('import_video', { path });
-      if (ticket !== importRevision.current) return;
+      const imported: Video[] = [];
+      for (const path of paths) {
+        imported.push(await invoke<Video>('import_video', { path }));
+        if (ticket !== importRevision.current) return;
+      }
       setPreparation({ percent: 0, elapsed: 0, remaining: null });
-      const nextSources = videoSources.length ? [...videoSources, v] : [v];
+      const nextSources = [...videoSources, ...imported];
       const proxy = await invoke<string>('create_timeline_proxy', { paths: nextSources.map(source => source.path) });
       if (ticket !== importRevision.current) return;
       const sourceOffset = videoSources.reduce((sum, source) => sum + source.duration, 0);
-      const projectVideo = { ...nextSources[0], duration: sourceOffset + v.duration, hasAudio: nextSources.some(source => source.hasAudio) };
+      const addedDuration = imported.reduce((sum, source) => sum + source.duration, 0);
+      const projectVideo = { ...nextSources[0], duration: sourceOffset + addedDuration, hasAudio: nextSources.some(source => source.hasAudio) };
       // Commit sources only after the new cached reel is ready. Failed appends
       // leave the current project and decoder untouched.
       setPlaying(false); setVideoSources(nextSources); setVideo(projectVideo); setProxyPath(proxy); setSourceVersion(version => version + 1);
@@ -150,17 +159,28 @@ export default function App() {
         undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
         if (undoStack.current.length > 100) undoStack.current.shift();
         redoStack.current = []; lastPresetEdit.current = 0;
-        setSegments(current => [...current, { id: crypto.randomUUID(), start: sourceOffset, end: sourceOffset + v.duration, volume: current[0]?.volume ?? 1, colorFix: 0 }]);
+        let offset = sourceOffset;
+        const appended = imported.map(source => {
+          const segment = { id: crypto.randomUUID(), start: offset, end: offset + source.duration, volume: segments[0]?.volume ?? 1, colorFix: 0 };
+          offset += source.duration;
+          return segment;
+        });
+        setSegments(current => [...current, ...appended]);
       } else {
-        const id = crypto.randomUUID();
-        setSegments([{ id, start: 0, end: v.duration, volume: 1, colorFix: 0 }]); setSelectedClip({ track: 'video', id });
-        setMusic(null); setMarkers({ video: null, music: null });
+        let offset = 0;
+        const initial = imported.map(source => {
+          const segment = { id: crypto.randomUUID(), start: offset, end: offset + source.duration, volume: 1, colorFix: 0 };
+          offset += source.duration;
+          return segment;
+        });
+        setSegments(initial); setSelectedClip({ track: 'video', id: initial[0].id });
+        setMusic(null); setMarkers({ video: [], music: [] });
         undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
         playhead.current = 0; setTimestamp(0); setBefore(false);
-        setOutputName(`${filename(v.path).replace(/\.[^.]+$/, '')}-edit.mp4`);
+        setOutputName(`${filename(imported[0].path).replace(/\.[^.]+$/, '')}-edit.mp4`);
       }
       setPreview(null);
-      setStore(s => ({ ...s, recentFiles: [v.path, ...s.recentFiles.filter(p => p !== v.path)].slice(0, 12) }));
+      setStore(s => ({ ...s, recentFiles: [...paths, ...s.recentFiles.filter(p => !paths.includes(p))].slice(0, 12) }));
     } catch (e) {
       if (ticket === importRevision.current && !message(e).includes('superseded')) report(e);
     } finally {
@@ -175,14 +195,13 @@ export default function App() {
   }, [proxyPreparing, Boolean(preparation)]);
   const importVideo = useCallback(async () => {
     try {
-      const path = await invoke<string | null>('pick_video');
-      if (path)
-        await importPath(path);
+      const paths = await invoke<string[]>('pick_video');
+      await importPaths(paths);
     }
     catch (e) {
       report(e);
     }
-  }, [importPath, report]);
+  }, [importPaths, report]);
   const importMusic = useCallback(async () => {
     try {
       const selected = await invoke<MusicFile | null>('pick_music');
@@ -192,7 +211,7 @@ export default function App() {
         lastPresetEdit.current = 0;
         redoStack.current = [];
         const id = crypto.randomUUID(); setMusic({ ...selected, segments: [{ id, start: 0, end: selected.duration, volume: 1, colorFix: 0 }] }); setSelectedClip({ track: 'music', id });
-        setMarkers(current => ({ ...current, music: null }));
+        setMarkers(current => ({ ...current, music: [] }));
         setPlaying(false);
       }
     }
@@ -201,13 +220,13 @@ export default function App() {
     }
   }, [report, preset, segments, music, markers]);
   useEffect(() => {
-    let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPath(paths[0])).then(fn => {
+    let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPaths(paths)).then(fn => {
       if (disposed)
         fn();
       else
         off = fn;
     }).catch(report); return () => { disposed = true; off?.(); };
-  }, [importPath, report]);
+  }, [importPaths, report]);
   useEffect(() => {
     if (!exporting)
       return;
@@ -348,7 +367,7 @@ export default function App() {
   }
   function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
   function resetProject() {
-    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: null, music: null }); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
+    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
   }
   function projectSnapshot(id: string, name: string, createdAt: number): Project {
     return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), preset: structuredClone(preset), quality, fps, outputFolder, outputName };
@@ -383,7 +402,7 @@ export default function App() {
       const restoredSegments = project.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 }));
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(project.markers); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }
@@ -476,13 +495,13 @@ export default function App() {
         </div>
       </div>}
       <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => setSelectedClip({ track, id })}
-        onMarker={(track, value) => {
-          if (markers[track] === value) return;
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => setSelectedClip({ track, id })}
+        onMarker={(track, values) => {
+          if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
           undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
           if (undoStack.current.length > 100) undoStack.current.shift();
           lastPresetEdit.current = 0; redoStack.current = [];
-          setMarkers(current => ({ ...current, [track]: value }));
+          setMarkers(current => ({ ...current, [track]: values }));
         }}
         onEdit={(track, next) => {
           const previous = track === 'video' ? segments : music?.segments ?? [];

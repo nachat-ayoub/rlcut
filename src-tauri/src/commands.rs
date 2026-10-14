@@ -132,12 +132,15 @@ pub fn save_store(state: State<AppState>, store: Store) -> Result<(), String> {
     settings::save(&state.file, &store)
 }
 #[tauri::command]
-pub async fn pick_video() -> Result<Option<String>, String> {
+pub async fn pick_video() -> Result<Vec<String>, String> {
     blocking(|| {
         Ok(rfd::FileDialog::new()
             .add_filter("Video", &["mp4", "mov", "mkv", "webm"])
-            .pick_file()
-            .map(|p| p.to_string_lossy().into()))
+            .pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.to_string_lossy().into())
+            .collect())
     })
     .await
 }
