@@ -170,6 +170,73 @@ pub async fn pick_folder() -> Result<Option<String>, String> {
     })
     .await
 }
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontOption {
+    family: String,
+    path: String,
+}
+#[tauri::command]
+pub async fn list_system_fonts() -> Result<Vec<FontOption>, String> {
+    blocking(|| {
+        let output = std::process::Command::new("fc-list")
+            .arg("--format=%{family[0]}|%{file}\n")
+            .output()
+            .map_err(|e| format!("Could not list system fonts: {e}"))?;
+        if !output.status.success() {
+            return Err("fontconfig could not list system fonts".into());
+        }
+        let mut fonts = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (family, path) = line.split_once('|')?;
+                (!family.trim().is_empty() && std::path::Path::new(path).is_file()).then(|| {
+                    FontOption {
+                        family: family.trim().into(),
+                        path: path.into(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        fonts.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+        fonts.dedup_by(|a, b| a.family.eq_ignore_ascii_case(&b.family));
+        Ok(fonts)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn save_google_font(
+    state: State<'_, AppState>,
+    family: String,
+    variant: String,
+    bytes: Vec<u8>,
+) -> Result<FontOption, String> {
+    if bytes.is_empty() || bytes.len() > 10_000_000 {
+        return Err("Google font file is empty or too large".into());
+    }
+    let safe = family
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect::<String>();
+    if safe.is_empty() {
+        return Err("Invalid font family".into());
+    }
+    let safe_variant = match variant.as_str() {
+        "regular" | "bold" | "black" | "italic" | "boldItalic" | "blackItalic" => variant,
+        _ => return Err("Invalid font variant".into()),
+    };
+    let folder = state.cache.join("fonts");
+    blocking(move || {
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let path = folder.join(format!("{safe}-{safe_variant}.woff2"));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(FontOption {
+            family,
+            path: path.to_string_lossy().into(),
+        })
+    })
+    .await
+}
 #[tauri::command]
 pub async fn import_video(state: State<'_, AppState>, path: String) -> Result<Video, String> {
     state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
@@ -299,6 +366,7 @@ pub fn start_export(
     preset: Preset,
     segments: Vec<Segment>,
     options: ExportOptions,
+    texts: Vec<crate::model::TextOverlay>,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
     overwrite: bool,
@@ -322,6 +390,11 @@ pub fn start_export(
         .collect::<Result<Vec<_>, _>>()?;
     let duration: f64 = videos.iter().map(|video| video.duration).sum();
     Segment::validate_all(&segments, duration)?;
+    let edited_duration: f64 = segments
+        .iter()
+        .map(|segment| segment.end - segment.start)
+        .sum();
+    crate::model::TextOverlay::validate_all(&texts, edited_duration)?;
     let out = export::destination(&videos[0], &options, overwrite)?;
     if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
         return Err("Output cannot replace a source video".into());
@@ -350,6 +423,7 @@ pub fn start_export(
             job,
             music,
             music_fade_out,
+            texts,
         )
     });
     *state

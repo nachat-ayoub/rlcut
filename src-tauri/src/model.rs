@@ -261,6 +261,109 @@ pub struct Segment {
     #[cfg_attr(feature = "serialization", serde(default))]
     pub color_fix: f64,
 }
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct TextOverlay {
+    pub id: String,
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+    pub box_width: f64,
+    pub rotation: f64,
+    pub font_family: String,
+    pub font_path: String,
+    pub font_bold_path: String,
+    pub font_black_path: String,
+    pub font_italic_path: String,
+    pub font_bold_italic_path: String,
+    pub font_black_italic_path: String,
+    pub font_weight: u16,
+    pub font_size: f64,
+    pub color: String,
+    pub opacity: f64,
+    pub align: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub letter_spacing: f64,
+    pub line_height: f64,
+    pub stroke_color: String,
+    pub stroke_width: f64,
+    pub stroke_position: String,
+    pub background_color: String,
+    pub background_opacity: f64,
+    pub shadow_color: String,
+    pub shadow_blur: f64,
+    pub shadow_x: f64,
+    pub shadow_y: f64,
+    pub fade_in: Option<f64>,
+    pub fade_out: Option<f64>,
+}
+impl TextOverlay {
+    pub fn validate_all(texts: &[Self], duration: f64) -> Result<(), String> {
+        if texts.len() > 100 {
+            return Err("A project can contain at most 100 text clips".into());
+        }
+        for text in texts {
+            if text.id.is_empty()
+                || text.text.len() > 4000
+                || !text.start.is_finite()
+                || !text.end.is_finite()
+                || text.start < 0.
+                || text.end <= text.start
+                || text.end > duration + 0.001
+                || !text.x.is_finite()
+                || !(0. ..=1.).contains(&text.x)
+                || !text.y.is_finite()
+                || !(0. ..=1.).contains(&text.y)
+                || !text.scale.is_finite()
+                || !(0.1..=10.).contains(&text.scale)
+                || !text.box_width.is_finite()
+                || !(0.1..=1.).contains(&text.box_width)
+                || !text.rotation.is_finite()
+                || !(-360. ..=360.).contains(&text.rotation)
+                || !text.font_size.is_finite()
+                || !(6. ..=500.).contains(&text.font_size)
+                || !matches!(text.font_weight, 400 | 700 | 900)
+                || !text.opacity.is_finite()
+                || !(0. ..=1.).contains(&text.opacity)
+                || !matches!(text.align.as_str(), "left" | "center" | "right")
+                || !text.letter_spacing.is_finite()
+                || !(-20. ..=100.).contains(&text.letter_spacing)
+                || !text.line_height.is_finite()
+                || !(0.5..=4.).contains(&text.line_height)
+                || !text.stroke_width.is_finite()
+                || !(0. ..=30.).contains(&text.stroke_width)
+                || !matches!(
+                    text.stroke_position.as_str(),
+                    "inside" | "center" | "outside"
+                )
+                || !text.background_opacity.is_finite()
+                || !(0. ..=1.).contains(&text.background_opacity)
+                || !text.shadow_blur.is_finite()
+                || !(0. ..=100.).contains(&text.shadow_blur)
+                || !text.shadow_x.is_finite()
+                || !text.shadow_y.is_finite()
+                || text
+                    .fade_in
+                    .is_some_and(|v| !v.is_finite() || !(0.05..=10.).contains(&v))
+                || text
+                    .fade_out
+                    .is_some_and(|v| !v.is_finite() || !(0.05..=10.).contains(&v))
+            {
+                return Err("Text clips contain invalid timing or style values".into());
+            }
+        }
+        Ok(())
+    }
+}
 fn default_volume() -> f64 {
     1.
 }

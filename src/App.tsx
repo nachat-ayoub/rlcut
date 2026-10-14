@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
-import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TrackMarkers, Video } from './types';
+import type { FontOption, Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TextOverlay, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
-import { invoke, isDesktop, message, onDrop } from './lib/native';
+import { fileUrl, invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
 import { Section, Slider } from './components/Controls';
 import { Composition } from './components/Composition';
@@ -10,7 +10,8 @@ import { Alignment } from './components/Alignment';
 import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
 import { ProjectHome } from './components/ProjectHome';
-import { editedToSource, sourceToEdited } from './lib/timeline';
+import { TextInspector } from './components/TextInspector';
+import { editedDuration, editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'shortcuts' | 'crop' | null;
 const shortcuts = [
   ['Playback', [['Space', 'Play or pause'], ['← / →', 'Move one frame'], ['Shift + ← / →', 'Move one second'], ['Home / End', 'Jump to timeline start or end']]],
@@ -30,13 +31,25 @@ const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | n
   video: Array.isArray(value?.video) ? value.video.filter(Number.isFinite) : Number.isFinite(value?.video) ? [value!.video as number] : [],
   music: Array.isArray(value?.music) ? value.music.filter(Number.isFinite) : Number.isFinite(value?.music) ? [value!.music as number] : [],
 });
+const normalizeText = (value: Partial<TextOverlay>): TextOverlay => ({
+  id: value.id || crypto.randomUUID(), text: value.text ?? 'Text', start: value.start ?? 0, end: value.end ?? 3,
+  x: value.x ?? .5, y: value.y ?? .5, scale: value.scale ?? 1, boxWidth: value.boxWidth ?? .7, rotation: value.rotation ?? 0,
+  fontFamily: value.fontFamily || 'DejaVu Sans', fontPath: value.fontPath || '', fontBoldPath: value.fontBoldPath || '', fontBlackPath: value.fontBlackPath || '', fontItalicPath: value.fontItalicPath || '', fontBoldItalicPath: value.fontBoldItalicPath || '', fontBlackItalicPath: value.fontBlackItalicPath || '', fontWeight: value.fontWeight ?? (value.bold ? 700 : 400), fontSize: value.fontSize ?? 72,
+  color: value.color || '#ffffff', opacity: value.opacity ?? 1, align: value.align ?? 'center', bold: value.bold ?? false,
+  italic: value.italic ?? false, underline: value.underline ?? false, letterSpacing: value.letterSpacing ?? 0,
+  lineHeight: value.lineHeight ?? 1.2, strokeColor: value.strokeColor || '#000000', strokeWidth: value.strokeWidth ?? 0, strokePosition: value.strokePosition ?? 'center',
+  backgroundColor: value.backgroundColor || '#000000', backgroundOpacity: value.backgroundOpacity ?? 0,
+  shadowColor: value.shadowColor || '#000000', shadowBlur: value.shadowBlur ?? 0, shadowX: value.shadowX ?? 0,
+  shadowY: value.shadowY ?? 4, fadeIn: value.fadeIn ?? null, fadeOut: value.fadeOut ?? null,
+});
+type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers; texts: TextOverlay[] };
 const migratePresetNames = (store: Store): Store => {
   const renamed: Preset[] = [];
   for (const preset of store.presets) {
     const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
-  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => ({ ...project, markers: normalizeMarkers(project.markers as never), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) })) };
+  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => ({ ...project, markers: normalizeMarkers(project.markers as never), texts: (project.texts ?? []).map(normalizeText), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) })) };
 };
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
@@ -55,17 +68,20 @@ export default function App() {
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
+  const [texts, setTexts] = useState<TextOverlay[]>([]), [selectedTextId, setSelectedTextId] = useState<string | null>(null), [fonts, setFonts] = useState<FontOption[]>([]);
   const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
   const [colorPreviewBefore, setColorPreviewBefore] = useState(false);
-  const undoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]), redoStack = useRef<Array<{ preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }>>([]);
+  const undoStack = useRef<EditorSnapshot[]>([]), redoStack = useRef<EditorSnapshot[]>([]);
   const playhead = useRef(0), lastTimeReport = useRef(0), manualSeekUntil = useRef(0);
-  const lastPresetEdit = useRef(0);
+  const lastPresetEdit = useRef(0), lastTextEdit = useRef(0);
   const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
+  const loadedFonts = useRef(new Set<string>());
   storeRef.current = store;
   const preset = store.activePreset === 'classic' ? classic : store.presets.find(p => p.id === store.activePreset) ?? classic;
   const allPresets = [classic, ...store.presets];
   const exporting = progress?.phase === 'running';
+  const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), texts: structuredClone(texts) }), [preset, segments, music, markers, texts]);
   const report = useCallback((e: unknown) => setError(message(e)), []);
   useEffect(() => {
     if (initialized.current)
@@ -77,6 +93,8 @@ export default function App() {
     }
     invoke<Init>('initialize').then(data => { const migrated = migratePresetNames(data.store); setInit(data); setStore(migrated); lastSaved.current = JSON.stringify(data.store); setOutputFolder(migrated.settings.outputFolder); setQuality(migrated.settings.quality); setFps(migrated.settings.fps); setError(data.storageError); setReady(true); }).catch(e => { report(e); setReady(true); });
   }, [report]);
+  useEffect(() => { if (ready && isDesktop()) invoke<FontOption[]>('list_system_fonts').then(setFonts).catch(() => undefined); }, [ready]);
+  useEffect(() => { for (const text of texts) { const variants: Array<[string, string, string]> = [[text.fontPath, '400', 'normal'], [text.fontBoldPath, '700', 'normal'], [text.fontBlackPath, '900', 'normal'], [text.fontItalicPath, '400', 'italic'], [text.fontBoldItalicPath, '700', 'italic'], [text.fontBlackItalicPath, '900', 'italic']]; for (const [path, weight, style] of variants) { if (!path || loadedFonts.current.has(path)) continue; loadedFonts.current.add(path); const face = new FontFace(text.fontFamily, `url("${fileUrl(path)}")`, { weight, style }); face.load().then(loaded => document.fonts.add(loaded)).catch(() => loadedFonts.current.delete(path)); } } }, [texts]);
   useEffect(() => {
     if (!ready || !isDesktop() || !init || init.storageError)
       return;
@@ -103,41 +121,42 @@ export default function App() {
   const change = useCallback((next: Preset) => {
     const now = performance.now();
     if (!lastPresetEdit.current || now - lastPresetEdit.current > 350) {
-      undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+      undoStack.current.push(snapshot());
       if (undoStack.current.length > 100) undoStack.current.shift();
     }
     lastPresetEdit.current = now;
     redoStack.current = [];
     replacePreset(next);
-  }, [preset, segments, music, markers, replacePreset]);
-  const restoreSnapshot = useCallback((snapshot: { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers }) => {
+  }, [snapshot, replacePreset]);
+  const restoreSnapshot = useCallback((snapshot: EditorSnapshot) => {
     lastPresetEdit.current = 0;
     replacePreset(snapshot.preset);
     setSegments(structuredClone(snapshot.segments));
     setMusic(structuredClone(snapshot.music));
     setMarkers(structuredClone(snapshot.markers));
+    setTexts(structuredClone(snapshot.texts));
     const value = editedToSource(snapshot.segments, sourceToEdited(snapshot.segments, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
   }, [replacePreset]);
   const undo = useCallback(() => {
-    const snapshot = undoStack.current.pop(); if (!snapshot) return;
-    redoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
-    restoreSnapshot(snapshot);
-  }, [preset, segments, music, markers, restoreSnapshot]);
+    const previous = undoStack.current.pop(); if (!previous) return;
+    redoStack.current.push(snapshot());
+    restoreSnapshot(previous);
+  }, [snapshot, restoreSnapshot]);
   const redo = useCallback(() => {
-    const snapshot = redoStack.current.pop(); if (!snapshot) return;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
-    restoreSnapshot(snapshot);
-  }, [preset, segments, music, markers, restoreSnapshot]);
+    const next = redoStack.current.pop(); if (!next) return;
+    undoStack.current.push(snapshot());
+    restoreSnapshot(next);
+  }, [snapshot, restoreSnapshot]);
   const editSegments = useCallback((next: Segment[], preservePlayback = false) => {
     lastPresetEdit.current = 0;
-    undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+    undoStack.current.push(snapshot());
     if (undoStack.current.length > 100) undoStack.current.shift();
     redoStack.current = []; setSegments(next);
     if (preservePlayback) return;
     const value = editedToSource(next, sourceToEdited(next, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
-  }, [preset, segments, music, markers]);
+  }, [snapshot]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPaths = useCallback(async (paths: string[]) => {
@@ -163,7 +182,7 @@ export default function App() {
       // leave the current project and decoder untouched.
       setPlaying(false); setVideoSources(nextSources); setVideo(projectVideo); setProxyPath(proxy); setSourceVersion(version => version + 1);
       if (videoSources.length) {
-        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+        undoStack.current.push(snapshot());
         if (undoStack.current.length > 100) undoStack.current.shift();
         redoStack.current = []; lastPresetEdit.current = 0;
         let offset = sourceOffset;
@@ -181,7 +200,7 @@ export default function App() {
           return segment;
         });
         setSegments(initial); setSelectedClip({ track: 'video', id: initial[0].id });
-        setMusic(null); setMarkers({ video: [], music: [] });
+        setMusic(null); setMarkers({ video: [], music: [] }); setTexts([]); setSelectedTextId(null);
         undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
         playhead.current = 0; setTimestamp(0); setBefore(false);
         setOutputName(`${filename(imported[0].path).replace(/\.[^.]+$/, '')}-edit.mp4`);
@@ -193,7 +212,7 @@ export default function App() {
     } finally {
       if (ticket === importRevision.current) { setImporting(false); setProxyPreparing(false); }
     }
-  }, [report, videoSources, preset, segments, music, markers]);
+  }, [report, videoSources, segments, snapshot]);
   useEffect(() => {
     if (!proxyPreparing || !preparation) return;
     let disposed = false;
@@ -213,7 +232,7 @@ export default function App() {
     try {
       const selected = await invoke<MusicFile | null>('pick_music');
       if (selected) {
-        undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+        undoStack.current.push(snapshot());
         if (undoStack.current.length > 100) undoStack.current.shift();
         lastPresetEdit.current = 0;
         redoStack.current = [];
@@ -225,7 +244,7 @@ export default function App() {
     catch (e) {
       report(e);
     }
-  }, [report, preset, segments, music, markers]);
+  }, [report, snapshot]);
   useEffect(() => {
     let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPaths(paths)).then(fn => {
       if (disposed)
@@ -303,7 +322,7 @@ export default function App() {
           return;
         rememberOutputFolder(folder);
       }
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } };
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -320,7 +339,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -382,10 +401,10 @@ export default function App() {
   }
   function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
   function resetProject() {
-    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
+    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setTexts([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
   }
   function projectSnapshot(id: string, name: string, createdAt: number): Project {
-    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), preset: structuredClone(preset), quality, fps, outputFolder, outputName };
+    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), texts: structuredClone(texts), preset: structuredClone(preset), quality, fps, outputFolder, outputName };
   }
   function saveCurrentProject(showNotice = true) {
     if (!video || !videoSources.length) return;
@@ -403,7 +422,7 @@ export default function App() {
     const timer = setTimeout(() => saveCurrentProject(false), 650);
     return () => clearTimeout(timer);
     // Project edits are saved after a short idle period.
-  }, [currentProjectId, video, videoSources, segments, music, markers, preset, quality, fps, outputFolder, outputName, proxyPreparing]);
+  }, [currentProjectId, video, videoSources, segments, music, markers, texts, preset, quality, fps, outputFolder, outputName, proxyPreparing]);
   async function openProject(project: Project) {
     if (!project.videoPaths.length) { setError('This project has no video files.'); return; }
     const ticket = ++importRevision.current; setProjectLoading(true); setError(null); setPlaying(false);
@@ -417,7 +436,7 @@ export default function App() {
       const restoredSegments = project.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 }));
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTexts((project.texts ?? []).map(normalizeText)); setSelectedTextId(null); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }
@@ -431,6 +450,52 @@ export default function App() {
   }
   async function exportProjectFile(project: Project) { try { if (await invoke<boolean>('export_project', { project })) setNotice('Project file exported'); } catch (error) { report(error); } }
   const b = preset.boost;
+  const selectedText = texts.find(text => text.id === selectedTextId) ?? null;
+  const editText = useCallback((next: TextOverlay) => {
+    const now = performance.now();
+    if (!lastTextEdit.current || now - lastTextEdit.current > 350) { undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); }
+    lastTextEdit.current = now; redoStack.current = [];
+    setTexts(current => current.map(text => text.id === next.id ? next : text));
+  }, [snapshot]);
+  const addText = useCallback(() => {
+    const editedAt = sourceToEdited(segments, playhead.current), total = editedDuration(segments);
+    if (total <= 0) return;
+    undoStack.current.push(snapshot()); redoStack.current = [];
+    const font = fonts[0];
+    const next = normalizeText({ id: crypto.randomUUID(), text: 'Text', start: Math.min(editedAt, Math.max(0, total - .05)), end: Math.min(total, Math.max(editedAt + 3, editedAt + .05)), fontFamily: font?.family, fontPath: font?.path });
+    setTexts(current => [...current, next]); setSelectedTextId(next.id); setSelectedClip(null); setLayer(null);
+  }, [segments, fonts, snapshot]);
+  const removeText = useCallback((id: string) => { undoStack.current.push(snapshot()); redoStack.current = []; setTexts(current => current.filter(text => text.id !== id)); setSelectedTextId(null); }, [snapshot]);
+  const splitText = useCallback((id: string, at: number) => { undoStack.current.push(snapshot()); redoStack.current = []; setTexts(current => current.flatMap(text => text.id !== id ? [text] : [{ ...text, end: at }, { ...text, id: crypto.randomUUID(), start: at }])); }, [snapshot]);
+  const addGoogleFont = useCallback(async (requestedFamily: string) => {
+    const family = requestedFamily.trim();
+    if (!family) return;
+    try {
+      type Variant = 'regular' | 'bold' | 'black' | 'italic' | 'boldItalic' | 'blackItalic';
+      const encoded = encodeURIComponent(family).replace(/%20/g, '+');
+      const requests: Array<[Variant, string]> = [['regular', encoded], ['bold', `${encoded}:wght@700`], ['black', `${encoded}:wght@900`], ['italic', `${encoded}:ital@1`], ['boldItalic', `${encoded}:ital,wght@1,700`], ['blackItalic', `${encoded}:ital,wght@1,900`]];
+      const urls = new Map<Variant, string>((await Promise.all(requests.map(async ([variant, query]) => {
+        try {
+          const response = await fetch(`https://fonts.googleapis.com/css2?family=${query}&display=swap`); if (!response.ok) return null;
+          const css = await response.text(), matches = [...css.matchAll(/url\((https:\/\/[^)]+)\)/g)];
+          return matches.length ? [variant, matches.at(-1)![1]] as [Variant, string] : null;
+        } catch { return null; }
+      }))).filter((item): item is [Variant, string] => item != null));
+      if (!urls.get('regular')) throw new Error('Google Fonts did not return a compatible regular font');
+      const paths: Partial<Record<Variant, string>> = {};
+      await Promise.all([...urls].map(async ([variant, url]) => {
+        const buffer = await fetch(url).then(response => response.arrayBuffer());
+        const bytes = Array.from(new Uint8Array(buffer as ArrayBuffer));
+        const saved = await invoke<FontOption>('save_google_font', { family, variant, bytes }); paths[variant] = saved.path;
+        const weight = variant === 'black' || variant === 'blackItalic' ? '900' : variant === 'bold' || variant === 'boldItalic' ? '700' : '400';
+        const style = variant.toLowerCase().includes('italic') ? 'italic' : 'normal';
+        const face = new FontFace(family, `url(${url})`, { weight, style }); await face.load(); document.fonts.add(face);
+      }));
+      const font: FontOption = { family, path: paths.regular!, variants: paths };
+      setFonts(current => [...current.filter(item => item.family.toLowerCase() !== font.family.toLowerCase()), font].sort((a, b) => a.family.localeCompare(b.family)));
+      if (selectedText) editText({ ...selectedText, fontFamily: font.family, fontPath: font.path, fontBoldPath: paths.bold ?? '', fontBlackPath: paths.black ?? '', fontItalicPath: paths.italic ?? '', fontBoldItalicPath: paths.boldItalic ?? '', fontBlackItalicPath: paths.blackItalic ?? '' });
+    } catch (error) { report(error); throw error; }
+  }, [selectedText, editText, report]);
   const selectedVideoSegment = selectedClip?.track === 'video' ? segments.find(segment => segment.id === selectedClip.id) ?? null : null;
   const colorFixValue = colorScope === 'all' ? (segments.every(segment => Math.abs(segment.colorFix - (segments[0]?.colorFix ?? 0)) < .001) ? segments[0]?.colorFix ?? 0 : selectedVideoSegment?.colorFix ?? 0) : selectedVideoSegment?.colorFix ?? 0;
   const setColorFix = (value: number) => {
@@ -509,11 +574,11 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={setLayer} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => setSelectedClip({ track, id })}
+      <Composition video={video} sourceVersion={sourceVersion} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} texts={texts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) setSelectedTextId(null); }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} segments={segments} music={music} markers={markers} texts={texts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedClip({ track, id }); }}
         onMarker={(track, values) => {
           if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
-          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+          undoStack.current.push(snapshot());
           if (undoStack.current.length > 100) undoStack.current.shift();
           lastPresetEdit.current = 0; redoStack.current = [];
           setMarkers(current => ({ ...current, [track]: values }));
@@ -523,7 +588,7 @@ export default function App() {
           const volumeOnly = next.length === previous.length && next.every((s, index) => s.id === previous[index].id && s.start === previous[index].start && s.end === previous[index].end);
           if (track === 'video') { editSegments(next, volumeOnly); return; }
           if (!music) return;
-          undoStack.current.push({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers) });
+          undoStack.current.push(snapshot());
           if (undoStack.current.length > 100) undoStack.current.shift();
           lastPresetEdit.current = 0;
           redoStack.current = [];
@@ -551,7 +616,8 @@ export default function App() {
         </span>
       </div>
       <div className="inspector-scroll">
-        {!layer && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, or boost element in the preview to edit it.</span></div>}
+        {!layer && !selectedText && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, boost, or text element in the preview to edit it.</span></div>}
+        {selectedText && <Section title="Text" icon={<Pencil size={16} />}><TextInspector value={selectedText} fonts={fonts} onChange={editText} onAddGoogleFont={addGoogleFont} onDelete={() => removeText(selectedText.id)} /></Section>}
         {layer === 'background' && <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
           <Slider label="Blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
           <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />

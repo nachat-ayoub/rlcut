@@ -1,5 +1,5 @@
 use super::geometry::{color_filter, filter_graph_normalized};
-use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, Video};
+use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
 use std::path::Path;
 pub fn export_args(
     v: &Video,
@@ -27,7 +27,7 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
-    export_args_timeline(v, p, segments, o, out, None, None)
+    export_args_timeline(v, p, segments, o, out, None, None, &[])
 }
 pub fn export_args_timeline(
     v: &Video,
@@ -37,6 +37,7 @@ pub fn export_args_timeline(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
 ) -> Result<Vec<String>, String> {
     export_args_timeline_sources(
         std::slice::from_ref(v),
@@ -46,6 +47,7 @@ pub fn export_args_timeline(
         out,
         music,
         music_fade_out,
+        texts,
     )
 }
 pub fn export_args_timeline_sources(
@@ -56,6 +58,7 @@ pub fn export_args_timeline_sources(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
 ) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
     if videos.is_empty()
@@ -67,6 +70,8 @@ pub fn export_args_timeline_sources(
     }
     let total_duration: f64 = videos.iter().map(|video| video.duration).sum();
     Segment::validate_all(segments, total_duration)?;
+    let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
+    TextOverlay::validate_all(texts, edited_duration)?;
     let mut offsets = Vec::with_capacity(videos.len());
     let mut offset = 0.;
     for video in videos {
@@ -177,6 +182,91 @@ pub fn export_args_timeline_sources(
     }
     graph.push(';');
     graph.push_str(&composition);
+    let mut video_output = "out_edit".to_string();
+    for (index, text) in texts.iter().enumerate() {
+        let next = format!("text{index}");
+        let escaped_text = text
+            .text
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace(':', "\\:")
+            .replace('%', "\\%")
+            .replace('\n', "\\n");
+        let styled_path = match (text.italic, text.font_weight) {
+            (true, 900) if !text.font_black_italic_path.is_empty() => &text.font_black_italic_path,
+            (true, 700) if !text.font_bold_italic_path.is_empty() => &text.font_bold_italic_path,
+            (true, _) if !text.font_italic_path.is_empty() => &text.font_italic_path,
+            (false, 900) if !text.font_black_path.is_empty() => &text.font_black_path,
+            (false, 700) if !text.font_bold_path.is_empty() => &text.font_bold_path,
+            _ => &text.font_path,
+        };
+        let font = if styled_path.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "fontfile='{}':",
+                styled_path
+                    .replace('\\', "\\\\")
+                    .replace(':', "\\:")
+                    .replace('\'', "\\'")
+            )
+        };
+        let x = match text.align.as_str() {
+            "left" => format!("w*{:.6}", text.x - text.box_width / 2.),
+            "right" => format!("w*{:.6}-text_w", text.x + text.box_width / 2.),
+            _ => format!("w*{:.6}-text_w/2", text.x),
+        };
+        let size = text.font_size * text.scale * w as f64 / 1080.;
+        let color = text.color.trim_start_matches('#');
+        let stroke = text.stroke_color.trim_start_matches('#');
+        let background = text.background_color.trim_start_matches('#');
+        let shadow = text.shadow_color.trim_start_matches('#');
+        let stroke_factor = match text.stroke_position.as_str() {
+            "outside" => 2.,
+            "inside" => 0.5,
+            _ => 1.,
+        };
+        let fade_in = text
+            .fade_in
+            .map(|value| {
+                format!(
+                    "if(lt(t,{:.6}),0,if(lt(t,{:.6}), (t-{:.6})/{value:.6},",
+                    text.start,
+                    text.start + value,
+                    text.start
+                )
+            })
+            .unwrap_or_else(|| format!("if(lt(t,{:.6}),0,", text.start));
+        let fade_out = text
+            .fade_out
+            .map(|value| {
+                format!(
+                    "if(gt(t,{:.6}),0,if(gt(t,{:.6}),({:.6}-t)/{value:.6},1))",
+                    text.end,
+                    text.end - value,
+                    text.end
+                )
+            })
+            .unwrap_or_else(|| format!("if(gt(t,{:.6}),0,1)", text.end));
+        let alpha = format!("{fade_in}{fade_out})");
+        let style = format!(
+            "{font}text='{escaped_text}':fontsize={size:.3}:fontcolor=0x{color}@{:.4}:line_spacing={:.3}:borderw={:.3}:bordercolor=0x{stroke}:box={}:boxcolor=0x{background}@{:.4}:shadowx={:.3}:shadowy={:.3}:shadowcolor=0x{shadow}:alpha='{alpha}'",
+            text.opacity, (text.line_height - 1.) * size, text.stroke_width * stroke_factor * w as f64 / 1080., if text.background_opacity > 0. { 1 } else { 0 }, text.background_opacity, text.shadow_x * w as f64 / 1080., text.shadow_y * w as f64 / 1080.
+        );
+        if text.rotation.abs() > 0.001 {
+            let layer = format!("text_layer{index}");
+            graph.push_str(&format!(
+                ";color=c=black@0.0:s={w}x{h}:d={edited_duration:.6},format=rgba,drawtext={style}:x='(w-text_w)/2':y='(h-text_h)/2',rotate={:.8}:c=none:ow=iw:oh=ih[{layer}];[{video_output}][{layer}]overlay=x='W*{:.6}-w/2':y='H*{:.6}-h/2':format=auto[{next}]",
+                text.rotation.to_radians(), text.x, text.y
+            ));
+        } else {
+            graph.push_str(&format!(
+                ";[{video_output}]drawtext={style}:x='{x}':y='h*{:.6}-text_h/2'[{next}]",
+                text.y
+            ));
+        }
+        video_output = next;
+    }
     if v.has_audio {
         for source in 0..videos.len() {
             if !videos[source].has_audio {
@@ -259,7 +349,6 @@ pub fn export_args_timeline_sources(
             graph.push_str(";[music_edit]alimiter=limit=0.95:level=0:attack=1[audio_mix]");
         }
     }
-    let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
     let mut args = vec![
         "-hide_banner".into(),
         "-loglevel".into(),
@@ -282,7 +371,7 @@ pub fn export_args_timeline_sources(
         "-filter_complex".into(),
         graph,
         "-map".into(),
-        "[out_edit]".into(),
+        format!("[{video_output}]"),
     ]);
     if v.has_audio || music.is_some() {
         args.extend(

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
-import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Trash2, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
-import type { MusicTrack, Segment, TrackMarkers } from '../types';
+import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
+import type { MusicTrack, Segment, TextOverlay, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
 
@@ -22,13 +22,15 @@ const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5M13.5 3H11v12h2.5" /></svg>;
 const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3h8v7.25L9 15l-4-4.75z" /></svg>;
 
-export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, texts, selectedTextId, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
   segments: Segment[];
   music: MusicTrack | null;
   markers: TrackMarkers;
+  texts: TextOverlay[];
+  selectedTextId: string | null;
   playing: boolean;
   playbackReady: boolean;
   canUndo: boolean;
@@ -36,6 +38,11 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   onSeek: (value: number) => void;
   onPlay: () => void;
   onEdit: (track: Track, segments: Segment[]) => void;
+  onTextEdit: (text: TextOverlay) => void;
+  onTextSplit: (id: string, at: number) => void;
+  onTextDelete: (id: string) => void;
+  onTextSelect: (id: string) => void;
+  onAddText: () => void;
   onMarker: (track: Track, values: number[]) => void;
   onSelectionChange: (track: Track, id: string) => void;
   onUndo: () => void;
@@ -50,11 +57,13 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const [markerPreview, setMarkerPreview] = useState<{ track: Track; index: number; edited: number; snapped: boolean } | null>(null);
   const [volume, setVolume] = useState(1);
   const [volumeOpen, setVolumeOpen] = useState(false);
+  const [textPreview, setTextPreview] = useState<TextOverlay | null>(null);
+  const textGesture = useRef<{ pointer: number; x: number; value: TextOverlay; edge: 'start' | 'end' | 'move' } | null>(null);
   const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), volumePopover = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
   const musicSegments = music?.segments ?? [], videoOffsets = offsetsOf(segments), musicOffsets = offsetsOf(musicSegments);
   let sourceCursor = 0;
   const sourceRanges = sourceDurations.map(length => { const start = sourceCursor; sourceCursor += length; return { start, end: sourceCursor }; });
-  const editedDuration = durationOf(segments), musicDuration = durationOf(musicSegments);
+  const editedDuration = durationOf(segments);
   const mappedTimestamp = sourceToEdited(segments, timestamp), editedTimestamp = mappedTimestamp < .025 ? 0 : mappedTimestamp;
   const lanes = { video: segments, music: musicSegments }, offsets = { video: videoOffsets, music: musicOffsets };
   const displayLanes = {
@@ -77,8 +86,9 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const selectedIndex = clips.findIndex(clip => clip.id === selection.id), selectedOffset = offsets[selection.track][selectedIndex] ?? 0;
   const selectedTime = selected ? selected.start + editedTimestamp - selectedOffset : 0;
   const canCut = Boolean(selected && selectedTime > selected.start + MIN_CLIP && selectedTime < selected.end - MIN_CLIP);
+  const selectedText = texts.find(text => text.id === selectedTextId), canCutText = Boolean(selectedText && editedTimestamp > selectedText.start + MIN_CLIP && editedTimestamp < selectedText.end - MIN_CLIP);
   const tickEvery = pixelsPerSecond >= 160 ? .5 : pixelsPerSecond >= 80 ? 1 : pixelsPerSecond >= 40 ? 2 : pixelsPerSecond >= 20 ? 5 : 10;
-  const timelineDuration = Math.max(durationOf(displayLanes.video), durationOf(displayLanes.music));
+  const timelineDuration = Math.max(durationOf(displayLanes.video), durationOf(displayLanes.music), ...texts.map(text => text.end));
   const ticks = Array.from({ length: Math.floor(timelineDuration / tickEvery) + 1 }, (_, index) => index * tickEvery);
   useEffect(() => {
     if (!segments.some(s => selection.track === 'video' && s.id === selection.id) && !musicSegments.some(s => selection.track === 'music' && s.id === selection.id)) setSelection({ track: 'video', id: segments[0]?.id ?? '' });
@@ -219,6 +229,12 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const setGain = (gain: number) => { if (selected) onEdit(selection.track, clips.map(segment => selection.track === 'video' || segment.id === selected.id ? { ...segment, volume: gain } : segment)); };
   const commitVolume = () => { if (selected && volumeDirty.current) { volumeDirty.current = false; setGain(volume); } };
   const cut = (operation: 'start' | 'end' | 'split') => {
+    if (selectedText) {
+      if (!canCutText) return;
+      if (operation === 'split') onTextSplit(selectedText.id, editedTimestamp);
+      else onTextEdit({ ...selectedText, [operation]: editedTimestamp });
+      return;
+    }
     if (!selected || !canCut) return;
     onEdit(selection.track, clips.flatMap(segment => segment.id !== selected.id ? [segment] : operation === 'split'
       ? [{ ...segment, end: selectedTime }, { ...segment, id: crypto.randomUUID(), start: selectedTime }]
@@ -246,8 +262,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       if ((event.ctrlKey || event.metaKey) && key === 'k') { event.preventDefault(); cut('split'); }
       else if (key === 'q') { event.preventDefault(); cut('start'); }
       else if (key === 'w') { event.preventDefault(); cut('end'); }
-      else if ((event.key === 'Delete' || event.key === 'Backspace') && selected) { event.preventDefault(); onEdit(selection.track, clips.filter(segment => segment.id !== selected.id)); }
-      else if (key === 'm' && selected) { event.preventDefault(); setMarkerAtCursor(selection.track); }
+      else if ((event.key === 'Delete' || event.key === 'Backspace') && (selectedText || selected)) { event.preventDefault(); if (selectedText) onTextDelete(selectedText.id); else onEdit(selection.track, clips.filter(segment => segment.id !== selected!.id)); }
+      else if (key === 'm' && selected && !selectedText) { event.preventDefault(); setMarkerAtCursor(selection.track); }
       else if (event.key === '-' || event.key === '_') { event.preventDefault(); zoom(pixelsPerSecond / 1.2); }
       else if (event.key === '=' || event.key === '+') { event.preventDefault(); zoom(pixelsPerSecond * 1.2); }
       else if (event.key === 'Home') { event.preventDefault(); seekEdited(0); }
@@ -269,6 +285,28 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   });
   const renderMarkers = (track: Track) => visibleMarkersEdited(track).map((value, index) => <button key={`${track}-${index}`} className={`track-marker ${track} ${markerPreview?.track === track && markerPreview.index === index && markerPreview.snapped ? 'snapped' : ''}`} style={{ left: `${value * pixelsPerSecond}px` }} aria-label={`Drag ${track} marker`} title={`${track === 'video' ? 'Video' : 'Music'} marker · drag to move, Alt for no snapping`} onPointerDown={event => beginMarker(event, track, index, value)} onPointerMove={moveMarker} onPointerUp={finishMarker} onPointerCancel={() => { markerGesture.current = null; setMarkerPreview(null); }}><Diamond size={9} fill="currentColor" /></button>);
   const renderReorderGhost = (track: Track) => reorderPreview?.track === track ? <div className={`reorder-ghost ${track}`} style={{ left: `${reorderPreview.offset * pixelsPerSecond}px`, width: `${reorderPreview.width * pixelsPerSecond}px` }} /> : null;
+  const beginText = (event: PointerEvent<HTMLElement>, text: TextOverlay, edge: 'start' | 'end' | 'move') => { event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); onTextSelect(text.id); textGesture.current = { pointer: event.pointerId, x: event.clientX, value: text, edge }; setTextPreview(text); };
+  const moveText = (event: PointerEvent<HTMLElement>) => {
+    const state = textGesture.current; if (!state || state.pointer !== event.pointerId) return;
+    const delta = (event.clientX - state.x) / pixelsPerSecond, total = editedDuration;
+    let next = { ...state.value };
+    if (state.edge === 'move') { const length = next.end - next.start; next.start = Math.max(0, Math.min(total - length, next.start + delta)); next.end = next.start + length; }
+    else if (state.edge === 'start') next.start = Math.max(0, Math.min(next.end - MIN_CLIP, next.start + delta));
+    else next.end = Math.max(next.start + MIN_CLIP, Math.min(total, next.end + delta));
+    if (!event.altKey) {
+      const edge = state.edge === 'end' ? next.end : next.start;
+      const snapped = nearest(edge, unique([...snapPoints(), ...texts.filter(text => text.id !== state.value.id).flatMap(text => [text.start, text.end])]));
+      if (snapped != null) { const shift = snapped - edge; if (state.edge === 'move') { next.start += shift; next.end += shift; } else next[state.edge] = snapped; }
+    }
+    setTextPreview(next);
+  };
+  const finishText = (event: PointerEvent<HTMLElement>) => { const state = textGesture.current; if (state?.pointer !== event.pointerId) return; const next = textPreview; textGesture.current = null; setTextPreview(null); if (next && (Math.abs(next.start - state.value.start) > .001 || Math.abs(next.end - state.value.end) > .001)) onTextEdit(next); };
+  const renderTexts = () => texts.map(text => {
+    const shown = textPreview?.id === text.id ? textPreview : text;
+    return <div key={text.id} className={`timeline-segment text-segment ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${shown.start * pixelsPerSecond}px`, width: `${(shown.end - shown.start) * pixelsPerSecond}px` }} onPointerDown={event => beginText(event, text, 'move')} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={() => { textGesture.current = null; setTextPreview(null); }}>
+      <button className="trim-handle start" onPointerDown={event => beginText(event, text, 'start')} onPointerMove={moveText} onPointerUp={finishText} /><span className="clip-fill"><Type size={12} /><b>{shown.text || 'Text'}</b></span><button className="trim-handle end" onPointerDown={event => beginText(event, text, 'end')} onPointerMove={moveText} onPointerUp={finishText} />
+    </div>;
+  });
   const addPosition = (track: Track) => durationOf(displayLanes[track]) * pixelsPerSecond + 9;
   return <section className="timeline" aria-label="Editor timeline" onWheel={wheelZoom}>
     <div className="transport">
@@ -276,26 +314,27 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button onClick={onPlay} disabled={!duration || !playbackReady} title={playbackReady ? undefined : 'Preparing optimized preview…'} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
       <button onClick={() => seekEdited(editedTimestamp + 5)} disabled={!duration} title="Forward 5 seconds" aria-label="Forward 5 seconds"><SkipForward size={15} /></button>
       <span className="timecode">{time(editedTimestamp)} <i>/</i> {time(editedDuration)}</span><span className="timeline-divider" />
-      <button className="editor-tool" onClick={() => cut('split')} disabled={!canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
-      <button className="editor-tool" onClick={() => cut('start')} disabled={!canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
-      <button className="editor-tool" onClick={() => cut('end')} disabled={!canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
-      <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><Trash2 size={16} /></button>
-      <button className={`editor-tool marker-action ${selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={!selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
+      <button className="editor-tool" onClick={() => cut('split')} disabled={selectedText ? !canCutText : !canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
+      <button className="editor-tool" onClick={() => cut('start')} disabled={selectedText ? !canCutText : !canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
+      <button className="editor-tool" onClick={() => cut('end')} disabled={selectedText ? !canCutText : !canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
+      <button className="editor-tool" onClick={() => selectedText ? onTextDelete(selectedText.id) : selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selectedText && !selected} title="Delete selected clip (Delete)" aria-label="Delete selected clip"><Trash2 size={16} /></button>
+      <button className={`editor-tool marker-action ${!selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
       <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
-      <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={!selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
+      <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={Boolean(selectedText) || !selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
     </div>
-    {volumeOpen && selected && <div className="volume-popover" ref={volumePopover}>
+    {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>
       <button onClick={() => { const next = volume > 0 ? 0 : 1; volumeDirty.current = false; setVolume(next); setGain(next); }} aria-label={volume > 0 ? 'Mute selected clip' : 'Unmute selected clip'}>{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
       <div className="volume-range"><input aria-label="Volume" type="range" min="0" max="2" step=".01" value={volume} style={{ '--range-fill': `${volume / 2 * 100}%` } as React.CSSProperties} onChange={event => { const raw = Number(event.target.value); volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .06 ? 1 : raw); }} onPointerUp={commitVolume} onKeyUp={commitVolume} onBlur={commitVolume} /><i /></div>
       <label className="volume-value"><input aria-label="Volume percent" type="number" min="0" max="200" step="1" value={Math.round(volume * 100)} onChange={event => { const raw = Math.max(0, Math.min(200, event.target.valueAsNumber || 0)) / 100; volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .02 ? 1 : raw); }} onKeyDown={event => { if (event.key === 'Enter') { commitVolume(); event.currentTarget.blur(); } }} onBlur={commitVolume} /><span>%</span></label>
     </div>}
     <div className="timeline-editor">
-      <div className="track-labels" aria-hidden="true"><div className="ruler-corner" /><div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div></div>
+      <div className="track-labels" aria-hidden="true"><div className="ruler-corner" /><div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div><div className="track-label text"><Type size={14} /></div></div>
       <div className="timeline-scroll" ref={scroll}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
         <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarkers('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
         <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarkers('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
+        <div className="text-track">{renderTexts()}<button className="track-add text" style={{ left: `${Math.max(0, ...texts.map(text => text.end)) * pixelsPerSecond + 9}px` }} title="Add text" aria-label="Add text" onPointerDown={event => event.stopPropagation()} onClick={onAddText}><Plus size={16} /></button></div>
         <i className={`playhead ${trimPreview?.snapped || markerPreview?.snapped ? 'snapped' : ''}`} style={{ left: `${editedTimestamp * pixelsPerSecond}px` }}><span /></i>
       </div></div>
     </div>

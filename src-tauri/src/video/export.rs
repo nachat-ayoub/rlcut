@@ -2,7 +2,7 @@ use super::{
     args::{export_args_timeline_sources, progress_seconds},
     binaries::{command, Binaries},
 };
-use crate::model::{ExportOptions, MusicTrack, Preset, Segment, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
 #[cfg(feature = "serialization")]
 use serde::Serialize;
 use std::{
@@ -115,7 +115,7 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
-    run_timeline(b, v, p, segments, o, job, None, None)
+    run_timeline(b, v, p, segments, o, job, None, None, Vec::new())
 }
 pub fn run_timeline(
     b: Binaries,
@@ -126,8 +126,19 @@ pub fn run_timeline(
     job: Arc<Job>,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
+    texts: Vec<TextOverlay>,
 ) {
-    run_timeline_sources(b, vec![v], p, segments, o, job, music, music_fade_out)
+    run_timeline_sources(
+        b,
+        vec![v],
+        p,
+        segments,
+        o,
+        job,
+        music,
+        music_fade_out,
+        texts,
+    )
 }
 pub fn run_timeline_sources(
     b: Binaries,
@@ -138,6 +149,7 @@ pub fn run_timeline_sources(
     job: Arc<Job>,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
+    texts: Vec<TextOverlay>,
 ) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
@@ -156,6 +168,7 @@ pub fn run_timeline_sources(
             &partial,
             music.as_ref(),
             music_fade_out,
+            &texts,
         )?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
