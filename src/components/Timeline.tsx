@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
-import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
+import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Trash2, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
 import type { MusicTrack, Segment, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
@@ -17,11 +17,10 @@ const MIN_CLIP = .05;
 const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
 const unique = (values: number[]) => values.filter((value, index) => values.findIndex(other => Math.abs(other - value) < .0001) === index);
-const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 2.5v2M5 7v2M5 11.5v2M5 15.5v.1M12.5 2.5h-2v13h2" /></svg>;
-const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M13 2.5v2M13 7v2M13 11.5v2M13 15.5v.1M5.5 2.5h2v13h-2" /></svg>;
-const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M7 2.5H5v13h2M11 2.5h2v13h-2" /></svg>;
-const RippleDeleteIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4 5h10M6 5l.6 10h4.8L12 5M7 5V3h4v2M8 7.5v5M10 7.5v5" /></svg>;
-const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.5 14.5 5v4c0 3.2-2.2 5.4-5.5 6.5C5.7 14.4 3.5 12.2 3.5 9V5z" /></svg>;
+const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" strokeDasharray="1 2" /><path d="M13.5 3H11v12h2.5" /></svg>;
+const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" /><path d="M13.5 3H11v12h2.5" strokeDasharray="1 2" /></svg>;
+const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5M13.5 3H11v12h2.5" /></svg>;
+const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3h8v7.25L9 15l-4-4.75z" /></svg>;
 
 export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
@@ -280,7 +279,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button className="editor-tool" onClick={() => cut('split')} disabled={!canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('start')} disabled={!canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={!canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
-      <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><RippleDeleteIcon /></button>
+      <button className="editor-tool" onClick={() => selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selected} title="Ripple delete selected clip (Delete)" aria-label="Ripple delete selected clip"><Trash2 size={16} /></button>
       <button className={`editor-tool marker-action ${selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={!selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
       <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
