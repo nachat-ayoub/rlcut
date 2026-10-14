@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Upload, X } from 'lucide-react';
 import type { Init, Layer, MusicFile, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { invoke, isDesktop, message, onDrop } from './lib/native';
@@ -11,7 +11,13 @@ import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
 import { ProjectHome } from './components/ProjectHome';
 import { editedToSource, sourceToEdited } from './lib/timeline';
-type Modal = 'settings' | 'presets' | 'crop' | null;
+type Modal = 'settings' | 'presets' | 'shortcuts' | 'crop' | null;
+const shortcuts = [
+  ['Playback', [['Space', 'Play or pause'], ['← / →', 'Move one frame'], ['Shift + ← / →', 'Move one second'], ['Home / End', 'Jump to timeline start or end']]],
+  ['Editing', [['Ctrl / ⌘ + K', 'Split selected clip'], ['Q', 'Trim left side to playhead'], ['W', 'Trim right side to playhead'], ['Delete', 'Ripple-delete selected clip'], ['M', 'Toggle marker at playhead'], ['Ctrl / ⌘ + Z', 'Undo'], ['Ctrl / ⌘ + Shift + Z', 'Redo']]],
+  ['Timeline', [['Drag clip', 'Reorder clips'], ['Shift + drag clip', 'Trim or restore the clip start'], ['Drag clip edge', 'Trim or restore that edge'], ['Alt while trimming', 'Temporarily disable snapping'], ['Ctrl + scroll', 'Zoom around the pointer']]],
+  ['Preview & files', [['Ctrl + scroll', 'Zoom preview'], ['Alt + drag', 'Pan a zoomed preview'], ['Ctrl / ⌘ + O', 'Import videos'], ['Ctrl / ⌘ + S', 'Save project'], ['Ctrl / ⌘ + E', 'Export clip']]],
+] as const;
 const customPresetName = (presets: Preset[]) => {
   const names = new Set(presets.map(preset => preset.name));
   if (!names.has('Custom Preset')) return 'Custom Preset';
@@ -697,20 +703,22 @@ export default function App() {
       </div>
     </div>}
     {modal === 'crop' && preview && <CropEditor aspect={(video?.width ?? 16) / (video?.height ?? 9)} source={preview.source} preset={preset} onCancel={() => setModal(null)} onApply={boost => { edit('boost', boost); setBefore(false); setModal(null); }} />}
-    {(modal === 'presets' || modal === 'settings') && <div className="modal-backdrop">
+    {(modal === 'presets' || modal === 'settings' || modal === 'shortcuts') && <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-heading">
           <div>
             <span className="eyebrow">YOUR WORKSPACE</span>
             <h2 id="modal-title">
-              {modal === 'presets' ? 'Manage presets' : 'Settings'}
+              {modal === 'presets' ? 'Manage presets' : modal === 'shortcuts' ? 'Keyboard shortcuts' : 'Settings'}
             </h2>
           </div>
           <button aria-label="Close dialog" onClick={() => { setModal(null); if (!video) setHome(true); }}>
             <X size={20} />
           </button>
         </div>
-        {modal === 'presets' ? <>
+        {modal === 'shortcuts' ? <div className="shortcuts-list">
+          {shortcuts.map(([group, entries]) => <section key={group}><h3>{group}</h3>{entries.map(([keys, action]) => <div key={keys}><kbd>{keys}</kbd><span>{action}</span></div>)}</section>)}
+        </div> : modal === 'presets' ? <>
           <label className="field">Selected preset<Dropdown label="Selected preset" value={preset.id} onChange={value => select(value)} options={allPresets.map(p => ({ value: p.id, label: p.name }))} />
           </label>
           <label className="field">Preset name<div className="folder-picker">
@@ -757,6 +765,7 @@ export default function App() {
           </div>
           </label>
           <div className="modal-actions">
+            <button onClick={() => setModal('shortcuts')}><Keyboard size={15} />View shortcuts</button>
             <button onClick={() => {
               const ticket = ++importRevision.current;
               setPlaying(false); setProxyPath(''); setProxyPreparing(Boolean(video));
@@ -772,7 +781,7 @@ export default function App() {
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
             <button className="primary" onClick={() => { setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
           </div>
-          <p className="help-text">Shortcuts: Ctrl / ⌘ O import · Ctrl / ⌘ E export · ← / → frame · Shift ← / → one second</p>
+          <p className="help-text">Keyboard and mouse controls are listed under View shortcuts.</p>
         </>}
       </div>
     </div>}

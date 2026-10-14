@@ -741,7 +741,9 @@ h1 {
 .timecode { margin:0 5px; color:#c8bbd2; font-size:8px; font-variant-numeric:tabular-nums; white-space:nowrap }
 .timecode i { color:#62596c; font-style:normal }
 .timeline-divider { height:18px; width:1px; background:#38313f; margin:0 3px }
+.timeline-zoom-wrap { position:relative; display:flex; width:52px; align-items:center }
 .timeline-zoom { width:52px; height:3px; padding:0; accent-color:#a781d3 }
+.timeline-zoom-wrap>i { position:absolute; z-index:2; left:calc(22.807% + 2.447px); top:50%; width:1px; height:8px; transform:translate(-.5px,-50%); background:#877991; pointer-events:none }
 .volume-popover {
   position:absolute;
   z-index:20;
@@ -766,6 +768,8 @@ h1 {
 .volume-value input { width:34px; height:24px; padding:2px 1px 2px 5px; border:0!important; background:transparent!important; text-align:right; font-size:10px; font-variant-numeric:tabular-nums; appearance:textfield }
 .volume-value input::-webkit-inner-spin-button { appearance:none }
 .volume-value span { padding-right:5px; font-size:9px }
+.volume-value:focus-within { border-color:#8061a4; box-shadow:0 0 0 1px #8061a455 }
+.volume-value input:focus-visible { outline:none; box-shadow:none }
 .timeline-editor {
   margin-top:6px;
   height:118px;
@@ -1610,6 +1614,12 @@ progress::-moz-progress-bar {
 .slider-range { position:relative; min-width:0 }
 .slider-range input { position:relative; z-index:1 }
 .slider-default { position:absolute; z-index:2; top:6px; width:1px; height:7px; transform:translateX(-.5px); border-radius:1px; background:#80728d; pointer-events:none }
+.shortcuts-list { display:grid; grid-template-columns:1fr 1fr; gap:18px 24px; max-height:min(62vh,520px); overflow:auto; padding:2px 4px 4px }
+.shortcuts-list section { min-width:0 }
+.shortcuts-list h3 { margin:0 0 6px; color:#cdb9e3; font-size:10px; text-transform:uppercase; letter-spacing:.11em }
+.shortcuts-list section>div { min-height:32px; display:grid; grid-template-columns:116px minmax(0,1fr); align-items:center; gap:10px; border-bottom:1px solid #2b2630; color:#a99eaf; font-size:10px }
+.shortcuts-list kbd { width:max-content; max-width:116px; padding:4px 6px; border:1px solid #403647; border-bottom-color:#655371; border-radius:5px; background:#18151d; color:#ded2e8; font-size:9px }
+@media(max-width:700px) { .shortcuts-list { grid-template-columns:1fr } }
 
 /* Compact editor inspector: clear hierarchy, fewer nested cards, more working space. */
 .inspector { background:#15141a }

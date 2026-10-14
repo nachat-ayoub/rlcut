@@ -82,20 +82,20 @@ export function CropEditor({ source, preset, aspect, onApply, onCancel }: {
           <div className="cutout-preview"><div style={{ width: cutoutWidth, height: cutoutWidth / cutoutRatio, position: 'relative', overflow: 'hidden', maskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)`, WebkitMaskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)` }}><img src={source} alt="Boost cutout result" style={{ position: 'absolute', width: `${100 / crop.width}%`, height: `${100 / crop.height}%`, maxWidth: 'none', left: `${-100 * crop.x / crop.width}%`, top: `${-100 * crop.y / crop.height}%` }} /></div></div>
           <label className="row">Show boost cutout<input type="checkbox" checked={boost.enabled} onChange={e => update({ enabled: e.target.checked })} /></label>
           <div className="segmented">{(['circle', 'ellipse'] as const).map(shape => <button key={shape} className={boost.shape === shape ? 'active' : ''} onClick={() => update({ shape })}>{shape}</button>)}</div>
-          <Slider label="Scale" value={boost.scale} min={.25} max={4} suffix="×" onChange={scale => update({ scale })} />
+          <Slider label="Scale" value={boost.scale} min={.25} max={4} defaultValue={preset.boost.scale} suffix="×" onChange={scale => update({ scale })} />
           <div className="two-controls">
-            <Slider label="Width" value={boost.width} min={.01} max={1} step={.001} onChange={width => update({ width })} />
-            <Slider label="Height" value={boost.height} min={.005} max={1} step={.001} onChange={height => update({ height })} />
-            <Slider label="X position" value={boost.x - .5} min={-.5} max={.5} onChange={x => update({ x: x + .5 })} />
-            <Slider label="Y position" value={boost.y - .5} min={-.5} max={.5} onChange={y => update({ y: y + .5 })} />
+            <Slider label="Width" value={boost.width} min={.01} max={1} step={.001} defaultValue={preset.boost.width} onChange={width => update({ width })} />
+            <Slider label="Height" value={boost.height} min={.005} max={1} step={.001} defaultValue={preset.boost.height} onChange={height => update({ height })} />
+            <Slider label="X position" value={boost.x - .5} min={-.5} max={.5} defaultValue={preset.boost.x - .5} onChange={x => update({ x: x + .5 })} />
+            <Slider label="Y position" value={boost.y - .5} min={-.5} max={.5} defaultValue={preset.boost.y - .5} onChange={y => update({ y: y + .5 })} />
           </div>
           <Alignment width={boost.width * boost.scale} height={boost.height * boost.scale} onChange={(x, y) => update({ x, y })} />
-          <Slider label="Edge feather" value={boost.feather} max={.25} step={.005} onChange={feather => update({ feather })} />
+          <Slider label="Edge feather" value={boost.feather} max={.25} step={.005} defaultValue={preset.boost.feather} onChange={feather => update({ feather })} />
           <details><summary>Source crop coordinates</summary><div className="two-controls">
-            <Slider label="Crop X" value={crop.x} max={1 - crop.width} step={.001} onChange={x => setCrop({ ...crop, x })} />
-            <Slider label="Crop Y" value={crop.y} max={1 - crop.height} step={.001} onChange={y => setCrop({ ...crop, y })} />
-            <Slider label="Crop width" value={crop.width} min={.002} max={1 - crop.x} step={.001} onChange={width => setCrop({ ...crop, width })} />
-            <Slider label="Crop height" value={crop.height} min={.002} max={1 - crop.y} step={.001} onChange={height => setCrop({ ...crop, height })} />
+            <Slider label="Crop X" value={crop.x} max={1 - crop.width} step={.001} defaultValue={preset.boost.crop.x} onChange={x => setCrop({ ...crop, x })} />
+            <Slider label="Crop Y" value={crop.y} max={1 - crop.height} step={.001} defaultValue={preset.boost.crop.y} onChange={y => setCrop({ ...crop, y })} />
+            <Slider label="Crop width" value={crop.width} min={.002} max={1 - crop.x} step={.001} defaultValue={preset.boost.crop.width} onChange={width => setCrop({ ...crop, width })} />
+            <Slider label="Crop height" value={crop.height} min={.002} max={1 - crop.y} step={.001} defaultValue={preset.boost.crop.height} onChange={height => setCrop({ ...crop, height })} />
           </div></details>
         </aside></div>
       <div className="crop-footer">

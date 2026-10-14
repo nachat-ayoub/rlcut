@@ -1,4 +1,4 @@
-use super::geometry::filter_graph;
+use super::geometry::{color_filter, filter_graph_normalized};
 use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, Video};
 use std::path::Path;
 pub fn export_args(
@@ -115,7 +115,11 @@ pub fn export_args_timeline_sources(
         if !graph.is_empty() {
             graph.push(';');
         }
-        graph.push_str(&format!("[{source}:v:0]split={}{outputs}", indices.len()));
+        graph.push_str(&format!(
+            "[{source}:v:0]{},split={}{outputs}",
+            color_filter(&videos[source]),
+            indices.len()
+        ));
     }
     for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
         let normalize = if videos[source].width == videos[0].width
@@ -150,7 +154,7 @@ pub fn export_args_timeline_sources(
         ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
         segments.len()
     ));
-    let mut composition = filter_graph(&v, p, w, h)?
+    let mut composition = filter_graph_normalized(&v, p, w, h)?
         .replace("[0:v:0]", "[source_edit]")
         .replace("[out]", "[out_edit]");
     if p.boost.intro.enabled && p.boost.enabled {

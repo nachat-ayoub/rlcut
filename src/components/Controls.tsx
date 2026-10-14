@@ -12,7 +12,13 @@ export function Slider({ label, value, min = 0, max = 1, step = 0.01, onChange, 
   snapThreshold?: number;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const snap = (next: number) => defaultValue != null && Math.abs(next - defaultValue) <= (snapThreshold ?? Math.max(step * 2, (max - min) * .015)) ? defaultValue : next;
+  const trackPosition = (point: number) => {
+    const ratio = Math.max(0, Math.min(1, (point - min) / (max - min)));
+    // Native range thumbs travel inside half a thumb at both ends. Account for
+    // that inset so the default tick crosses the thumb's actual center.
+    return `calc(${ratio * 100}% + ${4.5 - ratio * 9}px)`;
+  };
+  const snap = (next: number) => defaultValue != null && defaultValue >= min && defaultValue <= max && Math.abs(next - defaultValue) <= (snapThreshold ?? Math.max(step * 2, (max - min) * .015)) ? defaultValue : next;
   return <div className="slider-control">
     <div className="control-label">
       <label>
@@ -30,7 +36,7 @@ export function Slider({ label, value, min = 0, max = 1, step = 0.01, onChange, 
     </div>
     <div className="slider-range">
       <input aria-label={label} type="range" min={min} max={max} step={step} value={value} onChange={e => { setDraft(null); onChange(snap(Number(e.target.value))); }} style={{ '--range-fill': `${(value - min) / (max - min) * 100}%` } as React.CSSProperties} />
-      {defaultValue != null && defaultValue >= min && defaultValue <= max && <i className="slider-default" style={{ left: `${(defaultValue - min) / (max - min) * 100}%` }} />}
+      {defaultValue != null && defaultValue >= min && defaultValue <= max && <i className="slider-default" style={{ left: trackPosition(defaultValue) }} />}
     </div>
   </div>;
 }
