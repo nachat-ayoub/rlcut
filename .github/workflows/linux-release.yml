@@ -54,6 +54,17 @@ jobs:
       - run: npm ci
       - name: Build Linux AppImage (no test execution)
         run: |
+          exec > >(tee /tmp/rlcut-build.log) 2>&1
+          report_failure() {
+            status=$?
+            trap - ERR
+            message="$(tail -c 2500 /tmp/rlcut-build.log)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\n'/'%0A'}"
+            printf '::error::%s\n' "$message"
+            exit "$status"
+          }
+          trap report_failure ERR
           bash scripts/prepare-appimage.sh
           npm run desktop:build:native -- --bundles appimage --config src-tauri/tauri.appimage.conf.json
           mkdir -p dist
