@@ -7,7 +7,9 @@
           "/usr/bin/ffprobe": "../.runtime/appimage-tools/ffprobe",
           "/usr/share/rlcut/video-tool-notices": "../.runtime/appimage-tools/notices",
           "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner": "../.runtime/appimage-tools/gstreamer-scanner/gst-plugin-scanner",
-          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0": "../.runtime/appimage-tools/gstreamer-1.0"
+          "/usr/lib/x86_64-linux-gnu/gstreamer-1.0": "../.runtime/appimage-tools/gstreamer-1.0",
+          "/usr/bin/rlcut-ai": "../.runtime/ai",
+          "/usr/lib/libvulkan.so.1": "../.runtime/ai/libvulkan.so.1"
         }
       }
     }

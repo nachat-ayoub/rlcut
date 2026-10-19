@@ -70,6 +70,7 @@ fn real_import_preview_and_export_worker() {
     let cached = preview::render(&binaries, &video, &preset, 0.2, 480, &cache, &epoch, 1).unwrap();
     assert_eq!(frame.composed, cached.composed);
     let options = ExportOptions {
+        ai_enhance: false,
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),

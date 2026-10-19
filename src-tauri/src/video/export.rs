@@ -28,6 +28,7 @@ pub struct Progress {
     pub remaining: Option<f64>,
     pub output: String,
     pub error: Option<String>,
+    pub stage: Option<String>,
 }
 pub struct Job {
     pub cancel: AtomicBool,
@@ -47,6 +48,7 @@ impl Job {
                 remaining: None,
                 output,
                 error: None,
+                stage: None,
             }),
         }
     }
@@ -159,13 +161,23 @@ pub fn run_timeline_sources(
     let out = std::path::PathBuf::from(&snapshot.output);
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
+    let rendered = partial.with_extension("render.mp4");
     let result = (|| -> Result<(), String> {
+        if o.ai_enhance && !super::enhance::available() {
+            return Err("Optional AI engine is unavailable".into());
+        }
+        let mut render_options = o.clone();
+        if o.ai_enhance {
+            render_options.fps = o.fps / 2;
+        }
+        // The AI input may be 30 FPS; output validation already ran on the user options.
+        render_options.ai_enhance = false;
         let args = export_args_timeline_sources(
             &videos,
             &p,
             &segments,
-            &o,
-            &partial,
+            &render_options,
+            if o.ai_enhance { &rendered } else { &partial },
             music.as_ref(),
             music_fade_out,
             &texts,
@@ -175,8 +187,19 @@ pub fn run_timeline_sources(
             .write(true)
             .open(&log)
             .map_err(|e| format!("Cannot write in output folder: {e}"))?;
-        let mut child = command(b.ffmpeg()?)
-            .args(args)
+        let mut export_command = command(b.ffmpeg()?);
+        if o.ai_enhance {
+            super::enhance::low_pressure(&mut export_command, false);
+            if let Ok(mut p) = job.progress.lock() {
+                p.stage = Some("Preparing AI export".into());
+            }
+        }
+        let mut child = export_command
+            .args(if o.ai_enhance {
+                super::args::safe_ai_render_args(args)
+            } else {
+                args
+            })
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(stderr)
@@ -188,11 +211,13 @@ pub fn run_timeline_sources(
             .ok_or("Missing FFmpeg progress stream")?;
         let progress_job = job.clone();
         let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
+        let ai = o.ai_enhance;
         let reader = thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(seconds) = progress_seconds(&line) {
                     if let Ok(mut p) = progress_job.progress.lock() {
-                        p.percent = (seconds / duration * 100.).clamp(0., 99.9);
+                        p.percent = (seconds / duration * if ai { 20. } else { 100. })
+                            .clamp(0., if ai { 20. } else { 99.9 });
                         p.elapsed = start.elapsed().as_secs_f64();
                         p.remaining = if seconds > 0. && p.elapsed > 0.5 {
                             Some((duration - seconds).max(0.) * p.elapsed / seconds)
@@ -242,6 +267,35 @@ pub fn run_timeline_sources(
         if job.cancel.load(Ordering::SeqCst) {
             return Err("Export canceled".into());
         }
+        if o.ai_enhance {
+            let mut cursor = 0.;
+            let cuts = segments
+                .iter()
+                .map(|s| {
+                    cursor += s.end - s.start;
+                    cursor
+                })
+                .collect::<Vec<_>>();
+            let duration = cursor;
+            if let Ok(mut p) = job.progress.lock() {
+                p.stage = Some("AI smoothing · CPU safe mode".into());
+                p.remaining = None;
+            }
+            super::enhance::run(
+                &b,
+                &rendered,
+                &partial,
+                &o,
+                duration,
+                &cuts,
+                job.clone(),
+                start,
+                &log,
+            )?;
+        }
+        if job.cancel.load(Ordering::SeqCst) {
+            return Err("Export canceled".into());
+        }
         if job.overwrite {
             #[cfg(target_os = "windows")]
             if out.exists() {
@@ -257,6 +311,23 @@ pub fn run_timeline_sources(
         Ok(())
     })();
     let _ = fs::remove_file(&partial);
+    let _ = fs::remove_file(&rendered);
+    // Preserve useful diagnostics in the reported error before cleanup.
+    let result = result.map_err(|error| {
+        if !o.ai_enhance || job.cancel.load(Ordering::SeqCst) {
+            return error;
+        }
+        let detail = fs::File::open(&log)
+            .and_then(|mut f| {
+                let len = f.metadata()?.len();
+                f.seek(SeekFrom::Start(len.saturating_sub(2000)))?;
+                let mut text = String::new();
+                f.read_to_string(&mut text)?;
+                Ok(text)
+            })
+            .unwrap_or_default();
+        format!("{error} {detail}")
+    });
     let _ = fs::remove_file(&log);
     if let Ok(mut s) = job.progress.lock() {
         s.elapsed = start.elapsed().as_secs_f64();
@@ -300,6 +371,7 @@ mod tests {
             color_transfer: String::new(),
         };
         let o = ExportOptions {
+            ai_enhance: false,
             quality: 480,
             fps: 30,
             folder: dir.to_string_lossy().into(),

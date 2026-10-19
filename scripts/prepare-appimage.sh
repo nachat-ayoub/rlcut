@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
+python3 scripts/prepare-ai.py
 stage=.runtime/appimage-tools
+cp "$(ldconfig -p | awk '/libvulkan.so.1 / && !found {path=$NF; found=1} END {print path}')" .runtime/ai/libvulkan.so.1
 mkdir -p "$stage/notices" "$stage/gstreamer-1.0"
 mkdir -p "$stage/gstreamer-scanner"
 for tool in ffmpeg ffprobe; do
