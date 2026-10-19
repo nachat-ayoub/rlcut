@@ -32,7 +32,11 @@ with tempfile.TemporaryDirectory(prefix='rlcut-rife-') as work:
         print('Downloading optional RIFE engine (411 MiB at build time only)', flush=True)
         with urllib.request.urlopen(URL, timeout=120) as response, archive.open('wb') as output:
             shutil.copyfileobj(response, output)
-    digest = hashlib.file_digest(archive.open('rb'), 'sha256').hexdigest()
+    checksum = hashlib.sha256()
+    with archive.open('rb') as payload:
+        for chunk in iter(lambda: payload.read(1024 * 1024), b''):
+            checksum.update(chunk)
+    digest = checksum.hexdigest()
     if digest != SHA256:
         raise SystemExit(f'RIFE checksum mismatch: expected {SHA256}, received {digest}')
     stage.mkdir(parents=True, exist_ok=True)

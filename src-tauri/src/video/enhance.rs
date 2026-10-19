@@ -256,6 +256,10 @@ pub fn run(
         .arg(input)
         .args([
             "-an",
+            "-filter_threads",
+            "1",
+            "-vf",
+            "scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=rgb24",
             "-threads",
             "1",
             "-c:v",
@@ -301,7 +305,7 @@ pub fn run(
             "-c:a",
             "copy",
             "-vf",
-            "unsharp=5:5:0.25:5:5:0",
+            "scale=in_range=pc:out_range=tv:out_color_matrix=bt709,format=yuv420p,unsharp=5:5:0.25:5:5:0",
             "-filter_threads",
             "1",
             "-c:v",
