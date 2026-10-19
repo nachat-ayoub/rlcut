@@ -383,7 +383,7 @@ pub fn start_export(
         }
     }
     state.binaries.ffmpeg()?;
-    if options.ai_enhance && !crate::video::enhance::available() {
+    if (options.ai_enhance || options.ai_upscale) && !crate::video::enhance::available() {
         return Err(
             "The optional AI engine is not installed. Use the Linux AI-enabled AppImage.".into(),
         );

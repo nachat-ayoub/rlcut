@@ -9,7 +9,9 @@
           "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner": "../.runtime/appimage-tools/gstreamer-scanner/gst-plugin-scanner",
           "/usr/lib/x86_64-linux-gnu/gstreamer-1.0": "../.runtime/appimage-tools/gstreamer-1.0",
           "/usr/bin/rlcut-ai": "../.runtime/ai",
-          "/usr/lib/libvulkan.so.1": "../.runtime/ai/libvulkan.so.1"
+          "/usr/lib/libvulkan.so.1": "../.runtime/ai/libvulkan.so.1",
+          "/usr/lib/libpng16.so.16": "../.runtime/ai/libpng16.so.16",
+          "/usr/lib/libgomp.so.1": "../.runtime/ai/libgomp.so.1"
         }
       }
     }

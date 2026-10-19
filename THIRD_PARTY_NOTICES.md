@@ -23,3 +23,11 @@ This feature does not include Topaz software or claim equivalence to its models.
 
 ncnn and its bundled dependency notices are included in `NCNN-LICENSE` beside
 the RIFE license; a source copy is in `resources/licenses/NCNN-LICENSE`.
+
+## Optional CPU AI upscaling
+
+The compact realesr-animevideov3-x2 model is from Xintao Wang / Real-ESRGAN
+v0.2.5.0 (BSD 3-Clause). The license is included as REALESRGAN-LICENSE in
+the AI directory and resources/licenses/REALESRGAN-LICENSE in this source.
+The CPU helper links static ncnn (20220729); its license and dependency notices
+remain included as NCNN-LICENSE. libpng is used for PNG tile input/output.
