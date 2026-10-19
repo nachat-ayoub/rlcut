@@ -99,8 +99,10 @@ jobs:
 
           This release was built without running tests, as requested. Known repository test/lint failures are documented separately. Check SHA256SUMS after downloading.
           NOTES
+          # Ubuntu 22.04 ships an older gh without --verify-tag. Verify with Git first.
+          git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --clobber
           else
-            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --verify-tag --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
+            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
           fi
