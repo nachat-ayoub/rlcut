@@ -194,6 +194,19 @@ fn write_frame(w: &mut impl Write, mut bytes: &[u8], job: &Job) -> Result<(), St
     }
     Ok(())
 }
+fn write_timed_frame(
+    w: &mut impl Write,
+    bytes: &[u8],
+    job: &Job,
+    written: &mut u64,
+    limit: u64,
+) -> Result<(), String> {
+    if *written < limit {
+        write_frame(w, bytes, job)?;
+        *written += 1;
+    }
+    Ok(())
+}
 fn wait(process: &mut Process, job: &Job) -> Result<(), String> {
     loop {
         canceled(job)?;
@@ -332,10 +345,14 @@ pub fn run(
     let mut current = frame(&mut reader, &job)?.ok_or("No frames to enhance")?;
     let base_fps = o.fps as f64 / 2.;
     let mut index = 0u64;
+    let mut written = 0u64;
+    // A fractional source duration can end on a half-pair. Do not write extra
+    // PNGs after FFmpeg has reached -t and closed its input pipe.
+    let frame_limit = (duration * o.fps as f64).ceil() as u64;
     loop {
         canceled(&job)?;
         let next = frame(&mut reader, &job)?;
-        write_frame(&mut sink, &current, &job)?;
+        write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
         if let Some(next) = next {
             let time = index as f64 / base_fps;
             let cut = cuts
@@ -343,7 +360,7 @@ pub fn run(
                 .any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001);
             if cut {
                 // Never invent a morph between different timeline clips.
-                write_frame(&mut sink, &current, &job)?;
+                write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
             } else {
                 fs::write(&before, &current).map_err(|e| e.to_string())?;
                 fs::write(&after, &next).map_err(|e| e.to_string())?;
@@ -382,10 +399,12 @@ pub fn run(
                 if length == 0 || length > 24 * 1024 * 1024 {
                     return Err("RIFE output frame is invalid".into());
                 }
-                write_frame(
+                write_timed_frame(
                     &mut sink,
                     &fs::read(&middle).map_err(|e| e.to_string())?,
                     &job,
+                    &mut written,
+                    frame_limit,
                 )?;
                 // A short idle interval reduces sustained pressure; inference never uses the GPU.
                 for _ in 0..5 {
@@ -394,7 +413,7 @@ pub fn run(
             }
             current = next;
         } else {
-            write_frame(&mut sink, &current, &job)?;
+            write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
             break;
         }
         index += 1;

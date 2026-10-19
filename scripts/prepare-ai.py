@@ -15,6 +15,8 @@ URL = f'https://github.com/nihui/rife-ncnn-vulkan/releases/download/{VERSION}/{A
 SHA256 = '1e2c7ee7fa7daa326542d50622f0afedc80cf6f1858bda411d16385ffa5cdf68'
 FILES = {'rife-ncnn-vulkan': 'rife-ncnn-vulkan', 'rife-v4.6/flownet.param': 'rife-v4.6/flownet.param', 'rife-v4.6/flownet.bin': 'rife-v4.6/flownet.bin', 'LICENSE': 'RIFE-LICENSE'}
 stage = ROOT / '.runtime/ai'
+stage.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(ROOT / 'resources/licenses/NCNN-LICENSE', stage / 'NCNN-LICENSE')
 stamp = stage / '.archive-sha256'
 if stamp.is_file() and stamp.read_text().strip() == SHA256 and all((stage / name).is_file() for name in FILES.values()):
     print('Pinned RIFE engine already staged')

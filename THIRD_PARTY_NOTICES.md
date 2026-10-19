@@ -20,3 +20,6 @@ is preserved at `usr/bin/rlcut-ai/RIFE-LICENSE` inside the AppImage. Source:
 https://github.com/nihui/rife-ncnn-vulkan and https://github.com/hzwer/Practical-RIFE .
 The pinned archive checksum and selected files are in `scripts/prepare-ai.py`.
 This feature does not include Topaz software or claim equivalence to its models.
+
+ncnn and its bundled dependency notices are included in `NCNN-LICENSE` beside
+the RIFE license; a source copy is in `resources/licenses/NCNN-LICENSE`.
