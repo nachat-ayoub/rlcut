@@ -113,6 +113,7 @@ pub struct Init {
     store: Store,
     binaries: Binaries,
     storage_error: Option<String>,
+    ai_available: bool,
 }
 #[tauri::command]
 pub fn initialize(state: State<AppState>) -> Init {
@@ -124,6 +125,7 @@ pub fn initialize(state: State<AppState>) -> Init {
         store,
         binaries: state.binaries.clone(),
         storage_error: error,
+        ai_available: crate::video::enhance::available(),
     }
 }
 #[tauri::command]
@@ -381,6 +383,11 @@ pub fn start_export(
         }
     }
     state.binaries.ffmpeg()?;
+    if options.ai_enhance && !crate::video::enhance::available() {
+        return Err(
+            "The optional AI engine is not installed. Use the Linux AI-enabled AppImage.".into(),
+        );
+    }
     if paths.is_empty() || paths.len() > 100 {
         return Err("A project needs between 1 and 100 video clips".into());
     }

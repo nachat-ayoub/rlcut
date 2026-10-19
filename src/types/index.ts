@@ -75,6 +75,7 @@ export type Progress = {
   id: string;
   phase: 'running' | 'complete' | 'failed' | 'canceled';
   percent: number;
+  stage?: string | null;
   elapsed: number;
   remaining: number | null;
   output: string;
@@ -155,6 +156,7 @@ export type Project = {
   outputName: string;
 };
 export type Init = {
+  aiAvailable: boolean;
   store: Store;
   binaries: {
     ffmpeg: string | null;

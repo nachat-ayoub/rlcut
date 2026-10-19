@@ -436,6 +436,27 @@ pub fn export_args_timeline_sources(
     args.push(out.to_string_lossy().into());
     Ok(args)
 }
+/// Bound composition and codec threads for the optional AI staging pass.
+pub fn safe_ai_render_args(mut args: Vec<String>) -> Vec<String> {
+    for i in 0..args.len().saturating_sub(1) {
+        if args[i] == "-filter_complex_threads" {
+            args[i + 1] = "1".into();
+        }
+        if args[i] == "-crf" {
+            args[i + 1] = "14".into();
+        }
+    }
+    let mut bounded = Vec::new();
+    for arg in args {
+        if arg == "-i" {
+            bounded.extend(["-threads".into(), "1".into()]);
+        }
+        bounded.push(arg);
+    }
+    let last = bounded.pop().unwrap_or_default();
+    bounded.extend(["-threads".into(), "1".into(), last]);
+    bounded
+}
 pub fn progress_seconds(line: &str) -> Option<f64> {
     line.strip_prefix("out_time_us=")
         .and_then(|s| s.trim().parse::<f64>().ok())
@@ -457,6 +478,7 @@ mod tests {
             color_transfer: String::new(),
         };
         let o = ExportOptions {
+            ai_enhance: false,
             quality: 480,
             fps: 60,
             folder: "/tmp".into(),
@@ -484,6 +506,7 @@ mod tests {
     fn even_output_and_invalid_fps() {
         for (q, d) in [(480, (480, 854)), (720, (720, 1280)), (1080, (1080, 1920))] {
             let o = ExportOptions {
+                ai_enhance: false,
                 quality: q,
                 fps: 30,
                 folder: "".into(),
@@ -492,6 +515,7 @@ mod tests {
             assert_eq!(o.resolution().unwrap(), d);
         }
         let o = ExportOptions {
+            ai_enhance: false,
             quality: 720,
             fps: 24,
             folder: "".into(),
