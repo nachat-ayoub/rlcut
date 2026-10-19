@@ -3,7 +3,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 python3 scripts/prepare-ai.py
 stage=.runtime/appimage-tools
-cp "$(ldconfig -p | awk '/libvulkan.so.1 / && !found {path=$NF; found=1} END {print path}')" .runtime/ai/libvulkan.so.1
+for library in libvulkan.so.1 libpng16.so.16 libgomp.so.1; do
+  file="$(ldconfig -p | awk -v name="$library" '$1 == name && !found {path=$NF; found=1} END {print path}')"
+  [[ -n "$file" ]] || { echo "Missing AI runtime library: $library" >&2; exit 1; }
+  cp "$file" ".runtime/ai/$library"
+done
 mkdir -p "$stage/notices" "$stage/gstreamer-1.0"
 mkdir -p "$stage/gstreamer-scanner"
 for tool in ffmpeg ffprobe; do

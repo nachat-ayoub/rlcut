@@ -64,6 +64,7 @@ export default function App() {
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-edit.mp4');
   const [aiEnhance, setAiEnhance] = useState(false);
+  const [aiUpscale, setAiUpscale] = useState(false);
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
@@ -323,8 +324,8 @@ export default function App() {
           return;
         rememberOutputFolder(folder);
       }
-      if (aiEnhance) setPlaying(false);
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, folder, filename: outputName } };
+      if (aiEnhance || aiUpscale) setPlaying(false);
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -341,7 +342,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, quality, fps, aiEnhance, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, quality, fps, aiEnhance, aiUpscale, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -438,7 +439,7 @@ export default function App() {
       const restoredSegments = project.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 }));
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTexts((project.texts ?? []).map(normalizeText)); setSelectedTextId(null); setAiEnhance(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTexts((project.texts ?? []).map(normalizeText)); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }
@@ -694,16 +695,21 @@ export default function App() {
         </Section>}
         <Section title="Export" icon={<Download size={16} />}>
           <div className="two-controls">
-            <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, ...(!aiEnhance ? [{ value: 1080, label: '1080p · 1080 × 1920' }] : [])]} />
+            <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
             </label>
             <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
           <div className="setting-toggle compact">
             <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
-            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setQuality(480); setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
+            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
           </div>
-          {aiEnhance && <p className="enhancement-note">Export only. CPU safe mode uses one core, low priority and a 1.5 GiB AI memory limit; your GPU stays free. 480p is recommended for older laptops; 720p needs more memory. Adds intermediate frames and gentle sharpening. Long exports are normal. Motion artifacts can appear around fast objects. For 60 FPS sources choose 120 FPS to preserve their original frames.</p>}
+          <div className="setting-toggle compact">
+            <div><strong>AI upscale ×2</strong><small>Optional · compact Real-ESRGAN video model</small></div>
+            <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
+          </div>
+          {aiUpscale && <p className="enhancement-note">Final output: {quality * 2} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * 2}. Upscales the selected export resolution without reducing it first. This compact model is trained for animation; it may alter game textures or text.</p>}
+          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. Overlapping tiles keep AI working memory bounded; one CPU core, low priority and a 1.5 GiB per-process limit remain active. Higher resolutions and upscaling take substantially longer. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
           {!init?.aiAvailable && <small className="enhancement-note">AI smoothing is included in the Linux AI AppImage. Standard export works without it.</small>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
@@ -863,7 +869,7 @@ export default function App() {
             }}>
               <Trash2 size={15} />Clear preview cache</button>
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
-            <button className="primary" onClick={() => { setAiEnhance(false); setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
+            <button className="primary" onClick={() => { setAiEnhance(false); setAiUpscale(false); setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
           </div>
           <p className="help-text">Keyboard and mouse controls are listed under View shortcuts.</p>
         </>}

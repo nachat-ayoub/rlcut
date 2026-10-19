@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import urllib.request
 import zipfile
+import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = '20221029'
@@ -17,36 +19,42 @@ FILES = {'rife-ncnn-vulkan': 'rife-ncnn-vulkan', 'rife-v4.6/flownet.param': 'rif
 stage = ROOT / '.runtime/ai'
 stage.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(ROOT / 'resources/licenses/NCNN-LICENSE', stage / 'NCNN-LICENSE')
-stamp = stage / '.archive-sha256'
-if stamp.is_file() and stamp.read_text().strip() == SHA256 and all((stage / name).is_file() for name in FILES.values()):
-    print('Pinned RIFE engine already staged')
-    raise SystemExit(0)
+def prepare_rife():
+    stamp = stage / '.archive-sha256'
+    if stamp.is_file() and stamp.read_text().strip() == SHA256 and all((stage / name).is_file() for name in FILES.values()):
+        print('Pinned RIFE engine already staged')
+        return
 
-with tempfile.TemporaryDirectory(prefix='rlcut-rife-') as work:
-    archive = Path(work) / 'rife.zip'
-    # A local copy still requires the same digest; useful in offline build environments.
-    cached = os.environ.get('RLCUT_RIFE_ARCHIVE')
-    if cached:
-        shutil.copyfile(cached, archive)
-    else:
-        print('Downloading optional RIFE engine (411 MiB at build time only)', flush=True)
-        with urllib.request.urlopen(URL, timeout=120) as response, archive.open('wb') as output:
-            shutil.copyfileobj(response, output)
-    checksum = hashlib.sha256()
-    with archive.open('rb') as payload:
-        for chunk in iter(lambda: payload.read(1024 * 1024), b''):
-            checksum.update(chunk)
-    digest = checksum.hexdigest()
-    if digest != SHA256:
-        raise SystemExit(f'RIFE checksum mismatch: expected {SHA256}, received {digest}')
-    stage.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive) as source:
-        # Extract only the engine, selected model and license, never arbitrary archive paths.
-        for original, target in FILES.items():
-            dest = stage / target
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            with source.open(f'{ARCHIVE}/{original}') as src, dest.open('wb') as dst:
-                shutil.copyfileobj(src, dst)
-    (stage / 'rife-ncnn-vulkan').chmod(0o755)
-    stamp.write_text(SHA256 + '\n')
-print('Staged CPU-capable RIFE v4.6 engine and license')
+    with tempfile.TemporaryDirectory(prefix='rlcut-rife-') as work:
+        archive = Path(work) / 'rife.zip'
+        # A local copy still requires the same digest; useful in offline build environments.
+        cached = os.environ.get('RLCUT_RIFE_ARCHIVE')
+        if cached:
+            shutil.copyfile(cached, archive)
+        else:
+            print('Downloading optional RIFE engine (411 MiB at build time only)', flush=True)
+            with urllib.request.urlopen(URL, timeout=120) as response, archive.open('wb') as output:
+                shutil.copyfileobj(response, output)
+        checksum = hashlib.sha256()
+        with archive.open('rb') as payload:
+            for chunk in iter(lambda: payload.read(1024 * 1024), b''):
+                checksum.update(chunk)
+        digest = checksum.hexdigest()
+        if digest != SHA256:
+            raise SystemExit(f'RIFE checksum mismatch: expected {SHA256}, received {digest}')
+        stage.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as source:
+            # Extract only the engine, selected model and license, never arbitrary archive paths.
+            for original, target in FILES.items():
+                dest = stage / target
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                with source.open(f'{ARCHIVE}/{original}') as src, dest.open('wb') as dst:
+                    shutil.copyfileobj(src, dst)
+        (stage / 'rife-ncnn-vulkan').chmod(0o755)
+        stamp.write_text(SHA256 + '\n')
+    print('Staged CPU-capable RIFE v4.6 engine and license')
+
+prepare_rife()
+for name in FILES.values():
+    (stage / name).chmod(0o755 if name == "rife-ncnn-vulkan" else 0o644)
+subprocess.run([sys.executable, str(ROOT / "scripts/prepare-ai-cpu.py")], check=True)

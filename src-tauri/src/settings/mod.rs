@@ -94,6 +94,7 @@ impl Store {
         }
         ExportOptions {
             ai_enhance: false,
+            ai_upscale: false,
             quality: self.settings.quality,
             fps: self.settings.fps,
             folder: String::new(),

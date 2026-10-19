@@ -162,8 +162,9 @@ pub fn run_timeline_sources(
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let rendered = partial.with_extension("render.mp4");
+    let enhanced = o.ai_enhance || o.ai_upscale;
     let result = (|| -> Result<(), String> {
-        if o.ai_enhance && !super::enhance::available() {
+        if enhanced && !super::enhance::available() {
             return Err("Optional AI engine is unavailable".into());
         }
         let mut render_options = o.clone();
@@ -172,12 +173,13 @@ pub fn run_timeline_sources(
         }
         // The AI input may be 30 FPS; output validation already ran on the user options.
         render_options.ai_enhance = false;
+        render_options.ai_upscale = false;
         let args = export_args_timeline_sources(
             &videos,
             &p,
             &segments,
             &render_options,
-            if o.ai_enhance { &rendered } else { &partial },
+            if enhanced { &rendered } else { &partial },
             music.as_ref(),
             music_fade_out,
             &texts,
@@ -188,14 +190,14 @@ pub fn run_timeline_sources(
             .open(&log)
             .map_err(|e| format!("Cannot write in output folder: {e}"))?;
         let mut export_command = command(b.ffmpeg()?);
-        if o.ai_enhance {
+        if enhanced {
             super::enhance::low_pressure(&mut export_command, false);
             if let Ok(mut p) = job.progress.lock() {
                 p.stage = Some("Preparing AI export".into());
             }
         }
         let mut child = export_command
-            .args(if o.ai_enhance {
+            .args(if enhanced {
                 super::args::safe_ai_render_args(args)
             } else {
                 args
@@ -211,7 +213,7 @@ pub fn run_timeline_sources(
             .ok_or("Missing FFmpeg progress stream")?;
         let progress_job = job.clone();
         let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
-        let ai = o.ai_enhance;
+        let ai = enhanced;
         let reader = thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 if let Some(seconds) = progress_seconds(&line) {
@@ -267,7 +269,7 @@ pub fn run_timeline_sources(
         if job.cancel.load(Ordering::SeqCst) {
             return Err("Export canceled".into());
         }
-        if o.ai_enhance {
+        if enhanced {
             let mut cursor = 0.;
             let cuts = segments
                 .iter()
@@ -314,7 +316,7 @@ pub fn run_timeline_sources(
     let _ = fs::remove_file(&rendered);
     // Preserve useful diagnostics in the reported error before cleanup.
     let result = result.map_err(|error| {
-        if !o.ai_enhance || job.cancel.load(Ordering::SeqCst) {
+        if !enhanced || job.cancel.load(Ordering::SeqCst) {
             return error;
         }
         let detail = fs::File::open(&log)
@@ -372,6 +374,7 @@ mod tests {
         };
         let o = ExportOptions {
             ai_enhance: false,
+            ai_upscale: false,
             quality: 480,
             fps: 30,
             folder: dir.to_string_lossy().into(),

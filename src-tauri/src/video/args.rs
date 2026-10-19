@@ -479,6 +479,7 @@ mod tests {
         };
         let o = ExportOptions {
             ai_enhance: false,
+            ai_upscale: false,
             quality: 480,
             fps: 60,
             folder: "/tmp".into(),
@@ -507,6 +508,7 @@ mod tests {
         for (q, d) in [(480, (480, 854)), (720, (720, 1280)), (1080, (1080, 1920))] {
             let o = ExportOptions {
                 ai_enhance: false,
+                ai_upscale: false,
                 quality: q,
                 fps: 30,
                 folder: "".into(),
@@ -516,6 +518,7 @@ mod tests {
         }
         let o = ExportOptions {
             ai_enhance: false,
+            ai_upscale: false,
             quality: 720,
             fps: 24,
             folder: "".into(),

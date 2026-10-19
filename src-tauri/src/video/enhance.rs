@@ -33,6 +33,9 @@ pub fn installation() -> Option<(PathBuf, PathBuf)> {
         let model = dir.join("rife-v4.6");
         (cfg!(target_os = "linux")
             && binary.is_file()
+            && dir.join("rlcut-ai-cpu").is_file()
+            && dir.join("realesr-animevideov3-x2.param").is_file()
+            && dir.join("realesr-animevideov3-x2.bin").is_file()
             && model.join("flownet.param").is_file()
             && model.join("flownet.bin").is_file())
         .then_some((binary, model))
@@ -59,6 +62,7 @@ pub fn low_pressure(c: &mut Command, inference: bool) {
             fn setpriority(which: i32, who: u32, priority: i32) -> i32;
             fn setrlimit(resource: i32, limit: *const [u64; 2]) -> i32;
         }
+        c.process_group(0);
         // SAFETY: only async-signal-safe libc calls and stack operations after fork.
         unsafe {
             c.pre_exec(move || {
@@ -92,6 +96,16 @@ pub fn low_pressure(c: &mut Command, inference: bool) {
 struct Process(Child);
 impl Drop for Process {
     fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        if matches!(self.0.try_wait(), Ok(None)) {
+            unsafe extern "C" {
+                fn kill(pid: i32, signal: i32) -> i32;
+            }
+            // This helper owns a private group; cancellation also terminates its RIFE child.
+            unsafe {
+                kill(-(self.0.id() as i32), 9);
+            }
+        }
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -194,21 +208,76 @@ fn write_frame(w: &mut impl Write, mut bytes: &[u8], job: &Job) -> Result<(), St
     }
     Ok(())
 }
+struct Upscale {
+    folder: PathBuf,
+    scratch: PathBuf,
+    log: PathBuf,
+}
+impl Upscale {
+    fn frame(&self, bytes: &[u8], job: &Job) -> Result<Vec<u8>, String> {
+        let input = self.scratch.join("upscale-in.png");
+        let output = self.scratch.join("upscale-out.png");
+        fs::write(&input, bytes).map_err(|e| e.to_string())?;
+        let _ = fs::remove_file(&output);
+        let mut worker = command(&self.folder.join("rlcut-ai-cpu"));
+        worker
+            .arg("upscale")
+            .arg(self.folder.join("realesr-animevideov3-x2.param"))
+            .arg(self.folder.join("realesr-animevideov3-x2.bin"))
+            .arg(&input)
+            .arg(&output)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(
+                fs::OpenOptions::new()
+                    .append(true)
+                    .open(&self.log)
+                    .map_err(|e| e.to_string())?,
+            );
+        low_pressure(&mut worker, true);
+        wait(
+            &mut Process(
+                worker
+                    .spawn()
+                    .map_err(|e| format!("Cannot start AI upscaling: {e}"))?,
+            ),
+            job,
+        )?;
+        if fs::metadata(&output).map_err(|e| e.to_string())?.len() > 96 * 1024 * 1024 {
+            return Err("AI upscale output exceeds the frame safety limit".into());
+        }
+        // Yield between frames even when smoothing is off.
+        for _ in 0..5 {
+            pause(job)?;
+        }
+        fs::read(output).map_err(|e| e.to_string())
+    }
+}
 fn write_timed_frame(
     w: &mut impl Write,
     bytes: &[u8],
     job: &Job,
     written: &mut u64,
     limit: u64,
+    upscaler: Option<&Upscale>,
 ) -> Result<(), String> {
     if *written < limit {
-        write_frame(w, bytes, job)?;
+        if let Some(upscaler) = upscaler {
+            write_frame(w, &upscaler.frame(bytes, job)?, job)?;
+        } else {
+            write_frame(w, bytes, job)?;
+        }
         *written += 1;
     }
     Ok(())
 }
 fn wait(process: &mut Process, job: &Job) -> Result<(), String> {
+    let started = Instant::now();
+    let elapsed = job.snapshot()?.elapsed;
     loop {
+        if let Ok(mut progress) = job.progress.lock() {
+            progress.elapsed = elapsed + started.elapsed().as_secs_f64();
+        }
         canceled(job)?;
         match process.0.try_wait().map_err(|e| e.to_string())? {
             Some(status) if status.success() => return Ok(()),
@@ -229,10 +298,30 @@ pub fn run(
     start: Instant,
     log: &Path,
 ) -> Result<(), String> {
+    if let Ok(mut p) = job.progress.lock() {
+        p.stage = Some(
+            match (o.ai_enhance, o.ai_upscale) {
+                (true, true) => "AI smoothing + upscaling ×2 · CPU tiles",
+                (true, false) => "AI smoothing · CPU tiles",
+                _ => "AI upscaling ×2 · CPU tiles",
+            }
+            .into(),
+        );
+        p.remaining = None;
+    }
     let (binary, model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
     let scratch_path = input.with_extension("frames");
     fs::create_dir(&scratch_path).map_err(|e| format!("Cannot create AI scratch folder: {e}"))?;
     let scratch = Scratch(scratch_path);
+    let ai_folder = binary
+        .parent()
+        .ok_or("AI engine folder is unavailable")?
+        .to_path_buf();
+    let upscaler = o.ai_upscale.then(|| Upscale {
+        folder: ai_folder.clone(),
+        scratch: scratch.0.clone(),
+        log: log.to_path_buf(),
+    });
     let before = scratch.0.join("before.png");
     let after = scratch.0.join("after.png");
     let middle = scratch.0.join("middle.png");
@@ -347,7 +436,11 @@ pub fn run(
         .ok_or("Missing enhanced encoder pipe")?;
     nonblocking(&sink)?;
     let mut current = frame(&mut reader, &job)?.ok_or("No frames to enhance")?;
-    let base_fps = o.fps as f64 / 2.;
+    let base_fps = if o.ai_enhance {
+        o.fps as f64 / 2.
+    } else {
+        o.fps as f64
+    };
     let mut index = 0u64;
     let mut written = 0u64;
     // A fractional source duration can end on a half-pair. Do not write extra
@@ -356,30 +449,58 @@ pub fn run(
     loop {
         canceled(&job)?;
         let next = frame(&mut reader, &job)?;
-        write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
+        write_timed_frame(
+            &mut sink,
+            &current,
+            &job,
+            &mut written,
+            frame_limit,
+            upscaler.as_ref(),
+        )?;
         if let Some(next) = next {
+            if !o.ai_enhance {
+                current = next;
+                index += 1;
+                if let Ok(mut p) = job.progress.lock() {
+                    let fraction = (index as f64 / base_fps / duration).clamp(0., 1.);
+                    p.percent = (20. + fraction * 79.9).min(99.9);
+                    p.elapsed = start.elapsed().as_secs_f64();
+                    p.remaining = if fraction > 0. {
+                        Some(p.elapsed * (1. - fraction) / fraction)
+                    } else {
+                        None
+                    };
+                    p.stage = Some("AI upscaling ×2 · CPU tiles".into());
+                }
+                continue;
+            }
             let time = index as f64 / base_fps;
             let cut = cuts
                 .iter()
                 .any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001);
             if cut {
                 // Never invent a morph between different timeline clips.
-                write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
+                write_timed_frame(
+                    &mut sink,
+                    &current,
+                    &job,
+                    &mut written,
+                    frame_limit,
+                    upscaler.as_ref(),
+                )?;
             } else {
                 fs::write(&before, &current).map_err(|e| e.to_string())?;
                 fs::write(&after, &next).map_err(|e| e.to_string())?;
                 let _ = fs::remove_file(&middle);
-                let mut inference = command(&binary);
+                let mut inference = command(&ai_folder.join("rlcut-ai-cpu"));
                 inference
-                    .arg("-0")
-                    .arg(&before)
-                    .arg("-1")
-                    .arg(&after)
-                    .arg("-o")
-                    .arg(&middle)
-                    .arg("-m")
+                    .arg("interpolate")
+                    .arg(&binary)
                     .arg(&model)
-                    .args(["-g", "-1", "-j", "1:1:1"])
+                    .arg(&before)
+                    .arg(&after)
+                    .arg(&middle)
+                    .arg(&scratch.0)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(diagnostics()?);
@@ -409,6 +530,7 @@ pub fn run(
                     &job,
                     &mut written,
                     frame_limit,
+                    upscaler.as_ref(),
                 )?;
                 // A short idle interval reduces sustained pressure; inference never uses the GPU.
                 for _ in 0..5 {
@@ -417,7 +539,16 @@ pub fn run(
             }
             current = next;
         } else {
-            write_timed_frame(&mut sink, &current, &job, &mut written, frame_limit)?;
+            if o.ai_enhance {
+                write_timed_frame(
+                    &mut sink,
+                    &current,
+                    &job,
+                    &mut written,
+                    frame_limit,
+                    upscaler.as_ref(),
+                )?;
+            }
             break;
         }
         index += 1;
@@ -430,7 +561,14 @@ pub fn run(
             } else {
                 None
             };
-            p.stage = Some("AI smoothing · CPU safe mode".into());
+            p.stage = Some(
+                if o.ai_upscale {
+                    "AI smoothing + upscaling ×2 · CPU tiles"
+                } else {
+                    "AI smoothing · CPU tiles"
+                }
+                .into(),
+            );
         }
     }
     drop(sink);

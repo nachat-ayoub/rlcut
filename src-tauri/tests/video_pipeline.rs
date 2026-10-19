@@ -71,6 +71,7 @@ fn real_import_preview_and_export_worker() {
     assert_eq!(frame.composed, cached.composed);
     let options = ExportOptions {
         ai_enhance: false,
+        ai_upscale: false,
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),
