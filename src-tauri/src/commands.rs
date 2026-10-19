@@ -1,5 +1,5 @@
 use crate::{
-    model::{ExportOptions, MusicFile, Preset, Segment, Video},
+    model::{ExportOptions, MusicFile, MusicTrack, Preset, Segment, Video},
     presets,
     settings::{self, Store},
     video::{
@@ -132,12 +132,15 @@ pub fn save_store(state: State<AppState>, store: Store) -> Result<(), String> {
     settings::save(&state.file, &store)
 }
 #[tauri::command]
-pub async fn pick_video() -> Result<Option<String>, String> {
+pub async fn pick_video() -> Result<Vec<String>, String> {
     blocking(|| {
         Ok(rfd::FileDialog::new()
             .add_filter("Video", &["mp4", "mov", "mkv", "webm"])
-            .pick_file()
-            .map(|p| p.to_string_lossy().into()))
+            .pick_files()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|p| p.to_string_lossy().into())
+            .collect())
     })
     .await
 }
@@ -146,7 +149,10 @@ pub async fn pick_music(state: State<'_, AppState>) -> Result<Option<MusicFile>,
     let binaries = state.binaries.clone();
     blocking(move || {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Audio", &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"])
+            .add_filter(
+                "Audio",
+                &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"],
+            )
             .pick_file()
         else {
             return Ok(None);
@@ -161,6 +167,73 @@ pub async fn pick_folder() -> Result<Option<String>, String> {
         Ok(rfd::FileDialog::new()
             .pick_folder()
             .map(|p| p.to_string_lossy().into()))
+    })
+    .await
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FontOption {
+    family: String,
+    path: String,
+}
+#[tauri::command]
+pub async fn list_system_fonts() -> Result<Vec<FontOption>, String> {
+    blocking(|| {
+        let output = std::process::Command::new("fc-list")
+            .arg("--format=%{family[0]}|%{file}\n")
+            .output()
+            .map_err(|e| format!("Could not list system fonts: {e}"))?;
+        if !output.status.success() {
+            return Err("fontconfig could not list system fonts".into());
+        }
+        let mut fonts = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| {
+                let (family, path) = line.split_once('|')?;
+                (!family.trim().is_empty() && std::path::Path::new(path).is_file()).then(|| {
+                    FontOption {
+                        family: family.trim().into(),
+                        path: path.into(),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        fonts.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+        fonts.dedup_by(|a, b| a.family.eq_ignore_ascii_case(&b.family));
+        Ok(fonts)
+    })
+    .await
+}
+#[tauri::command]
+pub async fn save_google_font(
+    state: State<'_, AppState>,
+    family: String,
+    variant: String,
+    bytes: Vec<u8>,
+) -> Result<FontOption, String> {
+    if bytes.is_empty() || bytes.len() > 10_000_000 {
+        return Err("Google font file is empty or too large".into());
+    }
+    let safe = family
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect::<String>();
+    if safe.is_empty() {
+        return Err("Invalid font family".into());
+    }
+    let safe_variant = match variant.as_str() {
+        "regular" | "bold" | "black" | "italic" | "boldItalic" | "blackItalic" => variant,
+        _ => return Err("Invalid font variant".into()),
+    };
+    let folder = state.cache.join("fonts");
+    blocking(move || {
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        let path = folder.join(format!("{safe}-{safe_variant}.woff2"));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(FontOption {
+            family,
+            path: path.to_string_lossy().into(),
+        })
     })
     .await
 }
@@ -217,6 +290,60 @@ pub async fn create_proxy(state: State<'_, AppState>, path: String) -> Result<St
     Ok(path.to_string_lossy().into_owned())
 }
 #[tauri::command]
+pub async fn create_timeline_proxy(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<String, String> {
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("A project needs between 1 and 100 video clips".into());
+    }
+    let videos = paths
+        .iter()
+        .map(|path| state.video(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let first = &videos[0];
+    if videos.iter().any(|video| {
+        let aspect_delta = (video.width as f64 / video.height as f64
+            - first.width as f64 / first.height as f64)
+            .abs();
+        aspect_delta > 0.002 || (video.fps >= 50.) != (first.fps >= 50.)
+    }) {
+        return Err("Added clips must use the same aspect ratio and 30/60 FPS class".into());
+    }
+    let binaries = state.binaries.clone();
+    let proxy_dir = state.cache.join("proxies");
+    let lock = state.proxy_lock.clone();
+    let epoch = state.decoder_epoch.clone();
+    let ticket = epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    let progress = state.preparation.clone();
+    if let Ok(mut value) = progress.lock() {
+        *value = Preparation::default();
+    }
+    let path = blocking(move || {
+        let _guard = lock.lock().map_err(|_| "Decoder preparation unavailable")?;
+        crate::video::decoder::prepare_timeline(
+            &binaries,
+            &videos,
+            &proxy_dir,
+            &epoch,
+            ticket,
+            |percent, elapsed, remaining| {
+                if epoch.load(Ordering::SeqCst) == ticket {
+                    if let Ok(mut value) = progress.lock() {
+                        *value = Preparation {
+                            percent,
+                            elapsed,
+                            remaining,
+                        };
+                    }
+                }
+            },
+        )
+    })
+    .await?;
+    Ok(path.to_string_lossy().into_owned())
+}
+#[tauri::command]
 pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
     state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
     let cache = state.cache.clone();
@@ -235,28 +362,70 @@ pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
 #[tauri::command]
 pub fn start_export(
     state: State<AppState>,
-    path: String,
+    paths: Vec<String>,
     preset: Preset,
     segments: Vec<Segment>,
     options: ExportOptions,
+    texts: Vec<crate::model::TextOverlay>,
+    music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
+    overwrite: bool,
 ) -> Result<Progress, String> {
+    if let Some(m) = &music {
+        m.validate()?;
+    }
     preset.validate()?;
+    if let Some(duration) = music_fade_out {
+        if !duration.is_finite() || !(0.1..=10.).contains(&duration) {
+            return Err("Music fade duration must be between 0.1 and 10 seconds".into());
+        }
+    }
     state.binaries.ffmpeg()?;
-    let v = state.video(&path)?;
-    Segment::validate_all(&segments, v.duration)?;
-    let out = export::destination(&v, &options)?;
+    if paths.is_empty() || paths.len() > 100 {
+        return Err("A project needs between 1 and 100 video clips".into());
+    }
+    let videos = paths
+        .iter()
+        .map(|path| state.video(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let duration: f64 = videos.iter().map(|video| video.duration).sum();
+    Segment::validate_all(&segments, duration)?;
+    let edited_duration: f64 = segments
+        .iter()
+        .map(|segment| segment.end - segment.start)
+        .sum();
+    crate::model::TextOverlay::validate_all(&texts, edited_duration)?;
+    let out = export::destination(&videos[0], &options, overwrite)?;
+    if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
+        return Err("Output cannot replace a source video".into());
+    }
     let mut slot = state.job.lock().map_err(|_| "Export busy")?;
     if let Some(j) = slot.as_ref() {
         if j.snapshot()?.phase == "running" {
             return Err("An export is already running".into());
         }
     }
-    let job = Arc::new(Job::new(presets::id(), out.to_string_lossy().into()));
+    let job = Arc::new(Job::new(
+        presets::id(),
+        out.to_string_lossy().into(),
+        overwrite,
+    ));
     let result = job.snapshot()?;
     *slot = Some(job.clone());
     let b = state.binaries.clone();
-    let worker =
-        std::thread::spawn(move || export::run_segments(b, v, preset, segments, options, job));
+    let worker = std::thread::spawn(move || {
+        export::run_timeline_sources(
+            b,
+            videos,
+            preset,
+            segments,
+            options,
+            job,
+            music,
+            music_fade_out,
+            texts,
+        )
+    });
     *state
         .worker
         .lock()
@@ -342,6 +511,104 @@ pub async fn export_preset(preset: Preset) -> Result<bool, String> {
     .await
 }
 
+fn validate_project(project: &serde_json::Value) -> Result<(), String> {
+    let object = project.as_object().ok_or("Invalid rlcut project")?;
+    if object.get("version").and_then(|value| value.as_u64()) != Some(1)
+        || object
+            .get("id")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        || object
+            .get("name")
+            .and_then(|value| value.as_str())
+            .is_none_or(str::is_empty)
+        || object
+            .get("videoPaths")
+            .and_then(|value| value.as_array())
+            .is_none()
+        || object
+            .get("segments")
+            .and_then(|value| value.as_array())
+            .is_none()
+        || object
+            .get("preset")
+            .and_then(|value| value.as_object())
+            .is_none()
+        || object
+            .get("markers")
+            .and_then(|value| value.as_object())
+            .is_none()
+        || object
+            .get("quality")
+            .and_then(|value| value.as_u64())
+            .is_none()
+        || object.get("fps").and_then(|value| value.as_u64()).is_none()
+    {
+        return Err("This is not a supported rlcut project".into());
+    }
+    let size = serde_json::to_vec(project)
+        .map_err(|error| error.to_string())?
+        .len();
+    if size > 2_000_000 {
+        return Err("Project file is too large".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_project() -> Result<Option<serde_json::Value>, String> {
+    blocking(|| {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("rlcut project", &["rlcut", "json"])
+            .pick_file()
+        else {
+            return Ok(None);
+        };
+        let metadata = std::fs::metadata(&path).map_err(|error| error.to_string())?;
+        if metadata.len() > 2_000_000 {
+            return Err("Project file is too large".into());
+        }
+        let project: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).map_err(|error| error.to_string())?)
+                .map_err(|error| format!("Cannot read project: {error}"))?;
+        validate_project(&project)?;
+        Ok(Some(project))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn export_project(project: serde_json::Value) -> Result<bool, String> {
+    blocking(move || {
+        validate_project(&project)?;
+        let name = project
+            .get("name")
+            .and_then(|value| value.as_str())
+            .unwrap_or("rlcut-project");
+        let safe = name
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                    character
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>();
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("rlcut project", &["rlcut"])
+            .set_file_name(format!("{}.rlcut", safe.trim_matches('-')))
+            .save_file()
+        else {
+            return Ok(false);
+        };
+        let bytes = serde_json::to_vec_pretty(&project).map_err(|error| error.to_string())?;
+        std::fs::write(path, bytes).map_err(|error| error.to_string())?;
+        Ok(true)
+    })
+    .await
+}
+
 struct PlayerSlot {
     session: u64,
     player: Option<crate::video::player::Player>,
@@ -408,7 +675,6 @@ fn validate_segments(segments: &[Segment]) -> Result<(), String> {
         || segments
             .iter()
             .any(|s| !s.start.is_finite() || !s.end.is_finite() || s.start < 0. || s.end <= s.start)
-        || segments.windows(2).any(|s| s[0].end > s[1].start)
     {
         return Err("Invalid playback timeline".into());
     }
@@ -421,6 +687,7 @@ pub async fn playback_control(
     playing: Option<bool>,
     time: Option<f64>,
     segments: Option<Vec<Segment>>,
+    music: Option<MusicTrack>,
 ) -> Result<(), String> {
     if time.is_some_and(|t| !t.is_finite() || t < 0.) {
         return Err("Invalid playback position".into());
@@ -435,6 +702,9 @@ pub async fn playback_control(
             return Ok(());
         }
         if let Some(p) = slot.player.as_mut() {
+            if let Some(music) = music {
+                p.music(music)?;
+            }
             if let Some(segments) = segments {
                 p.segments(segments)?;
             }

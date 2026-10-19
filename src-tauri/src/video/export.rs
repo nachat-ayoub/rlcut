@@ -1,8 +1,8 @@
 use super::{
-    args::{export_args_segments, progress_seconds},
+    args::{export_args_timeline_sources, progress_seconds},
     binaries::{command, Binaries},
 };
-use crate::model::{ExportOptions, Preset, Segment, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
 #[cfg(feature = "serialization")]
 use serde::Serialize;
 use std::{
@@ -31,12 +31,14 @@ pub struct Progress {
 }
 pub struct Job {
     pub cancel: AtomicBool,
+    pub overwrite: bool,
     pub progress: Mutex<Progress>,
 }
 impl Job {
-    pub fn new(id: String, output: String) -> Self {
+    pub fn new(id: String, output: String, overwrite: bool) -> Self {
         Self {
             cancel: AtomicBool::new(false),
+            overwrite,
             progress: Mutex::new(Progress {
                 id,
                 phase: "running".into(),
@@ -55,7 +57,11 @@ impl Job {
             .map_err(|_| "Export progress unavailable".into())
     }
 }
-pub fn destination(v: &Video, o: &ExportOptions) -> Result<std::path::PathBuf, String> {
+pub fn destination(
+    v: &Video,
+    o: &ExportOptions,
+    overwrite: bool,
+) -> Result<std::path::PathBuf, String> {
     o.resolution()?;
     let name = o.filename.trim();
     if name.is_empty()
@@ -77,11 +83,8 @@ pub fn destination(v: &Video, o: &ExportOptions) -> Result<std::path::PathBuf, S
         return Err("Select an output folder".into());
     }
     let out = folder.join(name);
-    if out.exists() {
-        return Err(
-            "Output file already exists. Choose another filename; rlcut never overwrites videos."
-                .into(),
-        );
+    if out.exists() && !overwrite {
+        return Err("OUTPUT_EXISTS".into());
     }
     if out == Path::new(&v.path) {
         return Err("Output cannot replace the source video".into());
@@ -98,6 +101,7 @@ pub fn run(b: Binaries, v: Video, p: Preset, o: ExportOptions, job: Arc<Job>) {
             start: 0.,
             end: duration,
             volume: 1.,
+            color_fix: 0.,
         }],
         o,
         job,
@@ -111,6 +115,42 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
+    run_timeline(b, v, p, segments, o, job, None, None, Vec::new())
+}
+pub fn run_timeline(
+    b: Binaries,
+    v: Video,
+    p: Preset,
+    segments: Vec<Segment>,
+    o: ExportOptions,
+    job: Arc<Job>,
+    music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: Vec<TextOverlay>,
+) {
+    run_timeline_sources(
+        b,
+        vec![v],
+        p,
+        segments,
+        o,
+        job,
+        music,
+        music_fade_out,
+        texts,
+    )
+}
+pub fn run_timeline_sources(
+    b: Binaries,
+    videos: Vec<Video>,
+    p: Preset,
+    segments: Vec<Segment>,
+    o: ExportOptions,
+    job: Arc<Job>,
+    music: Option<MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: Vec<TextOverlay>,
+) {
     let start = Instant::now();
     let snapshot = match job.snapshot() {
         Ok(s) => s,
@@ -120,7 +160,16 @@ pub fn run_segments(
     let partial = out.with_file_name(format!(".rlcut-{}.partial.mp4", snapshot.id));
     let log = partial.with_extension("log");
     let result = (|| -> Result<(), String> {
-        let args = export_args_segments(&v, &p, &segments, &o, &partial)?;
+        let args = export_args_timeline_sources(
+            &videos,
+            &p,
+            &segments,
+            &o,
+            &partial,
+            music.as_ref(),
+            music_fade_out,
+            &texts,
+        )?;
         let stderr = fs::OpenOptions::new()
             .create_new(true)
             .write(true)
@@ -193,8 +242,18 @@ pub fn run_segments(
         if job.cancel.load(Ordering::SeqCst) {
             return Err("Export canceled".into());
         }
-        // Atomic, no-clobber publication in the same folder. Never truncate an existing file.
-        fs::hard_link(&partial,&out).map_err(|e|format!("Could not publish output safely: {e}. Choose a local filesystem that supports hard links."))?;
+        if job.overwrite {
+            #[cfg(target_os = "windows")]
+            if out.exists() {
+                fs::remove_file(&out)
+                    .map_err(|e| format!("Could not replace existing output: {e}"))?;
+            }
+            fs::rename(&partial, &out)
+                .map_err(|e| format!("Could not replace existing output: {e}"))?;
+        } else {
+            // Atomic, no-clobber publication in the same folder.
+            fs::hard_link(&partial,&out).map_err(|e|format!("Could not publish output safely: {e}. Choose a local filesystem that supports hard links."))?;
+        }
         Ok(())
     })();
     let _ = fs::remove_file(&partial);
@@ -252,17 +311,22 @@ mod tests {
     fn protects_existing_files_and_paths() {
         let (dir, v, mut o) = fixture();
         fs::write(dir.join("short.mp4"), b"existing video").unwrap();
-        assert!(destination(&v, &o).is_err());
+        assert!(destination(&v, &o, false).is_err());
+        assert!(destination(&v, &o, true).is_ok());
         o.filename = "../source.mp4".into();
-        assert!(destination(&v, &o).is_err());
+        assert!(destination(&v, &o, false).is_err());
         assert_eq!(fs::read(dir.join("short.mp4")).unwrap(), b"existing video");
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn failure_cleans_partial_files() {
         let (dir, v, o) = fixture();
-        let out = destination(&v, &o).unwrap();
-        let job = Arc::new(Job::new("failed".into(), out.to_string_lossy().into()));
+        let out = destination(&v, &o, false).unwrap();
+        let job = Arc::new(Job::new(
+            "failed".into(),
+            out.to_string_lossy().into(),
+            false,
+        ));
         run_segments(
             Binaries {
                 ffmpeg: None,
@@ -274,6 +338,7 @@ mod tests {
                 start: 0.,
                 end: 3.,
                 volume: 1.,
+                color_fix: 0.,
             }],
             o,
             job.clone(),
@@ -291,8 +356,12 @@ mod tests {
         // Stand-in process exercises cancellation/cleanup independently of encoder availability.
         fs::write(&binary,b"#!/bin/sh\nfor arg do last=\"$arg\"; done\n: > \"$last\"\nprintf 'out_time_us=1000000\\nprogress=continue\\n'\nexec sleep 30\n").unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
-        let out = destination(&v, &o).unwrap();
-        let job = Arc::new(Job::new("cancel".into(), out.to_string_lossy().into()));
+        let out = destination(&v, &o, false).unwrap();
+        let job = Arc::new(Job::new(
+            "cancel".into(),
+            out.to_string_lossy().into(),
+            false,
+        ));
         let worker_job = job.clone();
         let worker = thread::spawn(move || {
             run_segments(
@@ -306,6 +375,7 @@ mod tests {
                     start: 0.,
                     end: 3.,
                     volume: 1.,
+                    color_fix: 0.,
                 }],
                 o,
                 worker_job,

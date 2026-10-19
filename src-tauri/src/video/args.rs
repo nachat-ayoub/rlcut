@@ -1,5 +1,5 @@
-use super::geometry::filter_graph;
-use crate::model::{ExportOptions, Preset, Segment, Video};
+use super::geometry::{color_filter, filter_graph_normalized};
+use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
 use std::path::Path;
 pub fn export_args(
     v: &Video,
@@ -14,6 +14,7 @@ pub fn export_args(
             start: 0.,
             end: v.duration,
             volume: 1.,
+            color_fix: 0.,
         }],
         o,
         out,
@@ -26,39 +27,277 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
+    export_args_timeline(v, p, segments, o, out, None, None, &[])
+}
+pub fn export_args_timeline(
+    v: &Video,
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
+) -> Result<Vec<String>, String> {
+    export_args_timeline_sources(
+        std::slice::from_ref(v),
+        p,
+        segments,
+        o,
+        out,
+        music,
+        music_fade_out,
+        texts,
+    )
+}
+pub fn export_args_timeline_sources(
+    videos: &[Video],
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
+) -> Result<Vec<String>, String> {
     let (w, h) = o.resolution()?;
-    if !v.duration.is_finite() || v.duration <= 0. {
+    if videos.is_empty()
+        || videos
+            .iter()
+            .any(|video| !video.duration.is_finite() || video.duration <= 0.)
+    {
         return Err("Invalid video duration".into());
     }
-    Segment::validate_all(segments, v.duration)?;
-    let mut graph = filter_graph(v, p, w, h)?;
-    let split_outputs = (0..segments.len())
-        .map(|i| format!("[edit{i}]"))
-        .collect::<String>();
-    graph.push_str(&format!(";[out]split={}{split_outputs}", segments.len()));
-    for (index, segment) in segments.iter().enumerate() {
+    let total_duration: f64 = videos.iter().map(|video| video.duration).sum();
+    Segment::validate_all(segments, total_duration)?;
+    let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
+    TextOverlay::validate_all(texts, edited_duration)?;
+    let mut offsets = Vec::with_capacity(videos.len());
+    let mut offset = 0.;
+    for video in videos {
+        offsets.push(offset);
+        offset += video.duration;
+    }
+    let resolved = segments
+        .iter()
+        .map(|segment| {
+            let source = offsets
+                .iter()
+                .enumerate()
+                .rev()
+                .find(|(_, offset)| segment.start >= **offset)
+                .map(|(index, _)| index)
+                .ok_or("Timeline clip has no source")?;
+            let local_start = segment.start - offsets[source];
+            let local_end = segment.end - offsets[source];
+            if local_start < -0.001 || local_end > videos[source].duration + 0.001 {
+                return Err("A timeline clip cannot cross between source videos".into());
+            }
+            Ok((
+                source,
+                local_start.max(0.),
+                local_end.min(videos[source].duration),
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut v = videos[0].clone();
+    v.duration = total_duration;
+    v.has_audio = videos.iter().any(|video| video.has_audio);
+    let mut graph = String::new();
+    for source in 0..videos.len() {
+        let indices = resolved
+            .iter()
+            .enumerate()
+            .filter_map(|(index, value)| (value.0 == source).then_some(index))
+            .collect::<Vec<_>>();
+        if indices.is_empty() {
+            continue;
+        }
+        let outputs = indices
+            .iter()
+            .map(|index| format!("[edit{index}]"))
+            .collect::<String>();
+        if !graph.is_empty() {
+            graph.push(';');
+        }
         graph.push_str(&format!(
-            ";[edit{index}]trim=start={:.6}:end={:.6},setpts=PTS-STARTPTS[v{index}]",
-            segment.start, segment.end
+            "[{source}:v:0]{},split={}{outputs}",
+            color_filter(&videos[source]),
+            indices.len()
+        ));
+    }
+    for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
+        let normalize = if videos[source].width == videos[0].width
+            && videos[source].height == videos[0].height
+        {
+            ",setsar=1".to_string()
+        } else {
+            format!(
+                ",scale={}:{}:flags=lanczos,setsar=1",
+                videos[0].width, videos[0].height
+            )
+        };
+        let fix = segments[index].color_fix;
+        let correction = if fix > 0.0001 {
+            format!(
+                ",eq=brightness={:.5}:contrast={:.5}:saturation={:.5}:gamma={:.5}",
+                -0.018 * fix,
+                1. + 0.32 * fix,
+                1. + 0.28 * fix,
+                1. / (1. + 0.20 * fix)
+            )
+        } else {
+            String::new()
+        };
+        graph.push_str(&format!(
+            ";[edit{index}]trim=start={start:.6}:end={end:.6},setpts=PTS-STARTPTS{normalize}{correction}[v{index}]"
         ));
     }
     let video_inputs = (0..segments.len())
         .map(|i| format!("[v{i}]"))
         .collect::<String>();
     graph.push_str(&format!(
-        ";{video_inputs}concat=n={}:v=1:a=0[out_edit]",
+        ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
         segments.len()
     ));
-    if v.has_audio {
-        let audio_splits = (0..segments.len())
-            .map(|i| format!("[audio{i}]"))
-            .collect::<String>();
-        graph.push_str(&format!(";[0:a:0]asplit={}{audio_splits}", segments.len()));
-        for (index, segment) in segments.iter().enumerate() {
+    let mut composition = filter_graph_normalized(&v, p, w, h)?
+        .replace("[0:v:0]", "[source_edit]")
+        .replace("[out]", "[out_edit]");
+    if p.boost.intro.enabled && p.boost.enabled {
+        let b = super::geometry::geometry(&v, p, w, h)?.boost;
+        let hidden = -(b.width as i32) - 5;
+        let duration = p.boost.intro.duration;
+        let u = format!("(t/{duration:.6})");
+        let easing = match &p.boost.intro.easing {
+            BoostEasing::Linear => u.clone(),
+            BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
+            BoostEasing::EaseIn => format!("pow({u},3)"),
+            BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
+            BoostEasing::EaseInOut => format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"),
+        };
+        composition = composition.replace(
+            &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
+            &format!("[base][hud]overlay=x='if(lt(t,{duration:.6}),{hidden}+({}-({hidden}))*({easing}),{})':y={}:eval=frame", b.x, b.x, b.y),
+        ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
+    }
+    graph.push(';');
+    graph.push_str(&composition);
+    let mut video_output = "out_edit".to_string();
+    for (index, text) in texts.iter().enumerate() {
+        let next = format!("text{index}");
+        let escaped_text = text
+            .text
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+            .replace(':', "\\:")
+            .replace('%', "\\%")
+            .replace('\n', "\\n");
+        let styled_path = match (text.italic, text.font_weight) {
+            (true, 900) if !text.font_black_italic_path.is_empty() => &text.font_black_italic_path,
+            (true, 700) if !text.font_bold_italic_path.is_empty() => &text.font_bold_italic_path,
+            (true, _) if !text.font_italic_path.is_empty() => &text.font_italic_path,
+            (false, 900) if !text.font_black_path.is_empty() => &text.font_black_path,
+            (false, 700) if !text.font_bold_path.is_empty() => &text.font_bold_path,
+            _ => &text.font_path,
+        };
+        let font = if styled_path.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "fontfile='{}':",
+                styled_path
+                    .replace('\\', "\\\\")
+                    .replace(':', "\\:")
+                    .replace('\'', "\\'")
+            )
+        };
+        let x = match text.align.as_str() {
+            "left" => format!("w*{:.6}", text.x - text.box_width / 2.),
+            "right" => format!("w*{:.6}-text_w", text.x + text.box_width / 2.),
+            _ => format!("w*{:.6}-text_w/2", text.x),
+        };
+        let size = text.font_size * text.scale * w as f64 / 1080.;
+        let color = text.color.trim_start_matches('#');
+        let stroke = text.stroke_color.trim_start_matches('#');
+        let background = text.background_color.trim_start_matches('#');
+        let shadow = text.shadow_color.trim_start_matches('#');
+        let stroke_factor = match text.stroke_position.as_str() {
+            "outside" => 2.,
+            "inside" => 0.5,
+            _ => 1.,
+        };
+        let fade_in = text
+            .fade_in
+            .map(|value| {
+                format!(
+                    "if(lt(t,{:.6}),0,if(lt(t,{:.6}), (t-{:.6})/{value:.6},",
+                    text.start,
+                    text.start + value,
+                    text.start
+                )
+            })
+            .unwrap_or_else(|| format!("if(lt(t,{:.6}),0,", text.start));
+        let fade_out = text
+            .fade_out
+            .map(|value| {
+                format!(
+                    "if(gt(t,{:.6}),0,if(gt(t,{:.6}),({:.6}-t)/{value:.6},1))",
+                    text.end,
+                    text.end - value,
+                    text.end
+                )
+            })
+            .unwrap_or_else(|| format!("if(gt(t,{:.6}),0,1)", text.end));
+        let alpha = format!("{fade_in}{fade_out})");
+        let style = format!(
+            "{font}text='{escaped_text}':fontsize={size:.3}:fontcolor=0x{color}@{:.4}:line_spacing={:.3}:borderw={:.3}:bordercolor=0x{stroke}:box={}:boxcolor=0x{background}@{:.4}:shadowx={:.3}:shadowy={:.3}:shadowcolor=0x{shadow}:alpha='{alpha}'",
+            text.opacity, (text.line_height - 1.) * size, text.stroke_width * stroke_factor * w as f64 / 1080., if text.background_opacity > 0. { 1 } else { 0 }, text.background_opacity, text.shadow_x * w as f64 / 1080., text.shadow_y * w as f64 / 1080.
+        );
+        if text.rotation.abs() > 0.001 {
+            let layer = format!("text_layer{index}");
             graph.push_str(&format!(
-                ";[audio{index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[a{index}]",
-                segment.start, segment.end, segment.volume
+                ";color=c=black@0.0:s={w}x{h}:d={edited_duration:.6},format=rgba,drawtext={style}:x='(w-text_w)/2':y='(h-text_h)/2',rotate={:.8}:c=none:ow=iw:oh=ih[{layer}];[{video_output}][{layer}]overlay=x='W*{:.6}-w/2':y='H*{:.6}-h/2':format=auto[{next}]",
+                text.rotation.to_radians(), text.x, text.y
             ));
+        } else {
+            graph.push_str(&format!(
+                ";[{video_output}]drawtext={style}:x='{x}':y='h*{:.6}-text_h/2'[{next}]",
+                text.y
+            ));
+        }
+        video_output = next;
+    }
+    if v.has_audio {
+        for source in 0..videos.len() {
+            if !videos[source].has_audio {
+                continue;
+            }
+            let indices = resolved
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| (value.0 == source).then_some(index))
+                .collect::<Vec<_>>();
+            if indices.is_empty() {
+                continue;
+            }
+            let outputs = indices
+                .iter()
+                .map(|index| format!("[audio{index}]"))
+                .collect::<String>();
+            graph.push_str(&format!(";[{source}:a:0]asplit={}{outputs}", indices.len()));
+        }
+        for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
+            if videos[source].has_audio {
+                graph.push_str(&format!(
+                    ";[audio{index}]atrim=start={start:.6}:end={end:.6},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo,volume={:.4}[a{index}]",
+                    segments[index].volume
+                ));
+            } else {
+                graph.push_str(&format!(
+                    ";anullsrc=r=48000:cl=stereo,atrim=duration={:.6},asetpts=PTS-STARTPTS,volume={:.4}[a{index}]",
+                    end - start, segments[index].volume
+                ));
+            }
         }
         let audio_inputs = (0..segments.len())
             .map(|i| format!("[a{i}]"))
@@ -68,7 +307,48 @@ pub fn export_args_segments(
             segments.len()
         ));
     }
-    let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
+    let music = music.filter(|m| !m.segments.is_empty());
+    if let Some(music) = music {
+        music.validate()?;
+        let outputs = (0..music.segments.len())
+            .map(|i| format!("[ms{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(
+            ";[{}:a:0]asplit={}{outputs}",
+            videos.len(),
+            music.segments.len()
+        ));
+        for (i, s) in music.segments.iter().enumerate() {
+            graph.push_str(&format!(
+                ";[ms{i}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[mt{i}]",
+                s.start, s.end, s.volume
+            ));
+        }
+        let inputs = (0..music.segments.len())
+            .map(|i| format!("[mt{i}]"))
+            .collect::<String>();
+        let music_duration: f64 = music.segments.iter().map(|s| s.end - s.start).sum();
+        let fade = music_fade_out.map(|requested| {
+            let end = segments
+                .iter()
+                .map(|s| s.end - s.start)
+                .sum::<f64>()
+                .min(music_duration);
+            let duration = requested.min(end);
+            (end - duration, duration)
+        });
+        graph.push_str(&format!(
+            ";{inputs}concat=n={}:v=0:a=1,apad{}[music_edit]",
+            music.segments.len(),
+            fade.map(|(start, duration)| format!(",afade=t=out:st={start:.6}:d={duration:.6}"))
+                .unwrap_or_default()
+        ));
+        if v.has_audio {
+            graph.push_str(";[audio_edit][music_edit]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]");
+        } else {
+            graph.push_str(";[music_edit]alimiter=limit=0.95:level=0:attack=1[audio_mix]");
+        }
+    }
     let mut args = vec![
         "-hide_banner".into(),
         "-loglevel".into(),
@@ -77,21 +357,31 @@ pub fn export_args_segments(
         "-n".into(),
         "-filter_complex_threads".into(),
         std::thread::available_parallelism()
-            .map(|n| n.get().min(4))
+            .map(|n| n.get())
             .unwrap_or(1)
             .to_string(),
-        "-i".into(),
-        v.path.clone(),
+    ];
+    for video in videos {
+        args.extend(["-i".into(), video.path.clone()]);
+    }
+    if let Some(music) = music {
+        args.extend(["-i".into(), music.path.clone()]);
+    }
+    args.extend([
         "-filter_complex".into(),
         graph,
         "-map".into(),
-        "[out_edit]".into(),
-    ];
-    if v.has_audio {
+        format!("[{video_output}]"),
+    ]);
+    if v.has_audio || music.is_some() {
         args.extend(
             [
                 "-map",
-                "[audio_edit]",
+                if music.is_some() {
+                    "[audio_mix]"
+                } else {
+                    "[audio_edit]"
+                },
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -116,7 +406,7 @@ pub fn export_args_segments(
             "-c:v",
             "libx264",
             "-preset",
-            "medium",
+            "veryfast",
             "-crf",
             "20",
             "-pix_fmt",

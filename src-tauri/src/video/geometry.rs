@@ -85,12 +85,32 @@ pub fn color_filter(video: &Video) -> &'static str {
 }
 /// The single composition implementation used for previews AND full video exports.
 pub fn filter_graph(video: &Video, p: &Preset, w: u32, h: u32) -> Result<String, String> {
+    filter_graph_with_input(video, p, w, h, color_filter(video))
+}
+/// Compose frames that have already been normalized to limited-range BT.709.
+/// Timeline export uses this after converting each source independently, which
+/// is required when SDR and HDR recordings share one project.
+pub fn filter_graph_normalized(
+    video: &Video,
+    p: &Preset,
+    w: u32,
+    h: u32,
+) -> Result<String, String> {
+    filter_graph_with_input(video, p, w, h, "null")
+}
+fn filter_graph_with_input(
+    video: &Video,
+    p: &Preset,
+    w: u32,
+    h: u32,
+    input: &str,
+) -> Result<String, String> {
     let g = geometry(video, p, w, h)?;
     let bg = g.background;
     let gp = g.gameplay;
     let b = g.boost;
     let c = g.crop;
-    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=2,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[base]",color_filter(video),video.width,video.height,if p.boost.enabled{
+    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=2,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[base]",input,video.width,video.height,if p.boost.enabled{
         3
     }
     else{

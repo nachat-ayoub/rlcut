@@ -3,18 +3,17 @@ export const editedDuration = (segments: Segment[]) => segments.reduce((sum, seg
 export function trimBounds(segments: Segment[], index: number, duration: number, minimum = .05) {
   const segment = segments[index];
   return {
-    start: { min: segments[index - 1]?.end ?? 0, max: segment.end - minimum },
-    end: { min: segment.start + minimum, max: segments[index + 1]?.start ?? duration },
+    start: { min: 0, max: segment.end - minimum },
+    end: { min: segment.start + minimum, max: duration },
   };
 }
 export function sourceToEdited(segments: Segment[], source: number) {
   let offset = 0;
   for (const segment of segments) {
-    if (source < segment.start) return offset;
-    if (source < segment.end) return offset + source - segment.start;
+    if (source >= segment.start && source < segment.end) return offset + source - segment.start;
     offset += segment.end - segment.start;
   }
-  return offset;
+  return source <= (segments[0]?.start ?? 0) ? 0 : offset;
 }
 export function editedToSource(segments: Segment[], value: number) {
   const edited = Math.max(0, Math.min(editedDuration(segments), value));

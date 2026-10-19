@@ -16,7 +16,7 @@ gst_dir=/usr/lib/x86_64-linux-gnu/gstreamer-1.0
 converters=(videoconvert videoscale)
 if [[ -f "$gst_dir/libgstvideoconvertscale.so" ]]; then converters=(videoconvertscale); fi
 rm -f "$stage/gstreamer-1.0/"*.so
-for plugin in app autodetect coreelements playback audioconvert audioresample volume pulseaudio libav isomp4 typefindfunctions videorate audiofx audioparsers "${converters[@]}"; do
+for plugin in app autodetect coreelements playback audioconvert audioresample volume pulseaudio libav isomp4 typefindfunctions videorate audiofx audioparsers ogg wavparse flac id3demux "${converters[@]}"; do
   file="$gst_dir/libgst$plugin.so"
   [[ -f "$file" ]] || { echo "Missing playback plugin: $file" >&2; exit 1; }
   cp "$file" "$stage/gstreamer-1.0/"

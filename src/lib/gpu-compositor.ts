@@ -1,7 +1,7 @@
 import type { Preset, Video } from '../types';
 import type { CompositionSource, Scene } from './compositor';
 const vertex = `attribute vec2 position;attribute vec2 uv;varying vec2 coord;void main(){coord=uv;gl_Position=vec4(position,0.,1.);}`;
-const sprite = `precision mediump float;uniform sampler2D image;uniform vec4 crop;uniform vec2 mask;uniform float feather;uniform float brightness;varying vec2 coord;void main(){vec4 color=texture2D(image,crop.xy+coord*crop.zw);float alpha=1.;if(mask.x>0.){float distance=length((coord-.5)*mask);alpha=feather>0.?clamp((1.-distance)/feather,0.,1.):step(distance,1.);}gl_FragColor=vec4(clamp(color.rgb+brightness,0.,1.),alpha);}`;
+const sprite = `precision mediump float;uniform sampler2D image;uniform vec4 crop;uniform vec2 mask;uniform float feather;uniform float brightness;uniform float colorFix;varying vec2 coord;vec3 recover(vec3 c){float contrast=1.+.32*colorFix;float saturation=1.+.28*colorFix;float gamma=1.+.20*colorFix;c=pow(c,vec3(gamma));c=(c-.5)*contrast+.5;float luma=dot(c,vec3(.2126,.7152,.0722));return clamp(vec3(luma)+(c-vec3(luma))*saturation-.018*colorFix,0.,1.);}void main(){vec4 color=texture2D(image,crop.xy+coord*crop.zw);float alpha=1.;if(mask.x>0.){float distance=length((coord-.5)*mask);alpha=feather>0.?clamp((1.-distance)/feather,0.,1.):step(distance,1.);}gl_FragColor=vec4(clamp(recover(color.rgb)+brightness,0.,1.),alpha);}`;
 const blur = `precision mediump float;uniform sampler2D image;uniform vec2 stepSize;uniform float brightness;varying vec2 coord;void main(){vec2 base=vec2(coord.x,1.-coord.y);vec3 sum=vec3(0.);float weight=0.;for(int i=-8;i<=8;i++){float x=float(i)*.375;float w=exp(-.5*x*x);sum+=texture2D(image,base+float(i)*stepSize).rgb*w;weight+=w;}gl_FragColor=vec4(clamp(sum/weight+brightness,0.,1.),1.);}`;
 export class GPUCompositor {
   private width = 0;
@@ -41,13 +41,14 @@ export class GPUCompositor {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([left, top, 0, 0, left, bottom, 0, 1, right, top, 1, 0, right, bottom, 1, 1]), gl.STREAM_DRAW);
     for (const [name, offset] of [['position', 0], ['uv', 8]] as const) { const location = gl.getAttribLocation(program, name); gl.enableVertexAttribArray(location); gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 16, offset); }
   }
-  private paint(texture: WebGLTexture, rect: { x: number; y: number; width: number; height: number }, crop = [0, 0, 1, 1], mask = [0, 0], feather = 0, brightness = 0) {
+  private paint(texture: WebGLTexture, rect: { x: number; y: number; width: number; height: number }, crop = [0, 0, 1, 1], mask = [0, 0], feather = 0, brightness = 0, colorFix = 0) {
     const gl = this.gl; this.quad(this.sprite, texture, rect.x, rect.y, rect.width, rect.height);
     gl.uniform4fv(gl.getUniformLocation(this.sprite, 'crop'), crop); gl.uniform2fv(gl.getUniformLocation(this.sprite, 'mask'), mask);
     gl.uniform1f(gl.getUniformLocation(this.sprite, 'feather'), feather); gl.uniform1f(gl.getUniformLocation(this.sprite, 'brightness'), brightness);
+    gl.uniform1f(gl.getUniformLocation(this.sprite, 'colorFix'), colorFix);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
-  draw(source: CompositionSource, video: Pick<Video, 'width' | 'height'>, preset: Preset, plan: Scene, before: boolean) {
+  draw(source: CompositionSource, video: Pick<Video, 'width' | 'height'>, preset: Preset, plan: Scene, before: boolean, colorFix = 0) {
     const gl = this.gl, width = plan.width, height = plan.height;
     if (this.width !== width || this.height !== height) {
       this.width = width; this.height = height;
@@ -74,7 +75,7 @@ export class GPUCompositor {
     const bg = plan.background, crop = [bg.x / bg.width, bg.y / bg.height, width / bg.width, height / bg.height];
     const brightness = preset.background.brightness * 255 / 219;
     if (preset.background.blur > 0) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.targets[0].framebuffer); this.paint(this.source, full, crop);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.targets[0].framebuffer); this.paint(this.source, full, crop, [0, 0], 0, 0, colorFix);
       const sigma = preset.background.blur * width / 1080;
       for (let pass = 0; pass < 2; pass++) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, pass === 0 ? this.targets[1].framebuffer : null);
@@ -82,14 +83,14 @@ export class GPUCompositor {
         gl.uniform2f(gl.getUniformLocation(this.blur, 'stepSize'), pass === 0 ? sigma * .375 / width : 0, pass === 1 ? sigma * .375 / height : 0);
         gl.uniform1f(gl.getUniformLocation(this.blur, 'brightness'), pass === 1 ? brightness : 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
-    } else this.paint(this.source, full, crop, [0, 0], 0, brightness);
-    this.paint(this.source, plan.gameplay);
+    } else this.paint(this.source, full, crop, [0, 0], 0, brightness, colorFix);
+    this.paint(this.source, plan.gameplay, [0, 0, 1, 1], [0, 0], 0, 0, colorFix);
     if (preset.boost.enabled) {
       const b = plan.boost, c = plan.crop;
       const radius = Math.min(b.width, b.height) / 2;
       const mask = preset.boost.shape === 'circle' ? [b.width / radius, b.height / radius] : [2, 2];
       gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      this.paint(this.source, b, [c.x / video.width, c.y / video.height, c.width / video.width, c.height / video.height], mask, preset.boost.feather); gl.disable(gl.BLEND);
+      this.paint(this.source, b, [c.x / video.width, c.y / video.height, c.width / video.width, c.height / video.height], mask, preset.boost.feather, 0, colorFix); gl.disable(gl.BLEND);
     }
   }
   dispose() {

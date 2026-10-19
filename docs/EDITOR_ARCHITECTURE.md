@@ -21,25 +21,51 @@ preview. Unavailable or slow graphics contexts use the software compositor.
 Preview filtering and resolution prioritize interactive performance. Export uses
 the original recording and the existing full-resolution FFmpeg pipeline.
 
-Import prepares one cached, seekable SDR source, including consistent HDR tone
-mapping. FFmpeg reports processed duration; the UI displays actual percentage,
-elapsed time and an approximate remaining time. Cancel kills the preparation job
-and removes its incomplete output. An import only replaces the current source
-when preparation succeeds. Metadata probing and native decoder opening use an
-activity indicator because they do not expose measurable percentage progress.
+Import prepares one cached, seekable SDR proxy per source, including consistent
+HDR tone mapping. Imported videos append to the packed video lane. Existing
+proxies are reused and the editor reel is rebuilt with stream copy, so only a new
+source needs encoding. Proxy preparation uses the available CPU cores. FFmpeg
+reports processed duration; the UI displays percentage, elapsed time and an
+approximate remaining time. Cancel kills preparation and removes incomplete
+output. Metadata probing and native decoder opening use an activity indicator.
 
 The native engine is shipped in the Linux AppImage with its decoder/audio plugins
 and shared libraries. Windows/macOS native-engine packaging is pending; the old
 browser playback fallback has been removed. Those installers must not be published
 until the native engine/runtime has been packaged for those platforms.
 
-Timeline video segments store ordered source in/out points and per-segment gain.
+Timeline video segments store ordered virtual-source in/out points and per-segment gain.
+Each original occupies a fixed range in that virtual source; trim restoration is
+bounded to its own file and final export reads every original directly.
 The editor packs them without gaps, so deletion and edge trims ripple later clips.
 Trim handles may expand only into unused source ranges between neighboring clips,
 which makes an accidental trim reversible without creating overlapping media.
 Native playback changes playbin gain at segment boundaries; export applies the
-same gain before audio concatenation. The second music lane is currently a UI
-scaffold for the separate catalog/marker plan in `MUSIC_LIBRARY_ROADMAP.md`.
+same gain before audio concatenation. The music lane stores independent ordered source intervals and gain. It supports
+the same trim, split, ripple-delete, selection and history controls as video.
+A second native audio pipeline follows the video clock in edited time, including
+seeks and cuts. FFmpeg trims/joins both lanes, mixes their gains and limits peaks.
+Deleting music never changes the video intervals. The catalog/marker plan remains
+in `MUSIC_LIBRARY_ROADMAP.md`.
+
+Each lane has one editable peak marker stored in source time, so ripple edits and
+restored source ranges keep the marker attached to its media. Clip edges snap to
+the playhead, both lane markers, and every visible video/music clip boundary.
+Dragging a clip body left trims its source start; dragging right restores it. The
+packed lane, later clips, and source-attached peak markers preview their ripple
+positions continuously during the gesture. The selected clip determines which
+lane the single diamond marker action edits. During body drag that clip's peak can
+snap to the other lane's peak for direct gameplay-to-beat synchronization.
+
+The preset-owned entrance option moves the boost only on X, from a bounding
+box 5 output pixels left of the canvas to the configured position. Duration is
+configurable from 0.1–5 seconds, with linear, ease, ease-in, ease-out, and
+ease-in-out curves. Video cuts join before composition, so entrance timing starts
+at the edited output origin even when the first source interval is trimmed. The
+canvas compositor evaluates the same curve from the edited playhead time during
+normal timeline playback. Optional music fade-out is also applied by the native
+preview player, ends at the earlier of the edited video or edited music ending,
+and defaults to a 0.5-second duration.
 
 The native player has a 60 FPS smoke check, while the frontend/Rust suites cover
 timeline mapping, trim bounds, serialization, volume filters and the real export

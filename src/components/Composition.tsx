@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
-import type { Layer, Preset, Preview, Video, Segment } from '../types';
+import type { Layer, Preset, Preview, Video, Segment, MusicTrack, TextOverlay } from '../types';
 import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
 import { Compositor } from '../lib/compositor';
 import { corners, snapAxis, type Corner } from '../lib/geometry';
+import { ease } from '../lib/easing';
+import { sourceToEdited } from '../lib/timeline';
 type Gesture = {
   layer: 'gameplay' | 'boost';
   resize: Corner | null;
@@ -13,16 +15,25 @@ type Gesture = {
   y: number;
   preset: Preset;
 };
-export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], preview, preset, before, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+type PanGesture = { pointer: number; x: number; y: number; originX: number; originY: number };
+type TextGesture = { pointer: number; x: number; y: number; value: TextOverlay };
+export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   playbackPath: string;
   proxyPreparing: boolean;
   preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
   segments?: Segment[];
+  music?: MusicTrack | null;
+  musicFadeOut?: number | null;
+  texts?: TextOverlay[];
+  selectedTextId?: string | null;
+  onTextSelect: (id: string) => void;
+  onTextChange: (text: TextOverlay) => void;
   preview: Preview | null;
   preset: Preset;
   before: boolean;
+  colorPreviewBefore?: boolean;
   guides: boolean;
   layer: Layer | null;
   setLayer: (l: Layer | null) => void;
@@ -36,15 +47,19 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   onPlaybackError?: (error: unknown) => void;
   onSourceFrame?: (source: string) => void;
 }) {
-  const canvas = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null);
+  const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), panGesture = useRef<PanGesture | null>(null), textGesture = useRef<TextGesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
+  const playbackTimestamp = useRef(timestamp);
+  const textFrame = useRef(-1);
   const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [mediaReady, setMediaReady] = useState(false);
+  const [visualTime, setVisualTime] = useState(() => sourceToEdited(segments, timestamp));
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing });
-  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, video, playing }; });
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments }; });
   const [waiting, setWaiting] = useState(false);
   const draw = useRef<() => void>(() => { });
   const snapshot = useRef<() => void>(() => { });
@@ -60,7 +75,18 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     draw.current = () => {
       const current = callbacks.current, source = player.current?.frame;
       if (!current.video || !source) return;
-      try { compositor.draw(source, source.width, source.height, current.video, current.preset, current.quality, current.before, current.playing); }
+      try {
+        let drawingPreset = current.preset;
+        const editedTime = sourceToEdited(current.segments, playbackTimestamp.current);
+        if (current.preset.boost.intro.enabled && current.preset.boost.enabled && !current.before && editedTime < current.preset.boost.intro.duration) {
+          const boost = current.preset.boost;
+          const hidden = -(boost.width * boost.scale) / 2 - 5 / current.quality;
+          const progress = ease(editedTime / boost.intro.duration, boost.intro.easing);
+          drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
+        }
+        const activeClip = current.segments.find(segment => playbackTimestamp.current >= segment.start - .001 && playbackTimestamp.current <= segment.end + .001);
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0);
+      }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
     snapshot.current = () => {
@@ -72,12 +98,12 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     return () => { observer.disconnect(); target.removeEventListener('webglcontextlost', lost); target.removeEventListener('compositionfallback', lost); compositor.dispose(); renderer.current = null; };
   }, [playbackPath, forceCPU, sourceVersion]);
   useEffect(() => {
-    if (!playbackPath || !video) return;
+    if (!playbackPath || !video || !segments.length) { setMediaReady(false); setWaiting(false); return; }
     setMediaReady(false); setWaiting(true);
     let disposed = false;
     const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
-      frame: () => { if (disposed) return; setMediaReady(true); draw.current(); snapshot.current(); },
-      time: value => { if (!disposed) callbacks.current.onTimestamp(value); },
+      frame: (_source, time) => { if (disposed) return; playbackTimestamp.current = time; const edited = sourceToEdited(callbacks.current.segments, time); if (Math.abs(edited - textFrame.current) >= 1 / 30) { textFrame.current = edited; setVisualTime(edited); } setMediaReady(true); draw.current(); snapshot.current(); },
+      time: value => { if (!disposed) { playbackTimestamp.current = value; callbacks.current.onTimestamp(value); } },
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
@@ -85,12 +111,51 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
-  }, [playbackPath, sourceVersion]);
-  useEffect(() => { player.current?.control({ segments }); }, [segments]);
+  }, [playbackPath, sourceVersion, segments.length > 0]);
+  useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion]);
+  useEffect(() => {
+    player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, segments: [], fadeOut: null } });
+  }, [music, musicFadeOut, playbackPath, sourceVersion]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
-  useEffect(() => { if (!playing) player.current?.seek(timestamp); }, [timestamp, playing]);
-  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, quality, video, playing]);
-  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);
+  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments]);
+  const updateZoom = (next: number) => {
+    const bounded = Math.max(1, Math.min(4, next));
+    const snapped = Math.abs(bounded - 1) < .08 ? 1 : bounded;
+    setZoom(snapped);
+    if (snapped === 1) setPan({ x: 0, y: 0 });
+  };
+  const previewWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    updateZoom(zoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12));
+  };
+  const beginPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (!event.altKey || zoom <= 1) return;
+    event.preventDefault(); event.stopPropagation();
+    panGesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, originX: pan.x, originY: pan.y };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const movePan = (event: PointerEvent<HTMLDivElement>) => {
+    const state = panGesture.current;
+    if (!state || state.pointer !== event.pointerId) return;
+    setPan({ x: state.originX + event.clientX - state.x, y: state.originY + event.clientY - state.y });
+  };
+  const finishPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (panGesture.current?.pointer === event.pointerId) panGesture.current = null;
+  };
+  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { if (e.altKey) return; e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function beginText(e: PointerEvent<HTMLDivElement>, text: TextOverlay) { if (e.altKey) return; e.preventDefault(); e.stopPropagation(); onTextSelect(text.id); textGesture.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY, value: structuredClone(text) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function moveText(e: PointerEvent<HTMLDivElement>) {
+    const state = textGesture.current, target = canvas.current; if (!state || state.pointer !== e.pointerId || !target) return;
+    const rect = target.getBoundingClientRect(), thresholdX = 8 / rect.width, thresholdY = 8 / rect.height;
+    let x = clamp(state.value.x + (e.clientX - state.x) / rect.width), y = clamp(state.value.y + (e.clientY - state.y) / rect.height);
+    let gx: number | null = null, gy: number | null = null;
+    for (const point of [0, .5, 1]) if (Math.abs(x - point) <= thresholdX) { x = point; gx = point; }
+    for (const point of [0, .5, 1]) if (Math.abs(y - point) <= thresholdY) { y = point; gy = point; }
+    setSnaps([gx, gy]); onTextChange({ ...state.value, x, y });
+  }
+  function finishText(e: PointerEvent<HTMLDivElement>) { if (textGesture.current?.pointer === e.pointerId) { textGesture.current = null; setSnaps([null, null]); } }
   function move(e: PointerEvent) {
     const g = gesture.current;
     if (!g || !canvas.current)
@@ -155,9 +220,15 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
       </div>
     </div>;
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
-    <div className="preview-viewport">
-      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0 }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+    <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
+      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <canvas key={forceCPU ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} />
+        {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
+          const current = visualTime, local = current - text.start, remaining = text.end - current;
+          const fade = Math.min(1, text.fadeIn ? local / text.fadeIn : 1, text.fadeOut ? remaining / text.fadeOut : 1);
+          const strokeFactor = text.strokePosition === 'outside' ? 2 : text.strokePosition === 'inside' ? .5 : 1;
+          return <div key={text.id} className={`composition-text ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${text.x * 100}%`, top: `${text.y * 100}%`, width: `${text.boxWidth * 100}%`, transform: `translate(-50%,-50%) scale(${text.scale}) rotate(${text.rotation}deg)`, fontFamily: text.fontFamily, fontSize: `${text.fontSize / quality * 100}cqw`, fontWeight: text.fontWeight, fontStyle: text.italic ? 'italic' : 'normal', textDecoration: text.underline ? 'underline' : 'none', letterSpacing: `${text.letterSpacing / quality * 100}cqw`, lineHeight: text.lineHeight, textAlign: text.align, color: text.color, opacity: text.opacity * Math.max(0, fade), WebkitTextStroke: `${text.strokeWidth * strokeFactor / quality * 100}cqw ${text.strokeColor}`, paintOrder: text.strokePosition === 'outside' ? 'stroke fill' : 'fill stroke', backgroundColor: `${text.backgroundColor}${Math.round(text.backgroundOpacity * 255).toString(16).padStart(2, '0')}`, textShadow: `${text.shadowX / quality * 100}cqw ${text.shadowY / quality * 100}cqw ${text.shadowBlur / quality * 100}cqw ${text.shadowColor}` }} onPointerDown={event => beginText(event, text)} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={finishText}>{text.text}</div>;
+        })}
         {!mediaReady && !proxyPreparing && <div className="preview-loading"><LoaderCircle className="spin" />Opening native decoder…</div>}
         {!before && guides && (mediaReady || preview) && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
           {layer === target && <span>
@@ -173,6 +244,6 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
       </div></div>
     <span className="canvas-caption">
       <Scan size={12} />
-      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · <label>Zoom <Dropdown label="Preview zoom" value={zoom} onChange={value => setZoom(Number(value))} options={[1, 1.5, 2, 3, 4].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /></label></span>
+      {before ? 'Original frame' : `${quality === 480 ? 'Approx. 9:16' : '9:16'} · ${quality === 480 ? '480 × 854' : quality === 720 ? '720 × 1280' : '1080 × 1920'}`} · <label>Zoom <Dropdown label="Preview zoom" value={zoom} onChange={value => updateZoom(Number(value))} options={[1, 1.5, 2, 3, 4].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /></label></span>
   </div>;
 }

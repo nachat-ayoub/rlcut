@@ -39,6 +39,36 @@ pub enum Shape {
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]
+pub enum BoostEasing {
+    Linear,
+    Ease,
+    EaseIn,
+    EaseOut,
+    EaseInOut,
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct BoostIntro {
+    pub enabled: bool,
+    pub duration: f64,
+    pub easing: BoostEasing,
+}
+impl Default for BoostIntro {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            duration: 0.8,
+            easing: BoostEasing::Ease,
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
 pub struct Boost {
     pub enabled: bool,
@@ -50,6 +80,8 @@ pub struct Boost {
     pub scale: f64,
     pub shape: Shape,
     pub feather: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub intro: BoostIntro,
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -70,7 +102,7 @@ impl Default for Preset {
         Self {
             version: 1,
             id: "classic".into(),
-            name: "Classic RL Short".into(),
+            name: "Default Preset".into(),
             background: Background {
                 blur: 30.,
                 scale: 1.,
@@ -98,6 +130,7 @@ impl Default for Preset {
                 scale: 1.,
                 shape: Shape::Circle,
                 feather: 0.,
+                intro: BoostIntro::default(),
             },
         }
     }
@@ -137,6 +170,7 @@ impl Preset {
         range(h.x, 0., 1., "Boost X")?;
         range(h.y, 0., 1., "Boost Y")?;
         range(h.feather, 0., 0.25, "Feather")?;
+        range(h.intro.duration, 0.1, 5., "Boost entrance duration")?;
         range(h.crop.x, 0., 1., "Crop X")?;
         range(h.crop.y, 0., 1., "Crop Y")?;
         range(h.crop.width, 0.001, 1., "Crop width")?;
@@ -177,6 +211,39 @@ pub struct MusicFile {
     feature = "serialization",
     serde(rename_all = "camelCase", deny_unknown_fields)
 )]
+pub struct MusicTrack {
+    pub path: String,
+    pub duration: f64,
+    pub segments: Vec<Segment>,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub fade_out: Option<f64>,
+}
+impl MusicTrack {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.duration.is_finite()
+            || self.duration <= 0.
+            || !std::path::Path::new(&self.path).is_file()
+        {
+            return Err("Music file is missing or invalid".into());
+        }
+        if !self.segments.is_empty() {
+            Segment::validate_all(&self.segments, self.duration)?;
+        }
+        if self
+            .fade_out
+            .is_some_and(|duration| !duration.is_finite() || !(0.1..=10.).contains(&duration))
+        {
+            return Err("Invalid music fade duration".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
 pub struct ExportOptions {
     pub quality: u32,
     pub fps: u32,
@@ -191,6 +258,111 @@ pub struct Segment {
     pub end: f64,
     #[cfg_attr(feature = "serialization", serde(default = "default_volume"))]
     pub volume: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub color_fix: f64,
+}
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct TextOverlay {
+    pub id: String,
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+    pub x: f64,
+    pub y: f64,
+    pub scale: f64,
+    pub box_width: f64,
+    pub rotation: f64,
+    pub font_family: String,
+    pub font_path: String,
+    pub font_bold_path: String,
+    pub font_black_path: String,
+    pub font_italic_path: String,
+    pub font_bold_italic_path: String,
+    pub font_black_italic_path: String,
+    pub font_weight: u16,
+    pub font_size: f64,
+    pub color: String,
+    pub opacity: f64,
+    pub align: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub letter_spacing: f64,
+    pub line_height: f64,
+    pub stroke_color: String,
+    pub stroke_width: f64,
+    pub stroke_position: String,
+    pub background_color: String,
+    pub background_opacity: f64,
+    pub shadow_color: String,
+    pub shadow_blur: f64,
+    pub shadow_x: f64,
+    pub shadow_y: f64,
+    pub fade_in: Option<f64>,
+    pub fade_out: Option<f64>,
+}
+impl TextOverlay {
+    pub fn validate_all(texts: &[Self], duration: f64) -> Result<(), String> {
+        if texts.len() > 100 {
+            return Err("A project can contain at most 100 text clips".into());
+        }
+        for text in texts {
+            if text.id.is_empty()
+                || text.text.len() > 4000
+                || !text.start.is_finite()
+                || !text.end.is_finite()
+                || text.start < 0.
+                || text.end <= text.start
+                || text.end > duration + 0.001
+                || !text.x.is_finite()
+                || !(0. ..=1.).contains(&text.x)
+                || !text.y.is_finite()
+                || !(0. ..=1.).contains(&text.y)
+                || !text.scale.is_finite()
+                || !(0.1..=10.).contains(&text.scale)
+                || !text.box_width.is_finite()
+                || !(0.1..=1.).contains(&text.box_width)
+                || !text.rotation.is_finite()
+                || !(-360. ..=360.).contains(&text.rotation)
+                || !text.font_size.is_finite()
+                || !(6. ..=500.).contains(&text.font_size)
+                || !matches!(text.font_weight, 400 | 700 | 900)
+                || !text.opacity.is_finite()
+                || !(0. ..=1.).contains(&text.opacity)
+                || !matches!(text.align.as_str(), "left" | "center" | "right")
+                || !text.letter_spacing.is_finite()
+                || !(-20. ..=100.).contains(&text.letter_spacing)
+                || !text.line_height.is_finite()
+                || !(0.5..=4.).contains(&text.line_height)
+                || !text.stroke_width.is_finite()
+                || !(0. ..=30.).contains(&text.stroke_width)
+                || !matches!(
+                    text.stroke_position.as_str(),
+                    "inside" | "center" | "outside"
+                )
+                || !text.background_opacity.is_finite()
+                || !(0. ..=1.).contains(&text.background_opacity)
+                || !text.shadow_blur.is_finite()
+                || !(0. ..=100.).contains(&text.shadow_blur)
+                || !text.shadow_x.is_finite()
+                || !text.shadow_y.is_finite()
+                || text
+                    .fade_in
+                    .is_some_and(|v| !v.is_finite() || !(0.05..=10.).contains(&v))
+                || text
+                    .fade_out
+                    .is_some_and(|v| !v.is_finite() || !(0.05..=10.).contains(&v))
+            {
+                return Err("Text clips contain invalid timing or style values".into());
+            }
+        }
+        Ok(())
+    }
 }
 fn default_volume() -> f64 {
     1.
@@ -200,23 +372,22 @@ impl Segment {
         if segments.is_empty() {
             return Err("Keep at least one timeline segment".into());
         }
-        let mut previous_end = 0.;
         for segment in segments {
             if !segment.start.is_finite()
                 || !segment.end.is_finite()
-                || segment.start < previous_end
                 || segment.start < 0.
                 || segment.end <= segment.start
                 || segment.end > duration + 0.001
                 || !segment.volume.is_finite()
                 || !(0. ..=2.).contains(&segment.volume)
+                || !segment.color_fix.is_finite()
+                || !(0. ..=1.).contains(&segment.color_fix)
             {
                 return Err(
-                    "Timeline segments must be ordered, non-overlapping, and inside the video"
+                    "Timeline clips must have valid source ranges, volume, and color settings"
                         .into(),
                 );
             }
-            previous_end = segment.end;
         }
         Ok(())
     }
@@ -264,6 +435,7 @@ mod tests {
             start: 0.,
             end: 1.,
             volume: 1.,
+            color_fix: 0.,
         }];
         Segment::validate_all(&segments, 1.).unwrap();
         segments[0].volume = f64::NAN;

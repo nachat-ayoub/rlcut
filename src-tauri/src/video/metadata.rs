@@ -150,7 +150,11 @@ pub fn probe_music(b: &Binaries, path: &Path) -> Result<MusicFile, String> {
     let duration = stream["duration"]
         .as_str()
         .and_then(|value| value.parse::<f64>().ok())
-        .or_else(|| json["format"]["duration"].as_str().and_then(|value| value.parse().ok()))
+        .or_else(|| {
+            json["format"]["duration"]
+                .as_str()
+                .and_then(|value| value.parse().ok())
+        })
         .filter(|value| value.is_finite() && *value > 0.)
         .ok_or("Could not detect audio duration")?;
     let name = path

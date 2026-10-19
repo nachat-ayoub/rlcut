@@ -14,9 +14,18 @@ pub struct Settings {
     pub default_preset: String,
     #[serde(default = "default_wait_for_preview")]
     pub wait_for_preview: bool,
+    #[serde(default, skip_serializing)]
+    pub boost_intro: bool,
+    #[serde(default)]
+    pub music_fade_out: bool,
+    #[serde(default = "default_music_fade_duration")]
+    pub music_fade_duration: f64,
 }
 fn default_wait_for_preview() -> bool {
     true
+}
+fn default_music_fade_duration() -> f64 {
+    0.5
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -26,6 +35,9 @@ impl Default for Settings {
             output_folder: String::new(),
             default_preset: "classic".into(),
             wait_for_preview: true,
+            boost_intro: false,
+            music_fade_out: false,
+            music_fade_duration: default_music_fade_duration(),
         }
     }
 }
@@ -38,6 +50,8 @@ pub struct Store {
     pub presets: Vec<Preset>,
     pub settings: Settings,
     pub recent_files: Vec<String>,
+    #[serde(default)]
+    pub projects: Vec<serde_json::Value>,
 }
 impl Default for Store {
     fn default() -> Self {
@@ -48,6 +62,7 @@ impl Default for Store {
             presets: Vec::new(),
             settings: Settings::default(),
             recent_files: Vec::new(),
+            projects: Vec::new(),
         }
     }
 }
@@ -56,8 +71,15 @@ impl Store {
         if self.version != 1 {
             return Err("Unsupported settings version".into());
         }
-        if self.presets.len() > 200 || self.recent_files.len() > 12 {
+        if self.presets.len() > 200 || self.recent_files.len() > 12 || self.projects.len() > 100 {
             return Err("Too many presets or recent files".into());
+        }
+        if self
+            .projects
+            .iter()
+            .any(|project| serde_json::to_vec(project).map_or(true, |data| data.len() > 2_000_000))
+        {
+            return Err("A saved project is too large".into());
         }
         let mut ids = std::collections::HashSet::new();
         ids.insert("classic".to_string());
@@ -77,6 +99,11 @@ impl Store {
             filename: String::new(),
         }
         .resolution()?;
+        if !self.settings.music_fade_duration.is_finite()
+            || !(0.1..=10.).contains(&self.settings.music_fade_duration)
+        {
+            return Err("Music fade duration must be between 0.1 and 10 seconds".into());
+        }
         Ok(())
     }
 }

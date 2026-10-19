@@ -27,8 +27,11 @@ pub fn run() {
             commands::pick_video,
             commands::pick_music,
             commands::pick_folder,
+            commands::list_system_fonts,
+            commands::save_google_font,
             commands::import_video,
             commands::create_proxy,
+            commands::create_timeline_proxy,
             commands::preparation_progress,
             commands::cancel_preparation,
             commands::playback_open,
@@ -41,7 +44,9 @@ pub fn run() {
             commands::cancel_export,
             commands::open_export,
             commands::import_preset,
-            commands::export_preset
+            commands::export_preset,
+            commands::import_project,
+            commands::export_project
         ])
         .build(tauri::generate_context!())
         .expect("Unable to build rlcut")
