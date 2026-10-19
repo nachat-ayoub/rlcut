@@ -19,3 +19,5 @@ Run `python3 scripts/prepare-ai.py` once, then restart the app. It downloads the
 `bash scripts/prepare-appimage.sh` stages AI along with FFmpeg/GStreamer. The Linux release workflow builds on Ubuntu 22.04, publishes the AppImage, a FUSE-independent single-file launcher and SHA256SUMS as GitHub Release assets. Create a new `v*` tag after the workflow is on the default branch, or dispatch **Linux AppImage release** with an existing tag. No tests are executed by this release workflow.
 
 Upstream: https://github.com/nihui/rife-ncnn-vulkan · RIFE model: https://github.com/hzwer/Practical-RIFE . Release archive: 20221029; model: rife-v4.6. MIT license is included in the AI directory. See THIRD_PARTY_NOTICES.md for media dependencies.
+
+If publication fails after a successful build, **Publish existing Linux build** can reuse the artifact without recompiling. Supply the original run ID and matching version tag. It verifies the artifact commit against the tag and checks SHA256SUMS before uploading the files. A `release-publish-vX.Y.Z-RUNID` branch creation is an equivalent automation trigger; it does not run tests or build application code.
