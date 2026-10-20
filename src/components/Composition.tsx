@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent, type RefObject } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
 import type { Layer, Preset, Preview, Video, Segment, MusicTrack, TextOverlay } from '../types';
 import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
-import { Compositor } from '../lib/compositor';
+import { Compositor, type CompositionCanvas } from '../lib/compositor';
 import { corners, snapAxis, type Corner } from '../lib/geometry';
 import { ease } from '../lib/easing';
 import { sourceToEdited } from '../lib/timeline';
@@ -17,9 +17,24 @@ type Gesture = {
 };
 type PanGesture = { pointer: number; x: number; y: number; originX: number; originY: number };
 type TextGesture = { pointer: number; x: number; y: number; value: TextOverlay };
-export function Composition({ video, sourceVersion = 0, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+function PreviewPerformance({ canvas, playing }: { canvas: RefObject<HTMLCanvasElement | null>; playing: boolean }) {
+  const [sample, setSample] = useState<{ fps: number; backend: string } | null>(null);
+  useEffect(() => {
+    if (!playing) return;
+    let last = performance.now(), frames = (canvas.current as CompositionCanvas | null)?.compositionStats?.presented ?? 0;
+    const timer = window.setInterval(() => {
+      const stats = (canvas.current as CompositionCanvas | null)?.compositionStats, now = performance.now();
+      if (stats) { setSample({ fps: Math.round(Math.max(0, stats.presented - frames) * 1000 / (now - last)), backend: stats.backend.toUpperCase() }); frames = stats.presented; }
+      last = now;
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [canvas, playing]);
+  return <small className="preview-performance">{playing && sample ? `${sample.fps} FPS · ${sample.backend} preview` : 'Preview'}</small>;
+}
+export function Composition({ video, sourceVersion = 0, softwareRendering = false, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
+  softwareRendering?: boolean;
   playbackPath: string;
   proxyPreparing: boolean;
   preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
@@ -50,7 +65,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), panGesture = useRef<PanGesture | null>(null), textGesture = useRef<TextGesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
   const playbackTimestamp = useRef(timestamp);
-  const textFrame = useRef(-1);
+  const textFrame = useRef(-1), textSignature = useRef('');
   const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -59,8 +74,8 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   const [visualTime, setVisualTime] = useState(() => sourceToEdited(segments, timestamp));
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments });
-  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments }; });
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, texts });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, texts }; });
   const [waiting, setWaiting] = useState(false);
   const draw = useRef<() => void>(() => { });
   const snapshot = useRef<() => void>(() => { });
@@ -68,7 +83,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     const target = output.current;
     if (!target || !playbackPath) return;
     let compositor: Compositor;
-    try { compositor = new Compositor(target, forceCPU); }
+    try { compositor = new Compositor(target, forceCPU || softwareRendering); }
     catch { setForceCPU(true); return; }
     renderer.current = compositor;
     const lost = (event: Event) => { event.preventDefault(); setForceCPU(true); };
@@ -97,18 +112,32 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
     const observer = new ResizeObserver(() => draw.current()); observer.observe(target);
     draw.current();
     return () => { observer.disconnect(); target.removeEventListener('webglcontextlost', lost); target.removeEventListener('compositionfallback', lost); compositor.dispose(); renderer.current = null; };
-  }, [playbackPath, forceCPU, sourceVersion]);
+  }, [playbackPath, forceCPU, softwareRendering, sourceVersion]);
   useEffect(() => {
     if (!playbackPath || !video || !segments.length) { setMediaReady(false); setWaiting(false); return; }
     setMediaReady(false); setWaiting(true); setPlaybackFailed(false);
     let disposed = false;
     const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
-      frame: (_source, time) => { if (disposed) return; playbackTimestamp.current = time; const edited = sourceToEdited(callbacks.current.segments, time); if (Math.abs(edited - textFrame.current) >= 1 / 30) { textFrame.current = edited; setVisualTime(edited); } setMediaReady(true); draw.current(); snapshot.current(); },
+      frame: (_source, time) => {
+        if (disposed) return;
+        playbackTimestamp.current = time;
+        const current = callbacks.current, edited = sourceToEdited(current.segments, time);
+        // Static text does not need 30 React renders/sec. Update on visibility
+        // boundaries and while fades animate; decoded gameplay stays frame-paced.
+        const active = current.texts.filter(text => edited >= text.start && edited <= text.end);
+        const signature = active.map(text => text.id).join(',');
+        const fading = active.some(text => (text.fadeIn && edited < text.start + text.fadeIn) || (text.fadeOut && edited > text.end - text.fadeOut));
+        if (!current.playing || signature !== textSignature.current || (fading && Math.abs(edited - textFrame.current) >= 1 / 30)) {
+          textFrame.current = edited; textSignature.current = signature; setVisualTime(edited);
+        }
+        setMediaReady(true); draw.current(); snapshot.current();
+      },
+      cost: value => { if (callbacks.current.playing) renderer.current?.feedback(value); },
       time: value => { if (!disposed) { playbackTimestamp.current = value; callbacks.current.onTimestamp(value); } },
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); setPlaybackFailed(true); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
-    });
+    }, video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 480 : 640);
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
@@ -223,7 +252,8 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
-        <canvas key={forceCPU ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} />
+        <PreviewPerformance canvas={output} playing={playing} />
+        <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} />
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
           const current = visualTime, local = current - text.start, remaining = text.end - current;
           const fade = Math.min(1, text.fadeIn ? local / text.fadeIn : 1, text.fadeOut ? remaining / text.fadeOut : 1);

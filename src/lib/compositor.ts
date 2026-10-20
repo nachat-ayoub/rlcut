@@ -57,9 +57,32 @@ class CPUCompositor {
   private ctx: CanvasRenderingContext2D;
   private background = document.createElement('canvas');
   private hud = document.createElement('canvas');
+  private hudMask = document.createElement('canvas');
+  private maskKey = '';
+  private frameInput: CompositionSource | null = null;
+  private frameColor = -1;
+  private frameBefore = false;
   private frame = document.createElement('canvas');
   private scratch = new Uint8ClampedArray(0);
   private frameContext: CanvasRenderingContext2D;
+  private corrected = new Uint8ClampedArray(0);
+  private colorAmount = -1;
+  private colorLut = new Float32Array(256);
+  private backgroundAt = -Infinity;
+  private backgroundKey = '';
+  private playbackWidth = 360;
+  private cost = 0;
+  private samples = 0;
+  private lastTune = 0;
+  feedback(ms: number) {
+    this.cost = this.samples++ ? this.cost * .9 + ms * .1 : ms;
+    const now = performance.now();
+    if (this.samples < 15 || now - this.lastTune < 1500) return;
+    const widths = [224, 256, 288, 320, 360];
+    const index = widths.indexOf(this.playbackWidth);
+    if (this.cost > 18 && index > 0) { this.playbackWidth = widths[index - 1]; this.lastTune = now; }
+    else if (this.cost < 10 && index < widths.length - 1) { this.playbackWidth = widths[index + 1]; this.lastTune = now; }
+  }
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('The editor could not create its composition canvas.');
@@ -67,27 +90,37 @@ class CPUCompositor {
     this.frameContext = this.frame.getContext('2d', { alpha: false })!;
   }
   draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
-    const width = playing ? 360 : Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
+    const width = playing ? this.playbackWidth : Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
     const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
     if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
     // Capture once: all layers see precisely the same decoded frame, and
     // WebKit does not need to download the video texture three separate times.
     if (this.frame.width !== sourceWidth || this.frame.height !== sourceHeight) { this.frame.width = sourceWidth; this.frame.height = sourceHeight; }
-    if ('pixels' in source) {
-      const pixels = colorFix > .0001 ? new Uint8ClampedArray(source.pixels) : new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
-      if (colorFix > .0001 && !before) {
-        const contrast = 1 + .32 * colorFix, saturation = 1 + .28 * colorFix, gamma = 1 + .20 * colorFix, brightness = -.018 * colorFix;
-        for (let i = 0; i < pixels.length; i += 4) {
-          let r = Math.pow(pixels[i] / 255, gamma), g = Math.pow(pixels[i + 1] / 255, gamma), b = Math.pow(pixels[i + 2] / 255, gamma);
-          r = (r - .5) * contrast + .5; g = (g - .5) * contrast + .5; b = (b - .5) * contrast + .5;
-          const luma = r * .2126 + g * .7152 + b * .0722;
-          pixels[i] = (luma + (r - luma) * saturation + brightness) * 255;
-          pixels[i + 1] = (luma + (g - luma) * saturation + brightness) * 255;
-          pixels[i + 2] = (luma + (b - luma) * saturation + brightness) * 255;
+    if (!('pixels' in source && 'sequence' in source) || source !== this.frameInput || colorFix !== this.frameColor || before !== this.frameBefore) {
+      this.frameInput = source; this.frameColor = colorFix; this.frameBefore = before;
+      if ('pixels' in source) {
+        const correcting = colorFix > .0001 && !before;
+        if (correcting && this.corrected.length !== source.pixels.length) this.corrected = new Uint8ClampedArray(source.pixels.length);
+        const pixels = correcting ? this.corrected : new Uint8ClampedArray(source.pixels.buffer, source.pixels.byteOffset, source.pixels.byteLength);
+        if (correcting) pixels.set(source.pixels);
+        if (colorFix > .0001 && !before) {
+          const contrast = 1 + .32 * colorFix, saturation = 1 + .28 * colorFix, gamma = 1 + .20 * colorFix, brightness = -.018 * colorFix;
+          if (this.colorAmount !== colorFix) {
+            for (let i = 0; i < 256; i++) this.colorLut[i] = (Math.pow(i / 255, gamma) - .5) * contrast + .5;
+            this.colorAmount = colorFix;
+          }
+          const lut = this.colorLut;
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = lut[pixels[i]], g = lut[pixels[i + 1]], b = lut[pixels[i + 2]];
+            const luma = r * .2126 + g * .7152 + b * .0722;
+            pixels[i] = (luma + (r - luma) * saturation + brightness) * 255;
+            pixels[i + 1] = (luma + (g - luma) * saturation + brightness) * 255;
+            pixels[i + 2] = (luma + (b - luma) * saturation + brightness) * 255;
+          }
         }
-      }
-      this.frameContext.putImageData(new ImageData(pixels, sourceWidth, sourceHeight), 0, 0);
-    } else this.frameContext.drawImage(source, 0, 0);
+        this.frameContext.putImageData(new ImageData(pixels, sourceWidth, sourceHeight), 0, 0);
+      } else this.frameContext.drawImage(source, 0, 0);
+    }
     source = this.frame;
     const ctx = this.ctx;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = playing ? 'low' : 'high';
@@ -95,23 +128,31 @@ class CPUCompositor {
     const plan = scene(video, preset, width, height), bg = plan.background;
     // Keep enough source detail for a smooth Gaussian-like falloff instead of
     // the blocky low-resolution blur used by the earlier preview path.
-    const ratio = preset.background.blur > 0 ? Math.min(1, (playing ? 180 : 240) / width) : 1;
+    const ratio = preset.background.blur > 0 ? Math.min(1, (playing ? 96 : 240) / width) : 1;
     const bw = Math.max(2, Math.round(width * ratio)), bh = Math.max(2, Math.round(height * ratio));
-    if (this.background.width !== bw || this.background.height !== bh) { this.background.width = bw; this.background.height = bh; }
-    const back = this.background.getContext('2d', { willReadFrequently: true })!;
-    back.drawImage(source, bg.x / bg.width * sourceWidth, bg.y / bg.height * sourceHeight, width / bg.width * sourceWidth, height / bg.height * sourceHeight, 0, 0, bw, bh);
-    if (preset.background.blur > 0 || preset.background.brightness !== 0) {
-      const image = back.getImageData(0, 0, bw, bh);
-      if (this.scratch.length !== image.data.length) this.scratch = new Uint8ClampedArray(image.data.length);
-      for (const radius of blurRadii(preset.background.blur * bw / 1080)) {
-        if (radius === 0) continue;
-        box(image.data, this.scratch, bw, bh, radius, true);
-        box(this.scratch, image.data, bw, bh, radius, false);
+    const backgroundKey = [bw, bh, bg.x, bg.y, bg.width, bg.height, preset.background.blur, preset.background.brightness, colorFix, before].join(':');
+    const now = performance.now();
+    // The heavily blurred background needs less spatial/temporal detail than
+    // gameplay. Keep foreground/HUD frame-paced and restore precision on pause.
+    if (!playing || preset.background.blur <= 0 || backgroundKey !== this.backgroundKey || now - this.backgroundAt >= 1000 / 30) {
+      this.backgroundKey = backgroundKey; this.backgroundAt = now;
+      if (this.background.width !== bw || this.background.height !== bh) { this.background.width = bw; this.background.height = bh; }
+      const back = this.background.getContext('2d', { willReadFrequently: true })!;
+      back.clearRect(0, 0, bw, bh);
+      back.drawImage(source, bg.x / bg.width * sourceWidth, bg.y / bg.height * sourceHeight, width / bg.width * sourceWidth, height / bg.height * sourceHeight, 0, 0, bw, bh);
+      if (preset.background.blur > 0 || preset.background.brightness !== 0) {
+        const image = back.getImageData(0, 0, bw, bh);
+        if (this.scratch.length !== image.data.length) this.scratch = new Uint8ClampedArray(image.data.length);
+        for (const radius of blurRadii(preset.background.blur * bw / 1080)) {
+          if (radius === 0) continue;
+          box(image.data, this.scratch, bw, bh, radius, true);
+          box(this.scratch, image.data, bw, bh, radius, false);
+        }
+        // FFmpeg eq adds brightness to limited-range luma before RGB conversion.
+        const offset = preset.background.brightness * 255 * 255 / 219;
+        for (let i = 0; i < image.data.length; i += 4) { image.data[i] += offset; image.data[i + 1] += offset; image.data[i + 2] += offset; }
+        back.putImageData(image, 0, 0);
       }
-      // FFmpeg eq adds brightness to limited-range luma before RGB conversion.
-      const offset = preset.background.brightness * 255 * 255 / 219;
-      for (let i = 0; i < image.data.length; i += 4) { image.data[i] += offset; image.data[i + 1] += offset; image.data[i + 2] += offset; }
-      back.putImageData(image, 0, 0);
     }
     ctx.drawImage(this.background, 0, 0, width, height);
     const gp = plan.gameplay;
@@ -123,21 +164,28 @@ class CPUCompositor {
     const hud = this.hud.getContext('2d')!;
     hud.clearRect(0, 0, b.width, b.height);
     hud.drawImage(source, crop.x / video.width * sourceWidth, crop.y / video.height * sourceHeight, crop.width / video.width * sourceWidth, crop.height / video.height * sourceHeight, 0, 0, b.width, b.height);
+    const maskKey = [b.width, b.height, preset.boost.shape, preset.boost.feather].join(':');
+    if (maskKey !== this.maskKey) {
+      this.maskKey = maskKey; this.hudMask.width = b.width; this.hudMask.height = b.height;
+      const mask = this.hudMask.getContext('2d')!;
+      mask.save();
+      const rx = preset.boost.shape === 'circle' ? Math.min(b.width, b.height) / 2 : b.width / 2;
+      const ry = preset.boost.shape === 'circle' ? rx : b.height / 2;
+      mask.translate(b.width / 2, b.height / 2); mask.scale(rx, ry);
+      if (preset.boost.feather > 0) {
+        const gradient = mask.createRadialGradient(0, 0, 1 - preset.boost.feather, 0, 0, 1);
+        gradient.addColorStop(0, '#fff'); gradient.addColorStop(1, '#ffffff00'); mask.fillStyle = gradient;
+        mask.fillRect(-b.width / rx, -b.height / ry, b.width * 2 / rx, b.height * 2 / ry);
+      } else { mask.beginPath(); mask.arc(0, 0, 1, 0, Math.PI * 2); mask.fillStyle = '#fff'; mask.fill(); }
+      mask.restore();
+    }
     hud.save(); hud.globalCompositeOperation = 'destination-in';
-    const rx = preset.boost.shape === 'circle' ? Math.min(b.width, b.height) / 2 : b.width / 2;
-    const ry = preset.boost.shape === 'circle' ? rx : b.height / 2;
-    hud.translate(b.width / 2, b.height / 2); hud.scale(rx, ry);
-    if (preset.boost.feather > 0) {
-      const gradient = hud.createRadialGradient(0, 0, 1 - preset.boost.feather, 0, 0, 1);
-      gradient.addColorStop(0, '#fff'); gradient.addColorStop(1, '#ffffff00'); hud.fillStyle = gradient;
-      hud.fillRect(-b.width / rx, -b.height / ry, b.width * 2 / rx, b.height * 2 / ry);
-    } else { hud.beginPath(); hud.arc(0, 0, 1, 0, Math.PI * 2); hud.fillStyle = '#fff'; hud.fill(); }
-    hud.restore();
+    hud.drawImage(this.hudMask, 0, 0); hud.restore();
     ctx.drawImage(this.hud, b.x, b.y);
   }
 }
 
-export type CompositionStats = { frames: number; costs: number[]; backend: 'gpu' | 'cpu' };
+export type CompositionStats = { frames: number; presented: number; costs: number[]; backend: 'gpu' | 'cpu' };
 export type CompositionCanvas = HTMLCanvasElement & { compositionStats?: CompositionStats };
 function hardwareGPU() {
   const probe = document.createElement('canvas'); probe.width = 1; probe.height = 1;
@@ -153,14 +201,21 @@ export class Compositor {
   private cpu: CPUCompositor | null = null;
   private stats: CompositionStats;
   private slowFrames = 0;
+  private lastDraw: { source: CompositionSource; preset: Preset; video: Pick<Video, 'width' | 'height'>; quality: number; before: boolean; playing: boolean; colorFix: number; width: number } | null = null;
+  get backend() { return this.stats.backend; }
+  feedback(ms: number) { this.cpu?.feedback(ms); }
   constructor(private canvas: HTMLCanvasElement, forceCPU = false, forceGPU = false) {
     const gl = forceCPU || (!forceGPU && !hardwareGPU()) ? null : canvas.getContext('webgl', { alpha: false, antialias: false, preserveDrawingBuffer: false });
     if (gl) this.gpu = new GPUCompositor(canvas, gl);
     else this.cpu = new CPUCompositor(canvas);
-    this.stats = { frames: 0, costs: [], backend: gl ? 'gpu' : 'cpu' };
+    this.stats = { frames: 0, presented: 0, costs: [], backend: gl ? 'gpu' : 'cpu' };
     (canvas as CompositionCanvas).compositionStats = this.stats;
   }
   draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
+    const previous = this.lastDraw, clientWidth = this.canvas.clientWidth;
+    if ('pixels' in source && 'sequence' in source && previous && previous.source === source && previous.preset === preset && previous.video === video && previous.quality === quality && previous.before === before && previous.playing === playing && previous.colorFix === colorFix && previous.width === clientWidth) return;
+    if (!previous || previous.source !== source) this.stats.presented++;
+    this.lastDraw = { source, preset, video, quality, before, playing, colorFix, width: clientWidth };
     const start = performance.now();
     if (this.gpu) {
       const width = Math.min(playing ? 540 : 720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));

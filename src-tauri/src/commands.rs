@@ -110,11 +110,13 @@ async fn blocking<T: Send + 'static>(
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Init {
+    version: String,
     store: Store,
     binaries: Binaries,
     storage_error: Option<String>,
     ai_available: bool,
     preview_audio: bool,
+    software_rendering: bool,
 }
 #[tauri::command]
 pub fn initialize(state: State<AppState>) -> Init {
@@ -123,11 +125,13 @@ pub fn initialize(state: State<AppState>) -> Init {
         Err(e) => (Store::default(), Some(e)),
     };
     Init {
+        version: env!("CARGO_PKG_VERSION").into(),
         store,
         binaries: state.binaries.clone(),
         storage_error: error,
         ai_available: crate::video::enhance::available(),
         preview_audio: std::env::var("RLCUT_PREVIEW_SILENT").as_deref() != Ok("1"),
+        software_rendering: std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref() == Ok("1"),
     }
 }
 #[tauri::command]
@@ -669,6 +673,7 @@ pub async fn playback_open(
     path: String,
     time: f64,
     segments: Vec<Segment>,
+    max_edge: Option<u32>,
 ) -> Result<(), String> {
     let cache = state
         .cache
@@ -693,7 +698,10 @@ pub async fn playback_open(
         // A 640 px RGBA source is sharp enough for the interactive preview
         // while keeping 60 FPS IPC payloads under 1 MB for 16:9 recordings.
         // Export continues to use the original recording at full resolution.
-        let scale = (640. / metadata.width.max(metadata.height) as f64).min(1.);
+        // Software composition needs fewer bytes per frame; existing clients
+        // retain the 640px default. No prepared files or exports are resized.
+        let max_edge = max_edge.unwrap_or(640).clamp(320, 640);
+        let scale = (max_edge as f64 / metadata.width.max(metadata.height) as f64).min(1.);
         let w = ((metadata.width as f64 * scale / 2.).round() as u32 * 2).max(2);
         let h = ((metadata.height as f64 * scale / 2.).round() as u32 * 2).max(2);
         let player =

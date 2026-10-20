@@ -7,6 +7,7 @@ type Callbacks = {
   waiting: (waiting: boolean) => void;
   ended: () => void;
   error: (error: unknown) => void;
+  cost?: (milliseconds: number) => void;
 };
 export type NativeFrame = { width: number; height: number; pixels: Uint8Array<ArrayBuffer>; sequence: number };
 // A pull transport provides backpressure: at most one binary frame request is
@@ -18,15 +19,18 @@ export class NativePlayback {
   frame: NativeFrame | null = null;
   private session = ++nextSession;
   private disposed = false;
+  private polling = false;
   private timer = 0;
   private sequence = 0;
   private commands: Promise<void>;
   private latestTime = 0;
   private waiting = true;
   private waitingSince = performance.now();
-  constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks) {
+  private desiredPlaying = false;
+  private nativePlaying = false;
+  constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks, private fps = 60, maxEdge = 640) {
     this.latestTime = time;
-    this.commands = invoke<void>('playback_open', { session: this.session, path, time, segments });
+    this.commands = invoke<void>('playback_open', { session: this.session, path, time, segments, maxEdge });
     void this.commands.then(() => { if (!this.disposed) void this.poll(); }).catch(error => this.fail(error));
   }
   private fail(error: unknown) {
@@ -34,14 +38,17 @@ export class NativePlayback {
     this.callbacks.error(error); this.dispose();
   }
   private async poll() {
-    if (this.disposed) return;
+    if (this.disposed || this.polling) return;
+    this.polling = true;
     const started = performance.now();
+    let changed = false;
     try {
       const response = await invoke<ArrayBuffer | number[]>('playback_frame', { session: this.session, last: this.sequence });
       if (this.disposed) return;
       const buffer = response instanceof ArrayBuffer ? response : Uint8Array.from(response).buffer;
       if (buffer.byteLength >= 32) {
         const header = new DataView(buffer), width = header.getUint32(0, true), height = header.getUint32(4, true), sequence = header.getUint32(8, true), flags = header.getUint32(12, true);
+        this.nativePlaying = Boolean(flags & 1);
         const time = header.getFloat64(16, true);
         const waiting = !(flags & 2);
         if (!waiting) this.waitingSince = performance.now();
@@ -54,19 +61,30 @@ export class NativePlayback {
           this.sequence = sequence;
           this.frame = { width, height, sequence, pixels: new Uint8Array(buffer, 32) };
           this.callbacks.frame(this.frame, time);
+          changed = true;
+          this.callbacks.cost?.(performance.now() - started);
         }
         if (flags & 4) this.callbacks.ended();
       }
-    } catch (error) { this.fail(error); return; }
-    // Poll above the source cadence so a request that lands just before a
-    // decoded frame does not halve visible 60 FPS playback. Unchanged replies
-    // contain only the 32-byte header; image payloads remain frame-bounded.
-    if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), Math.max(0, 1000 / 120 - (performance.now() - started)));
+    } catch (error) { this.polling = false; this.fail(error); return; }
+    this.polling = false;
+    // After a fresh frame, wait almost one source interval. If that request
+    // lands just before the next frame, retry quickly instead of halving FPS.
+    // Paused, ready previews do not need 120 header-only IPC requests a second.
+    const active = this.desiredPlaying || this.nativePlaying;
+    const delay = active ? changed ? Math.max(0, 1000 / this.fps - 3 - (performance.now() - started)) : 2 : this.waiting ? 8 : 80;
+    if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), delay);
   }
   control(values: { playing?: boolean; time?: number; segments?: Segment[]; music?: MusicTrack }) {
     if (this.disposed) return;
+    if (values.playing !== undefined) this.desiredPlaying = values.playing;
     this.commands = this.commands.then(async () => {
-      if (!this.disposed) await invoke<void>('playback_control', { session: this.session, ...values });
+      if (!this.disposed) {
+        await invoke<void>('playback_control', { session: this.session, ...values });
+        // Wake a backed-off paused poll immediately for play/seek/edit commands.
+        clearTimeout(this.timer);
+        if (!this.disposed && !this.polling) this.timer = window.setTimeout(() => void this.poll(), 0);
+      }
     });
     void this.commands.catch(error => this.fail(error));
   }

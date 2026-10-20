@@ -52,6 +52,18 @@ RLCUT_PREVIEW_SILENT=1 bash scripts/run.sh dev
 
 Decoder waits now time out after 15 seconds and show **Retry playback** rather than spinning forever. Report the visible error if retry fails. Clear the preview cache in Settings to rebuild a proxy. Restart the launcher after pulling these changes; Docker audio mounts are established at launch.
 
+### Software graphics and preview FPS
+
+On Linux, rlcut now selects software compatibility automatically when no readable `/dev/dri/renderD*` node is available. This sets the software GL, WebKit compositing and DMA-BUF workarounds before GTK/WebKit starts. You can force it explicitly with one variable:
+
+```sh
+RLCUT_SOFTWARE_RENDERING=1 ./rlcut-Linux-x86_64.AppImage
+```
+
+`RLCUT_SOFTWARE_RENDERING=0` disables automatic selection for troubleshooting; explicitly supplied graphics environment variables remain respected. Software mode uses a 480px native frame source (rather than 640px), scales before RGBA conversion, reuses a native frame buffer and skips idle paused decoding work. CPU composition adapts its playing canvas between 224px and 360px wide based on observed frame work; pausing restores the larger composition canvas. The blurred background uses a smaller surface and refreshes up to 30 Hz, while gameplay and HUD continue at the available frame cadence. Color correction uses a lookup table, HUD masks are cached, and static text avoids frame-driven React renders. Source-timed polling backs off while paused and retries quickly when a playing frame is not yet ready.
+
+The preview's **FPS · CPU/GPU** badge measures newly composed frames once per second; the sidebar shows the actual app version. This is user-visible instrumentation, not a claim of measured performance on the 42 PC. The timeline cursor follows the native position independently of the slower general React updates; edit actions read the current position. Preview tradeoffs do not change export resolution, FPS, effects or AI processing.
+
 ## Your Ubuntu laptop (native, no Docker)
 
 Use Ubuntu 24.04 or later. Install the native prerequisites once:
