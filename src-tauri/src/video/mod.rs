@@ -13,3 +13,6 @@ pub mod preview;
 
 #[cfg(feature = "desktop")]
 pub mod player;
+
+#[cfg(feature = "serialization")]
+pub mod enhance;

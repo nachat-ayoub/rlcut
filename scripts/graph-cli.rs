@@ -27,6 +27,8 @@ fn main() {
         p.boost.feather = 0.05;
     }
     let o = model::ExportOptions {
+        ai_enhance: false,
+            ai_upscale: false,
         quality,
         fps,
         folder: String::new(),

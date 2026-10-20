@@ -1,0 +1,76 @@
+name: Publish existing Linux build
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID containing the rlcut-Linux-x86_64 artifact'
+        required: true
+        type: string
+      tag:
+        description: 'Existing version tag matching the artifact commit'
+        required: true
+        type: string
+  create:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-publish-'))
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Resolve requested build
+        id: source
+        env:
+          INPUT_RUN: ${{ github.event.inputs.run_id }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          SOURCE_REF: ${{ github.ref_name }}
+        run: |
+          if [[ -n "$INPUT_RUN" ]]; then
+            run_id="$INPUT_RUN"
+            tag="$INPUT_TAG"
+          else
+            source="${SOURCE_REF#release-publish-}"
+            run_id="${source##*-}"
+            tag="${source%-*}"
+          fi
+          [[ "$run_id" =~ ^[0-9]+$ && "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'run_id=%s\ntag=%s\n' "$run_id" "$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.tag }}
+      - name: Verify build belongs to the selected tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.source.outputs.run_id }}
+        run: |
+          source_commit="$(gh run view "$RUN_ID" --json headSha --jq .headSha)"
+          test "$source_commit" = "$(git rev-parse HEAD)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: rlcut-Linux-x86_64
+          path: dist
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify artifact integrity
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
+      - name: Publish existing AppImage and launcher
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+        run: |
+          cat > /tmp/release-notes.md <<'NOTES'
+          Linux x86_64 AppImage with optional offline RIFE AI smoothing in Export.
+
+          Download `rlcut-Linux-x86_64.AppImage`, make it executable, and run it. Without FUSE, use `--appimage-extract-and-run` or download the single-file `rlcut-Linux-x86_64` launcher.
+
+          AI export starts disabled. CPU safe mode uses one core, low priority and a 1.5 GiB RIFE memory cap. 1080p is supported with overlapping CPU tiles. Optional AI upscaling doubles output dimensions, up to 2160 × 3840. Higher resolutions can take substantially longer. Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage. Preview is unchanged. AI may introduce motion artifacts. It adds interpolation and gentle sharpening; Topaz’s proprietary restoration is not included. No GPU, account, Python installation or model download is needed on your laptop.
+
+          Built without running tests, as requested. Frontend/native builds passed locally. Verify downloads with SHA256SUMS.
+          NOTES
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --verify-tag --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
+          fi

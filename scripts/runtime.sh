@@ -56,8 +56,9 @@ case "$action" in
     if [[ "$(uname -s)" == Linux ]]; then
       bash scripts/prepare-appimage.sh
       npm run desktop:build:native -- "$@" --config src-tauri/tauri.appimage.conf.json
-      if [[ -f src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage ]]; then
-        cp src-tauri/target/release/bundle/appimage/rlcut_0.1.0_amd64.AppImage dist/rlcut.AppImage
+      appimage="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name 'rlcut_*_amd64.AppImage' -type f -print -quit)"
+      if [[ -n "$appimage" ]]; then
+        cp "$appimage" dist/rlcut.AppImage
         chmod 755 dist/rlcut.AppImage
         rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut
         chmod 755 dist/rlcut

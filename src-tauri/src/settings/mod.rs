@@ -93,6 +93,8 @@ impl Store {
             return Err("Selected preset does not exist".into());
         }
         ExportOptions {
+            ai_enhance: false,
+            ai_upscale: false,
             quality: self.settings.quality,
             fps: self.settings.fps,
             folder: String::new(),

@@ -245,6 +245,10 @@ impl MusicTrack {
     serde(rename_all = "camelCase", deny_unknown_fields)
 )]
 pub struct ExportOptions {
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub ai_enhance: bool,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub ai_upscale: bool,
     pub quality: u32,
     pub fps: u32,
     pub folder: String,
@@ -398,7 +402,10 @@ impl Segment {
 }
 impl ExportOptions {
     pub fn resolution(&self) -> Result<(u32, u32), String> {
-        if self.fps != 30 && self.fps != 60 {
+        if self.ai_enhance && (!matches!(self.fps, 60 | 120) || self.quality > 1080) {
+            return Err("AI smoothing requires 480p, 720p or 1080p and 60 or 120 FPS".into());
+        }
+        if self.fps != 30 && self.fps != 60 && !(self.ai_enhance && self.fps == 120) {
             return Err("Export FPS must be 30 or 60".into());
         }
         match self.quality {

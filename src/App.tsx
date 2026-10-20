@@ -69,6 +69,8 @@ export default function App() {
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [errorCopied, setErrorCopied] = useState(false), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-edit.mp4');
+  const [aiEnhance, setAiEnhance] = useState(false);
+  const [aiUpscale, setAiUpscale] = useState(false);
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
@@ -332,7 +334,8 @@ export default function App() {
       }
       const trackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
       const exportTexts = [...texts].sort((a, b) => (trackOrder.get(b.trackId) ?? -1) - (trackOrder.get(a.trackId) ?? -1));
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, folder, filename: outputName } };
+      if (aiEnhance || aiUpscale) setPlaying(false);
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -349,7 +352,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, aiEnhance, aiUpscale, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -414,7 +417,7 @@ export default function App() {
     importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setTexts([]); setTextTracks([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
   }
   function projectSnapshot(id: string, name: string, createdAt: number): Project {
-    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps, outputFolder, outputName };
+    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps: fps === 120 ? 60 : fps, outputFolder, outputName };
   }
   function saveCurrentProject(showNotice = true) {
     if (!video || !videoSources.length) return;
@@ -447,7 +450,7 @@ export default function App() {
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
       const sourceTexts = project.texts ?? [], restoredTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setQuality(project.quality); setFps(project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }
@@ -712,9 +715,20 @@ export default function App() {
           <div className="two-controls">
             <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
             </label>
-            <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={[{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
+            <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
+          <div className="setting-toggle compact">
+            <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
+            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
+          </div>
+          <div className="setting-toggle compact">
+            <div><strong>AI upscale ×2</strong><small>Optional · compact Real-ESRGAN video model</small></div>
+            <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
+          </div>
+          {aiUpscale && <p className="enhancement-note">Final output: {quality * 2} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * 2}. Upscales the selected export resolution without reducing it first. This compact model is trained for animation; it may alter game textures or text.</p>}
+          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. Overlapping tiles keep AI working memory bounded; one CPU core, low priority and a 1.5 GiB per-process limit remain active. Higher resolutions and upscaling take substantially longer. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
+          {!init?.aiAvailable && <small className="enhancement-note">AI smoothing is included in the Linux AI AppImage. Standard export works without it.</small>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
           <label className="field">Destination folder<div className="folder-picker">
@@ -730,12 +744,13 @@ export default function App() {
         {progress && <div className={`export-progress ${progress.phase}`}>
           <div className="row">
             <strong>
-              {progress.phase === 'running' ? `Exporting · ${progress.percent.toFixed(0)}%` : progress.phase === 'complete' ? 'Your clip is ready' : progress.phase === 'canceled' ? 'Export canceled' : 'Export failed'}
+              {progress.phase === 'running' ? `${progress.stage || 'Exporting'} · ${progress.percent.toFixed(0)}%` : progress.phase === 'complete' ? 'Your clip is ready' : progress.phase === 'canceled' ? 'Export canceled' : 'Export failed'}
             </strong>
             {progress.phase === 'running' ? <button aria-label="Cancel export" onClick={() => void invoke('cancel_export').catch(report)}>
               <X size={16} />
             </button> : <CheckCircle2 size={16} />}
           </div>
+          {progress.error && <p role="alert" className="enhancement-note">{progress.error}</p>}
           <progress max="100" value={progress.percent} />
           <small>
             {duration(progress.elapsed)} elapsed{progress.remaining != null ? ` · ${duration(progress.remaining)} remaining` : ''}
@@ -873,7 +888,7 @@ export default function App() {
             }}>
               <Trash2 size={15} />Clear preview cache</button>
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
-            <button className="primary" onClick={() => { setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
+            <button className="primary" onClick={() => { setAiEnhance(false); setAiUpscale(false); setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
           </div>
           <p className="help-text">Keyboard and mouse controls are listed under View shortcuts.</p>
         </>}

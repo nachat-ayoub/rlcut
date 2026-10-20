@@ -170,3 +170,9 @@ or restart playback. Import shows measured preparation progress and supports
 cancellation. See [editor architecture](docs/EDITOR_ARCHITECTURE.md).
 Windows/macOS native engine packaging is pending; the earlier installer instructions
 only describe the packaging infrastructure, not a working native preview there.
+
+## Optional AI smooth export (Linux)
+
+The Linux AI AppImage includes offline RIFE frame interpolation. Enable **AI smooth export** in Export for CPU safe mode: one core, low priority, bounded AI memory, and streamed frames. 1080p is supported using overlapping CPU tiles. Optional AI upscaling doubles the selected output dimensions, including 1080p → 2160p. Higher resolutions take substantially longer. Select 60 FPS for 30 FPS recordings or 120 FPS for 60 FPS recordings. Preview remains unchanged. This adds neural interpolation and light sharpening, not Topaz restoration. See [AI export](docs/AI_EXPORT.md) for limits, artifacts and packaging.
+
+Download the Linux AppImage or FUSE-independent launcher from [GitHub Releases](https://github.com/nachat-ayoub/rlcut/releases). Version tags run the dedicated build-only Linux release workflow and attach downloadable files and checksums.

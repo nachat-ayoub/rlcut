@@ -1782,3 +1782,5 @@ progress::-moz-progress-bar {
 .timeline-segment.music-segment.selected { border-color:#bf8fea; background:#414365 }
 .playhead.snapped { background:#6fe2df; box-shadow:0 0 7px #6fe2df88 }
 .playhead.snapped>span { background:#6fe2df }
+
+.enhancement-note { font-size: 11px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }

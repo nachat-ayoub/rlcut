@@ -1,0 +1,108 @@
+name: Linux AppImage release
+on:
+  # Tag creation is separate from push CI, so a build-only release is possible
+  # even when a commit deliberately skips the repository's test workflow.
+  create:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag to build (for example v0.2.0)'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: linux-release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  appimage:
+    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v')) || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-build-'))
+    runs-on: ubuntu-24.04
+    container:
+      image: ubuntu:22.04
+    defaults:
+      run:
+        shell: bash
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: '2'
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - name: Clean Ubuntu 22.04 build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          # A clean container avoids preinstalled runner packages conflicting with GTK.
+          if ! apt-get update > /tmp/rlcut-apt.log 2>&1 || ! apt-get install -y --no-install-recommends ca-certificates git gh curl python3 file wget xz-utils unzip build-essential cmake libpng-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libvulkan1 libgstreamer1.0-dev gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good >> /tmp/rlcut-apt.log 2>&1; then
+            message="$(tail -c 2500 /tmp/rlcut-apt.log)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\n'/'%0A'}"
+            printf '::error::%s\n' "$message"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build Linux AppImage (no test execution)
+        run: |
+          exec > >(tee /tmp/rlcut-build.log) 2>&1
+          report_failure() {
+            status=$?
+            trap - ERR
+            message="$(tail -c 2500 /tmp/rlcut-build.log)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\n'/'%0A'}"
+            printf '::error::%s\n' "$message"
+            exit "$status"
+          }
+          trap report_failure ERR
+          bash scripts/prepare-appimage.sh
+          npm run desktop:build:native -- --bundles appimage --config src-tauri/tauri.appimage.conf.json
+          mkdir -p dist
+          mapfile -t images < <(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -type f)
+          test "${#images[@]}" -eq 1
+          cp "${images[0]}" dist/rlcut-Linux-x86_64.AppImage
+          cp dist/rlcut-Linux-x86_64.AppImage dist/rlcut.AppImage
+          rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut-Linux-x86_64
+          cd dist
+          sha256sum rlcut-Linux-x86_64.AppImage rlcut-Linux-x86_64 > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rlcut-Linux-x86_64
+          path: |
+            dist/rlcut-Linux-x86_64.AppImage
+            dist/rlcut-Linux-x86_64
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish downloadable GitHub release assets
+        if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          cat > /tmp/release-notes.md <<'NOTES'
+          Linux x86_64 AppImage with optional offline RIFE AI smoothing in Export.
+
+          Download `rlcut-Linux-x86_64.AppImage`, make it executable, and run it. If FUSE is unavailable, run with `--appimage-extract-and-run`, or use the single-file `rlcut-Linux-x86_64` launcher instead.
+
+          AI export is disabled by default. CPU safe mode uses one core, low priority and a 1.5 GiB RIFE memory cap. 1080p is supported with overlapping CPU tiles. Optional AI upscaling doubles output dimensions, up to 2160 × 3840. Higher resolutions can take substantially longer. Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage. Preview is unchanged. AI can produce motion artifacts and is not Topaz restoration. No GPU, account, model download or Python install is needed on the user's machine.
+
+          This release was built without running tests, as requested. Known repository test/lint failures are documented separately. Check SHA256SUMS after downloading.
+          NOTES
+          # Ubuntu 22.04 ships an older gh without --verify-tag. Verify with Git first.
+          git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
+          fi

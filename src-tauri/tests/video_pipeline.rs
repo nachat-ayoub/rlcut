@@ -70,15 +70,18 @@ fn real_import_preview_and_export_worker() {
     let cached = preview::render(&binaries, &video, &preset, 0.2, 480, &cache, &epoch, 1).unwrap();
     assert_eq!(frame.composed, cached.composed);
     let options = ExportOptions {
+        ai_enhance: false,
+        ai_upscale: false,
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),
         filename: "short.mp4".into(),
     };
-    let destination = export::destination(&video, &options).unwrap();
+    let destination = export::destination(&video, &options, false).unwrap();
     let job = Arc::new(export::Job::new(
         "integration".into(),
         destination.to_string_lossy().into_owned(),
+        false,
     ));
     export::run(binaries.clone(), video, preset, options, job.clone());
     let progress = job.snapshot().unwrap();

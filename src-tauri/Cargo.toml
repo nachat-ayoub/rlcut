@@ -1,6 +1,6 @@
 [package]
 name = "rlcut"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.85"
 
@@ -11,6 +11,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "rlcut"
 path = "src/main.rs"
+required-features = ["desktop"]
+
+[[example]]
+name = "player-fps"
+path = "examples/player-fps.rs"
 required-features = ["desktop"]
 
 [features]
