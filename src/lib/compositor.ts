@@ -93,9 +93,9 @@ class CPUCompositor {
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = playing ? 'low' : 'high';
     if (before) { ctx.drawImage(source, 0, 0, width, height); return; }
     const plan = scene(video, preset, width, height), bg = plan.background;
-    // A low-resolution blurred layer gives predictable performance on school
-    // GPUs and on software-rendered desktops, without Canvas.filter support.
-    const ratio = preset.background.blur > 0 ? Math.min(1, (playing ? 72 : 96) / width) : 1;
+    // Keep enough source detail for a smooth Gaussian-like falloff instead of
+    // the blocky low-resolution blur used by the earlier preview path.
+    const ratio = preset.background.blur > 0 ? Math.min(1, (playing ? 180 : 240) / width) : 1;
     const bw = Math.max(2, Math.round(width * ratio)), bh = Math.max(2, Math.round(height * ratio));
     if (this.background.width !== bw || this.background.height !== bh) { this.background.width = bw; this.background.height = bh; }
     const back = this.background.getContext('2d', { willReadFrequently: true })!;

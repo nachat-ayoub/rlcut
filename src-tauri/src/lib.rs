@@ -27,6 +27,7 @@ pub fn run() {
             commands::pick_video,
             commands::pick_music,
             commands::pick_folder,
+            commands::project_thumbnails,
             commands::list_system_fonts,
             commands::save_google_font,
             commands::import_video,

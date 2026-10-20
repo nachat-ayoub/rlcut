@@ -9,11 +9,15 @@ export function trimBounds(segments: Segment[], index: number, duration: number,
 }
 export function sourceToEdited(segments: Segment[], source: number) {
   let offset = 0;
+  let previous: { source: number; edited: number } | null = null;
+  let next: { source: number; edited: number } | null = null;
   for (const segment of segments) {
     if (source >= segment.start && source < segment.end) return offset + source - segment.start;
+    if (segment.end <= source && (!previous || segment.end > previous.source)) previous = { source: segment.end, edited: offset + segment.end - segment.start };
+    if (segment.start > source && (!next || segment.start < next.source)) next = { source: segment.start, edited: offset };
     offset += segment.end - segment.start;
   }
-  return source <= (segments[0]?.start ?? 0) ? 0 : offset;
+  return previous?.edited ?? next?.edited ?? 0;
 }
 export function editedToSource(segments: Segment[], value: number) {
   const edited = Math.max(0, Math.min(editedDuration(segments), value));

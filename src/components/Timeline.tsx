@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
-import type { MusicTrack, Segment, TextOverlay, TrackMarkers } from '../types';
+import type { MusicTrack, Segment, TextOverlay, TextTrack, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
 
@@ -22,7 +22,7 @@ const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5M13.5 3H11v12h2.5" /></svg>;
 const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3h8v7.25L9 15l-4-4.75z" /></svg>;
 
-export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, texts, selectedTextId, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, segments, music, markers, texts, textTracks, selectedTextId, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
@@ -30,6 +30,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   music: MusicTrack | null;
   markers: TrackMarkers;
   texts: TextOverlay[];
+  textTracks: TextTrack[];
   selectedTextId: string | null;
   playing: boolean;
   playbackReady: boolean;
@@ -42,7 +43,9 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   onTextSplit: (id: string, at: number) => void;
   onTextDelete: (id: string) => void;
   onTextSelect: (id: string) => void;
-  onAddText: () => void;
+  onAddText: (trackId: string) => void;
+  onAddTextTrack: () => void;
+  onDeleteTextTrack: (id: string) => void;
   onMarker: (track: Track, values: number[]) => void;
   onSelectionChange: (track: Track, id: string) => void;
   onUndo: () => void;
@@ -58,8 +61,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   const [volume, setVolume] = useState(1);
   const [volumeOpen, setVolumeOpen] = useState(false);
   const [textPreview, setTextPreview] = useState<TextOverlay | null>(null);
-  const textGesture = useRef<{ pointer: number; x: number; value: TextOverlay; edge: 'start' | 'end' | 'move' } | null>(null);
-  const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), volumePopover = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
+  const textGesture = useRef<{ pointer: number; x: number; y: number; value: TextOverlay; edge: 'start' | 'end' | 'move' } | null>(null);
+  const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), trackLabels = useRef<HTMLDivElement>(null), volumePopover = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
   const musicSegments = music?.segments ?? [], videoOffsets = offsetsOf(segments), musicOffsets = offsetsOf(musicSegments);
   let sourceCursor = 0;
   const sourceRanges = sourceDurations.map(length => { const start = sourceCursor; sourceCursor += length; return { start, end: sourceCursor }; });
@@ -285,7 +288,7 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
   });
   const renderMarkers = (track: Track) => visibleMarkersEdited(track).map((value, index) => <button key={`${track}-${index}`} className={`track-marker ${track} ${markerPreview?.track === track && markerPreview.index === index && markerPreview.snapped ? 'snapped' : ''}`} style={{ left: `${value * pixelsPerSecond}px` }} aria-label={`Drag ${track} marker`} title={`${track === 'video' ? 'Video' : 'Music'} marker · drag to move, Alt for no snapping`} onPointerDown={event => beginMarker(event, track, index, value)} onPointerMove={moveMarker} onPointerUp={finishMarker} onPointerCancel={() => { markerGesture.current = null; setMarkerPreview(null); }}><Diamond size={9} fill="currentColor" /></button>);
   const renderReorderGhost = (track: Track) => reorderPreview?.track === track ? <div className={`reorder-ghost ${track}`} style={{ left: `${reorderPreview.offset * pixelsPerSecond}px`, width: `${reorderPreview.width * pixelsPerSecond}px` }} /> : null;
-  const beginText = (event: PointerEvent<HTMLElement>, text: TextOverlay, edge: 'start' | 'end' | 'move') => { event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); onTextSelect(text.id); textGesture.current = { pointer: event.pointerId, x: event.clientX, value: text, edge }; setTextPreview(text); };
+  const beginText = (event: PointerEvent<HTMLElement>, text: TextOverlay, edge: 'start' | 'end' | 'move') => { event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId); onTextSelect(text.id); textGesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, value: text, edge }; setTextPreview(text); };
   const moveText = (event: PointerEvent<HTMLElement>) => {
     const state = textGesture.current; if (!state || state.pointer !== event.pointerId) return;
     const delta = (event.clientX - state.x) / pixelsPerSecond, total = editedDuration;
@@ -298,15 +301,20 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       const snapped = nearest(edge, unique([...snapPoints(), ...texts.filter(text => text.id !== state.value.id).flatMap(text => [text.start, text.end])]));
       if (snapped != null) { const shift = snapped - edge; if (state.edge === 'move') { next.start += shift; next.end += shift; } else next[state.edge] = snapped; }
     }
+    if (state.edge === 'move') {
+      const lane = document.elementsFromPoint(event.clientX, event.clientY).map(element => (element as HTMLElement).closest<HTMLElement>('[data-text-track]')).find(Boolean);
+      if (lane?.dataset.textTrack) next.trackId = lane.dataset.textTrack;
+    }
     setTextPreview(next);
   };
-  const finishText = (event: PointerEvent<HTMLElement>) => { const state = textGesture.current; if (state?.pointer !== event.pointerId) return; const next = textPreview; textGesture.current = null; setTextPreview(null); if (next && (Math.abs(next.start - state.value.start) > .001 || Math.abs(next.end - state.value.end) > .001)) onTextEdit(next); };
-  const renderTexts = () => texts.map(text => {
+  const finishText = (event: PointerEvent<HTMLElement>) => { const state = textGesture.current; if (state?.pointer !== event.pointerId) return; const next = textPreview; textGesture.current = null; setTextPreview(null); if (next && (Math.abs(next.start - state.value.start) > .001 || Math.abs(next.end - state.value.end) > .001 || next.trackId !== state.value.trackId)) onTextEdit(next); };
+  const renderTexts = (trackId: string) => texts.filter(text => text.trackId === trackId).map(text => {
     const shown = textPreview?.id === text.id ? textPreview : text;
-    return <div key={text.id} className={`timeline-segment text-segment ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${shown.start * pixelsPerSecond}px`, width: `${(shown.end - shown.start) * pixelsPerSecond}px` }} onPointerDown={event => beginText(event, text, 'move')} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={() => { textGesture.current = null; setTextPreview(null); }}>
+    return <div key={text.id} className={`timeline-segment text-segment ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${shown.start * pixelsPerSecond}px`, width: `${(shown.end - shown.start) * pixelsPerSecond}px` }} title="Drag horizontally to move in time or vertically to another text layer" onPointerDown={event => beginText(event, text, 'move')} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={() => { textGesture.current = null; setTextPreview(null); }}>
       <button className="trim-handle start" onPointerDown={event => beginText(event, text, 'start')} onPointerMove={moveText} onPointerUp={finishText} /><span className="clip-fill"><Type size={12} /><b>{shown.text || 'Text'}</b></span><button className="trim-handle end" onPointerDown={event => beginText(event, text, 'end')} onPointerMove={moveText} onPointerUp={finishText} />
     </div>;
   });
+  const textRows = textTracks.map(() => '39px').join(' '), contentHeight = 103 + textTracks.length * 39, editorHeight = Math.min(274, 118 + textTracks.length * 39);
   const addPosition = (track: Track) => durationOf(displayLanes[track]) * pixelsPerSecond + 9;
   return <section className="timeline" aria-label="Editor timeline" onWheel={wheelZoom}>
     <div className="transport">
@@ -314,8 +322,8 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <button onClick={onPlay} disabled={!duration || !playbackReady} title={playbackReady ? undefined : 'Preparing optimized preview…'} aria-label={playing ? 'Pause' : 'Play'}>{playing ? <Pause size={16} /> : <Play size={16} />}</button>
       <button onClick={() => seekEdited(editedTimestamp + 5)} disabled={!duration} title="Forward 5 seconds" aria-label="Forward 5 seconds"><SkipForward size={15} /></button>
       <span className="timecode">{time(editedTimestamp)} <i>/</i> {time(editedDuration)}</span><span className="timeline-divider" />
-      <button className="editor-tool" onClick={() => cut('split')} disabled={selectedText ? !canCutText : !canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('start')} disabled={selectedText ? !canCutText : !canCut} title="Trim start to playhead (Q)" aria-label="Trim selected clip start to playhead"><TrimStartIcon /></button>
+      <button className="editor-tool" onClick={() => cut('split')} disabled={selectedText ? !canCutText : !canCut} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={selectedText ? !canCutText : !canCut} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
       <button className="editor-tool" onClick={() => selectedText ? onTextDelete(selectedText.id) : selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selectedText && !selected} title="Delete selected clip (Delete)" aria-label="Delete selected clip"><Trash2 size={16} /></button>
       <button className={`editor-tool marker-action ${!selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
@@ -328,13 +336,13 @@ export function Timeline({ duration, sourceDurations, timestamp, segments, music
       <div className="volume-range"><input aria-label="Volume" type="range" min="0" max="2" step=".01" value={volume} style={{ '--range-fill': `${volume / 2 * 100}%` } as React.CSSProperties} onChange={event => { const raw = Number(event.target.value); volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .06 ? 1 : raw); }} onPointerUp={commitVolume} onKeyUp={commitVolume} onBlur={commitVolume} /><i /></div>
       <label className="volume-value"><input aria-label="Volume percent" type="number" min="0" max="200" step="1" value={Math.round(volume * 100)} onChange={event => { const raw = Math.max(0, Math.min(200, event.target.valueAsNumber || 0)) / 100; volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .02 ? 1 : raw); }} onKeyDown={event => { if (event.key === 'Enter') { commitVolume(); event.currentTarget.blur(); } }} onBlur={commitVolume} /><span>%</span></label>
     </div>}
-    <div className="timeline-editor">
-      <div className="track-labels" aria-hidden="true"><div className="ruler-corner" /><div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div><div className="track-label text"><Type size={14} /></div></div>
-      <div className="timeline-scroll" ref={scroll}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px` }}>
+    <div className="timeline-editor" style={{ height: `${editorHeight}px` }}>
+      <div className="track-labels" ref={trackLabels} style={{ gridTemplateRows: `22px ${textRows} 42px 39px 15px` }}><div className="ruler-corner"><button onClick={onAddTextTrack} title="Add text layer" aria-label="Add text layer"><Plus size={12} /><Type size={12} /></button></div>{textTracks.map(track => <div key={track.id} className="track-label text" title={track.name}><Type size={13} /><button onClick={() => onAddText(track.id)} title={`Add text to ${track.name}`} aria-label={`Add text to ${track.name}`}><Plus size={12} /></button><button onClick={() => onDeleteTextTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={11} /></button></div>)}<div className="track-label"><Film size={14} /></div><div className="track-label music"><Music2 size={14} /></div></div>
+      <div className="timeline-scroll" ref={scroll} onScroll={event => { if (trackLabels.current) trackLabels.current.scrollTop = event.currentTarget.scrollTop; }}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px`, height: `${contentHeight}px`, gridTemplateRows: `22px ${textRows} 42px 39px` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
+        {textTracks.map(track => <div key={track.id} className={`text-track ${textGesture.current && textPreview?.trackId === track.id && textGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-text-track={track.id}>{renderTexts(track.id)}<button className="track-add text" style={{ left: `${Math.max(0, ...texts.filter(text => text.trackId === track.id).map(text => text.end)) * pixelsPerSecond + 9}px` }} title={`Add text to ${track.name}`} aria-label={`Add text to ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={() => onAddText(track.id)}><Plus size={16} /></button></div>)}
         <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarkers('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
         <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarkers('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
-        <div className="text-track">{renderTexts()}<button className="track-add text" style={{ left: `${Math.max(0, ...texts.map(text => text.end)) * pixelsPerSecond + 9}px` }} title="Add text" aria-label="Add text" onPointerDown={event => event.stopPropagation()} onClick={onAddText}><Plus size={16} /></button></div>
         <i className={`playhead ${trimPreview?.snapped || markerPreview?.snapped ? 'snapped' : ''}`} style={{ left: `${editedTimestamp * pixelsPerSecond}px` }}><span /></i>
       </div></div>
     </div>

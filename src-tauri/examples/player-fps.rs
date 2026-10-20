@@ -20,6 +20,7 @@ fn main() {
             start: 0.,
             end: 60.,
             volume: 1.,
+            color_fix: 0.,
         }],
     )
     .expect("native player should open");
