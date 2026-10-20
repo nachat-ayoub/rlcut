@@ -47,7 +47,7 @@ Use Ubuntu 24.04 or later. Install the native prerequisites once:
 ```sh
 sudo apt update
 sudo apt install build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg python3 curl \
+  libssl-dev librsvg2-dev libayatana-appindicator3-dev libpng-dev cmake patchelf ffmpeg python3 curl \
   gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
 ```
 
@@ -77,6 +77,10 @@ bash scripts/run.sh dev
 The launcher runs `npm ci` when dependencies are missing or the lockfile changes.
 The Tauri CLI is a project dependency; a separate `cargo install tauri-cli` is
 unnecessary. Native mode uses your ordinary file picker and app-data directory.
+On Linux, the first dev launch also prepares the optional AI export runtime in
+`.runtime/ai`; later launches reuse it. This downloads the pinned RIFE archive
+and builds the local CPU helper, so the first launch can take a while. Set
+`RLCUT_SKIP_AI_SETUP=1` to start without preparing AI.
 
 ## Detection and overrides
 

@@ -17,7 +17,7 @@ The app pauses preview playback for AI exports. It renders a high-quality interm
 
 ## Development and packaging
 
-Install CMake, a C++17 compiler, pkg-config and libpng development headers, then run `python3 scripts/prepare-ai.py`. It stages checksum-pinned RIFE, builds a CPU-only static ncnn helper, and extracts only the required Real-ESRGAN x2 model from a checksum-pinned upstream archive. No model conversion, Python runtime, account, GPU driver or model download is needed on the user's laptop.
+Install CMake, a C++17 compiler, pkg-config and libpng development headers. On Linux, `bash scripts/run.sh dev` prepares the AI runtime automatically when it is missing; set `RLCUT_SKIP_AI_SETUP=1` to opt out. You can also run `python3 scripts/prepare-ai.py` directly. It stages checksum-pinned RIFE, builds a CPU-only static ncnn helper, and extracts only the required Real-ESRGAN x2 model from a checksum-pinned upstream archive. No model conversion, Python runtime, account, GPU driver or model download is needed on the user's laptop.
 
 The helper source is `native/ai-cpu.cpp`; its reproducible build is `scripts/prepare-ai-cpu.py`. CMake explicitly disables ncnn tests, tools, examples, benchmarks and Vulkan. The RIFE binary needs the bundled Vulkan loader, but GPU driver discovery is disabled and inference uses CPU (`-g -1`). `RLCUT_AI_DIR` can override the staged directory for development. All required helper/model files must exist before the AI toggles become available.
 
