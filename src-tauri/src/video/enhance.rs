@@ -5,10 +5,12 @@ use super::{
 };
 use crate::model::ExportOptions;
 use std::{
+    cell::{Cell, RefCell},
     fs,
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
+    rc::Rc,
     sync::{atomic::Ordering, Arc},
     thread,
     time::{Duration, Instant},
@@ -50,7 +52,9 @@ fn ai_threads() -> usize {
     std::env::var("RLCUT_AI_THREADS")
         .ok()
         .and_then(|value| value.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(2, |value| value.get()))
+        .unwrap_or_else(|| {
+            std::thread::available_parallelism().map_or(2, |value| (value.get() / 2).max(1))
+        })
         .clamp(1, 4)
 }
 
@@ -133,6 +137,11 @@ impl Drop for Scratch {
     }
 }
 fn canceled(job: &Job) -> Result<(), String> {
+    if job.started.elapsed() >= Duration::from_secs(45 * 60) {
+        return Err(
+            "Export reached its 45-minute safety deadline. No existing output was replaced.".into(),
+        );
+    }
     if job.cancel.load(Ordering::SeqCst) {
         Err("Export canceled".into())
     } else {
@@ -242,64 +251,173 @@ struct AiProgress {
     label: String,
 }
 impl AiProgress {
-    fn report(&self, job: &Job, export_start: Instant, done: u64, total: u64, weight: f64, detail: &str) {
-        if total == 0 { return; }
+    fn report(
+        &self,
+        job: &Job,
+        export_start: Instant,
+        done: u64,
+        total: u64,
+        weight: f64,
+        detail: &str,
+    ) {
+        if total == 0 {
+            return;
+        }
         let effective = (self.completed + done.min(total) as f64 * weight).min(self.total);
         let fraction = (effective / self.total.max(1.)).clamp(0., 1.);
         let ai_elapsed = self.started.elapsed().as_secs_f64();
         if let Ok(mut progress) = job.progress.lock() {
-            progress.percent = progress.percent.max((20. + fraction * 79.9).min(99.9));
+            progress.percent = progress.percent.max((20. + fraction * 69.9).min(89.9));
             progress.elapsed = export_start.elapsed().as_secs_f64();
             progress.remaining = (effective >= weight && fraction < 1.)
                 .then(|| (ai_elapsed / effective * (self.total - effective)).max(0.));
-            progress.stage = Some(format!("{} · {detail}", self.label));
+            progress.stage = Some(format!(
+                "{} · {detail} · tile {}/{total}",
+                self.label,
+                done.min(total)
+            ));
         }
     }
     fn finish(&mut self, units: u64, weight: f64) {
         self.completed = (self.completed + units as f64 * weight).min(self.total);
     }
 }
-struct Upscale {
+struct Worker {
+    process: Process,
+    input: std::process::ChildStdin,
+}
+struct Session {
+    worker: RefCell<Option<Worker>>,
     folder: PathBuf,
     scratch: PathBuf,
     log: PathBuf,
+    fallback: Cell<bool>,
+}
+impl Session {
+    fn request(
+        &self,
+        mode: &str,
+        state: &Path,
+        job: &Job,
+        mut report: impl FnMut(u64, u64),
+    ) -> Result<(), String> {
+        loop {
+            if !self.fallback.get() && job.started.elapsed() >= Duration::from_secs(40 * 60) {
+                self.worker.borrow_mut().take();
+                self.fallback.set(true);
+                if let Ok(mut p) = job.progress.lock() {
+                    p.warning=Some("AI time budget reached: remaining frames use frame blending and standard upscaling. Completed neural work was retained.".into());
+                }
+            }
+            if self.worker.borrow().is_none() {
+                let mut command = command(&self.folder.join("rlcut-ai-cpu"));
+                command
+                    .arg("serve")
+                    .arg(&self.folder)
+                    .current_dir(&self.scratch)
+                    .stdin(Stdio::piped())
+                    .stdout(Stdio::null())
+                    .stderr(
+                        fs::OpenOptions::new()
+                            .append(true)
+                            .open(&self.log)
+                            .map_err(|e| e.to_string())?,
+                    );
+                low_pressure(&mut command, true);
+                let mut process = Process(
+                    command
+                        .spawn()
+                        .map_err(|e| format!("Cannot start persistent AI worker: {e}"))?,
+                );
+                let input = process.0.stdin.take().ok_or("Missing AI command pipe")?;
+                nonblocking(&input)?;
+                *self.worker.borrow_mut() = Some(Worker { process, input });
+            }
+            let result = self.scratch.join("worker-result");
+            let _ = fs::remove_file(&result);
+            let _ = fs::remove_file(state);
+            let chosen = if self.fallback.get() {
+                if mode == "interpolate" {
+                    "blend"
+                } else {
+                    "resize"
+                }
+            } else {
+                mode
+            };
+            {
+                let mut worker = self.worker.borrow_mut();
+                write_frame(
+                    &mut worker.as_mut().unwrap().input,
+                    format!("{chosen}\n").as_bytes(),
+                    job,
+                )?;
+            }
+            let mut last = None;
+            loop {
+                canceled(job)?;
+                if !self.fallback.get() && job.started.elapsed() >= Duration::from_secs(40 * 60) {
+                    break;
+                }
+                if let Ok(text) = fs::read_to_string(&result) {
+                    if text == "ok" {
+                        if let Some((a, b)) = status(state) {
+                            report(a, b);
+                        }
+                        return Ok(());
+                    }
+                    return Err(format!("Persistent AI worker: {text}"));
+                }
+                if let Some(value) = status(state) {
+                    if last != Some(value) {
+                        report(value.0, value.1);
+                        last = Some(value);
+                    }
+                }
+                if self
+                    .worker
+                    .borrow_mut()
+                    .as_mut()
+                    .unwrap()
+                    .process
+                    .0
+                    .try_wait()
+                    .map_err(|e| e.to_string())?
+                    .is_some()
+                {
+                    return Err("AI worker exited unexpectedly; inspect export diagnostics".into());
+                }
+                if let Ok(mut p) = job.progress.lock() {
+                    p.elapsed = job.started.elapsed().as_secs_f64();
+                }
+                pause(job)?;
+            }
+        }
+    }
+}
+struct Upscale {
+    session: Rc<Session>,
     tiles: u64,
 }
 impl Upscale {
-    fn frame(&self, bytes: &[u8], job: &Job, progress: &mut AiProgress, export_start: Instant, detail: &str) -> Result<Vec<u8>, String> {
-        let input = self.scratch.join("upscale-in.png");
-        let output = self.scratch.join("upscale-out.png");
-        let state = self.scratch.join("upscale-progress");
+    fn frame(
+        &self,
+        bytes: &[u8],
+        job: &Job,
+        progress: &mut AiProgress,
+        export_start: Instant,
+        detail: &str,
+    ) -> Result<Vec<u8>, String> {
+        let input = self.session.scratch.join("upscale-in.png");
+        let output = self.session.scratch.join("upscale-out.png");
+        let state = self.session.scratch.join("upscale-progress");
         fs::write(&input, bytes).map_err(|e| e.to_string())?;
         let _ = fs::remove_file(&output);
-        let _ = fs::remove_file(&state);
-        let mut worker = command(&self.folder.join("rlcut-ai-cpu"));
-        worker
-            .arg("upscale")
-            .arg(self.folder.join("realesr-animevideov3-x2.param"))
-            .arg(self.folder.join("realesr-animevideov3-x2.bin"))
-            .arg(&input)
-            .arg(&output)
-            .arg(&state)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(
-                fs::OpenOptions::new()
-                    .append(true)
-                    .open(&self.log)
-                    .map_err(|e| e.to_string())?,
-            );
-        low_pressure(&mut worker, true);
-        wait_reporting(
-            &mut Process(
-                worker
-                    .spawn()
-                    .map_err(|e| format!("Cannot start AI upscaling: {e}"))?,
-            ),
-            job,
-            &state,
-            |done, total| progress.report(job, export_start, done, total, 1., detail),
-        )?;
+        self.session
+            .request("upscale", &state, job, |done, total| {
+                progress.report(job, export_start, done, total, 1., detail)
+            })?;
+        progress.report(job, export_start, self.tiles, self.tiles, 1., detail);
         progress.finish(self.tiles, 1.);
         if fs::metadata(&output).map_err(|e| e.to_string())?.len() > 96 * 1024 * 1024 {
             return Err("AI upscale output exceeds the frame safety limit".into());
@@ -320,35 +438,17 @@ fn write_timed_frame(
     if *written < limit {
         if let Some(upscaler) = upscaler {
             let detail = format!("frame {}/{}", *written + 1, limit);
-            write_frame(w, &upscaler.frame(bytes, job, progress, export_start, &detail)?, job)?;
+            write_frame(
+                w,
+                &upscaler.frame(bytes, job, progress, export_start, &detail)?,
+                job,
+            )?;
         } else {
             write_frame(w, bytes, job)?;
         }
         *written += 1;
     }
     Ok(())
-}
-fn wait_reporting(
-    process: &mut Process,
-    job: &Job,
-    state: &Path,
-    mut report: impl FnMut(u64, u64),
-) -> Result<(), String> {
-    let mut last = None;
-    loop {
-        if let Some(value) = status(state) {
-            if last != Some(value) { report(value.0, value.1); last = Some(value); }
-        }
-        canceled(job)?;
-        match process.0.try_wait().map_err(|e| e.to_string())? {
-            Some(exit) if exit.success() => {
-                if let Some(value) = status(state) { report(value.0, value.1); }
-                return Ok(());
-            }
-            Some(_) => return Err("AI export subprocess failed. Try 480p and close other apps; see the export diagnostics.".into()),
-            None => pause(job)?,
-        }
-    }
 }
 fn wait(process: &mut Process, job: &Job) -> Result<(), String> {
     let started = Instant::now();
@@ -388,7 +488,7 @@ pub fn run(
         );
         p.remaining = None;
     }
-    let (binary, model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
+    let (binary, _model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
     let (width, height) = o.resolution()?;
     let upscale_tiles = tile_count(width, height, UPSCALE_CORE);
     let rife_tiles = tile_count(width, height, RIFE_STEP);
@@ -399,10 +499,15 @@ pub fn run(
         .parent()
         .ok_or("AI engine folder is unavailable")?
         .to_path_buf();
-    let upscaler = o.ai_upscale.then(|| Upscale {
-        folder: ai_folder.clone(),
+    let session = Rc::new(Session {
+        worker: RefCell::new(None),
+        folder: ai_folder.canonicalize().map_err(|e| e.to_string())?,
         scratch: scratch.0.clone(),
         log: log.to_path_buf(),
+        fallback: Cell::new(false),
+    });
+    let upscaler = o.ai_upscale.then(|| Upscale {
+        session: session.clone(),
         tiles: upscale_tiles,
     });
     let before = scratch.0.join("before.png");
@@ -530,18 +635,36 @@ pub fn run(
     // PNGs after FFmpeg has reached -t and closed its input pipe.
     let frame_limit = (duration * o.fps as f64).ceil() as u64;
     let source_frames = (duration * base_fps).ceil() as u64;
-    let rife_calls = (0..source_frames.saturating_sub(1)).filter(|index| {
-        let time = *index as f64 / base_fps;
-        !cuts.iter().any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001)
-    }).count() as u64;
-    let total_units = (if o.ai_upscale { frame_limit * upscale_tiles } else { 0 }) as f64
-        + (if o.ai_enhance { rife_calls * rife_tiles } else { 0 }) as f64 * RIFE_WEIGHT;
+    let rife_calls = (0..source_frames.saturating_sub(1))
+        .filter(|index| {
+            let time = *index as f64 / base_fps;
+            !cuts
+                .iter()
+                .any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001)
+        })
+        .count() as u64;
+    let total_units = (if o.ai_upscale {
+        frame_limit * upscale_tiles
+    } else {
+        0
+    }) as f64
+        + (if o.ai_enhance {
+            rife_calls * rife_tiles
+        } else {
+            0
+        }) as f64
+            * RIFE_WEIGHT;
     let label = match (o.ai_enhance, o.ai_upscale) {
         (true, true) => "AI smoothing + upscaling ×2",
         (true, false) => "AI smoothing",
         _ => "AI upscaling ×2",
     };
-    let mut ai_progress = AiProgress { started: Instant::now(), completed: 0., total: total_units.max(1.), label: label.into() };
+    let mut ai_progress = AiProgress {
+        started: Instant::now(),
+        completed: 0.,
+        total: total_units.max(1.),
+        label: label.into(),
+    };
     loop {
         canceled(&job)?;
         let next = frame(&mut reader, &job)?;
@@ -583,36 +706,11 @@ pub fn run(
                 let _ = fs::remove_file(&middle);
                 let state = scratch.0.join("rife-progress");
                 let _ = fs::remove_file(&state);
-                let mut inference = command(&ai_folder.join("rlcut-ai-cpu"));
-                inference
-                    .arg("interpolate")
-                    .arg(&binary)
-                    .arg(&model)
-                    .arg(&before)
-                    .arg(&after)
-                    .arg(&middle)
-                    .arg(&scratch.0)
-                    .arg(&state)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(diagnostics()?);
-                // The CPU backend needs the Vulkan loader but never an actual GPU/driver.
-                // Avoid driver initialization consuming memory before RIFE inference starts.
-                inference
-                    .env("VK_ICD_FILENAMES", "/dev/null")
-                    .env("VK_DRIVER_FILES", "/dev/null");
-                low_pressure(&mut inference, true);
                 let detail = format!("source frame {}/{}", index + 1, source_frames);
-                wait_reporting(
-                    &mut Process(
-                        inference
-                            .spawn()
-                            .map_err(|e| format!("Cannot start RIFE: {e}"))?,
-                    ),
-                    &job,
-                    &state,
-                    |done, total| ai_progress.report(&job, start, done, total, RIFE_WEIGHT, &detail),
-                )?;
+                session.request("interpolate", &state, &job, |done, total| {
+                    ai_progress.report(&job, start, done, total, RIFE_WEIGHT, &detail)
+                })?;
+                ai_progress.report(&job, start, rife_tiles, rife_tiles, RIFE_WEIGHT, &detail);
                 ai_progress.finish(rife_tiles, RIFE_WEIGHT);
                 let length = fs::metadata(&middle)
                     .map_err(|e| format!("RIFE did not produce a frame: {e}"))?
@@ -652,5 +750,7 @@ pub fn run(
     drop(sink);
     wait(&mut decoder, &job)?;
     wait(&mut encoder, &job)?;
+    drop(upscaler);
+    drop(session);
     Ok(())
 }

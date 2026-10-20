@@ -77,6 +77,7 @@ export type Progress = {
   phase: 'running' | 'complete' | 'failed' | 'canceled';
   percent: number;
   stage?: string | null;
+  warning?: string | null;
   elapsed: number;
   remaining: number | null;
   output: string;

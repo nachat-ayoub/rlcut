@@ -377,6 +377,17 @@ pub async fn clear_cache(state: State<'_, AppState>) -> Result<(), String> {
     .await
 }
 #[tauri::command]
+pub fn clear_ai_cache(state: State<AppState>) -> Result<(), String> {
+    // Serialize against start_export so an export cannot begin during deletion.
+    let job = state.job.lock().map_err(|_| "Export state unavailable")?;
+    if let Some(job) = job.as_ref() {
+        if job.snapshot()?.phase == "running" {
+            return Err("Wait for the export to finish before clearing its AI cache".into());
+        }
+    }
+    crate::video::ai_cache::clear()
+}
+#[tauri::command]
 pub fn start_export(
     state: State<AppState>,
     paths: Vec<String>,

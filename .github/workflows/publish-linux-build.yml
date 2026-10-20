@@ -65,7 +65,9 @@ jobs:
 
           Download `rlcut-Linux-x86_64.AppImage`, make it executable, and run it. Without FUSE, use `--appimage-extract-and-run` or download the single-file `rlcut-Linux-x86_64` launcher.
 
-          AI export starts disabled. CPU safe mode uses one core, low priority and a 1.5 GiB RIFE memory cap. 1080p is supported with overlapping CPU tiles. Optional AI upscaling doubles output dimensions, up to 2160 × 3840. Higher resolutions can take substantially longer. Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage. Preview is unchanged. AI may introduce motion artifacts. It adds interpolation and gentle sharpening; Topaz’s proprietary restoration is not included. No GPU, account, Python installation or model download is needed on your laptop.
+          AI smoothing and 2× upscaling are optional, including 1080p. A persistent CPU worker keeps models loaded and caches the enhanced video without text or audio. Text/music/volume edits reuse that work. Half the available CPU threads (up to four), low priority and a 3 GiB inference address-space limit reduce pressure. After 40 minutes, remaining frames use blending/standard upscaling with a visible warning; unfinished enhanced exports stop at 45 minutes. Successful completion depends on hardware and output settings. Clear prepared videos in Settings → Clear AI cache.
+
+          Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage. Upscaling doubles output dimensions, up to 2160 × 3840. AI can introduce motion/texture artifacts; frame blending can cause ghosting. Preview is unchanged. No GPU, account, Python installation or model download is needed on your laptop.
 
           Built without running tests, as requested. Frontend/native builds passed locally. Verify downloads with SHA256SUMS.
           NOTES

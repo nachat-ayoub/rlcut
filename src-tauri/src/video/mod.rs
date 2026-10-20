@@ -16,3 +16,6 @@ pub mod player;
 
 #[cfg(feature = "serialization")]
 pub mod enhance;
+
+#[cfg(feature = "serialization")]
+pub mod ai_cache;
