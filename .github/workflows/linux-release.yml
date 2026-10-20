@@ -11,6 +11,7 @@ on:
         type: string
 permissions:
   contents: write
+  actions: read
 concurrency:
   group: linux-release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
@@ -84,12 +85,25 @@ jobs:
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 30
+  publish:
+    # Publish on the host with current gh, outside the build container. A publishing
+    # failure must not discard successful builds or prevent Rust cache saving.
+    needs: appimage
+    if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: rlcut-Linux-x86_64
+          path: dist
+      - name: Verify downloadable artifacts
+        working-directory: dist
+        run: sha256sum --check SHA256SUMS
       - name: Publish downloadable GitHub release assets
-        if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           cat > /tmp/release-notes.md <<'NOTES'
           Linux x86_64 AppImage with optional offline RIFE AI smoothing in Export.
@@ -102,12 +116,8 @@ jobs:
 
           This release was built without running tests, as requested. Check SHA256SUMS after downloading.
           NOTES
-          # Container checkout ownership can differ from the publishing user.
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # Ubuntu 22.04 ships an older gh without --verify-tag. Verify with Git first.
-          git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --clobber
           else
-            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
+            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --verify-tag --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
           fi
