@@ -49,4 +49,5 @@ with zipfile.ZipFile(models) as data:
         with data.open('models/'+name) as src,(STAGE/name).open('wb') as dst:shutil.copyfileobj(src,dst)
         (STAGE/name).chmod(0o644)
 shutil.copyfile(ROOT/'resources/licenses/REALESRGAN-LICENSE',STAGE/'REALESRGAN-LICENSE')
+(STAGE/'.helper-source-sha256').write_text(hashlib.sha256((ROOT/'native/ai-cpu.cpp').read_bytes()).hexdigest()+'\n')
 print('Built CPU-only tiled RIFE / Real-ESRGAN helper')
