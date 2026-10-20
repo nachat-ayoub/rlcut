@@ -328,6 +328,7 @@ pub fn execute(
         .take()
         .ok_or("Missing FFmpeg progress stream")?;
     let progress_job = job.clone();
+    let stage_start = Instant::now();
     let reader = thread::spawn(move || {
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
             if let Some(seconds) = progress_seconds(&line) {
@@ -335,7 +336,10 @@ pub fn execute(
                     p.percent = (base + seconds / duration * span).clamp(base, base + span);
                     p.elapsed = start.elapsed().as_secs_f64();
                     p.remaining = if seconds > 0. {
-                        Some((duration - seconds).max(0.) * p.elapsed / seconds)
+                        Some(
+                            (duration - seconds).max(0.) * stage_start.elapsed().as_secs_f64()
+                                / seconds,
+                        )
                     } else {
                         None
                     };

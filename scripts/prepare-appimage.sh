@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 python3 scripts/prepare-ai.py
+python3 scripts/prepare-ai-gpu.py
 stage=.runtime/appimage-tools
 for library in libvulkan.so.1 libpng16.so.16 libgomp.so.1; do
   file="$(ldconfig -p | awk -v name="$library" '$1 == name && !found {path=$NF; found=1} END {print path}')"

@@ -24,12 +24,12 @@ This feature does not include Topaz software or claim equivalence to its models.
 ncnn and its bundled dependency notices are included in `NCNN-LICENSE` beside
 the RIFE license; a source copy is in `resources/licenses/NCNN-LICENSE`.
 
-## Optional CPU AI upscaling
+## Optional CPU / Vulkan AI upscaling
 
 The compact realesr-animevideov3-x2 model is from Xintao Wang / Real-ESRGAN
 v0.2.5.0 (BSD 3-Clause). The license is included as REALESRGAN-LICENSE in
 the AI directory and resources/licenses/REALESRGAN-LICENSE in this source.
-The CPU helper links static ncnn (20220729); its license and dependency notices
+The CPU and GPU helpers link static ncnn (20220729); its license and dependency notices
 remain included as NCNN-LICENSE. libpng is used for PNG tile input/output.
 
 
@@ -41,5 +41,14 @@ license preserved in `UPSCAYL-LICENSE` inside the AI directory and
 `resources/licenses/UPSCAYL-LICENSE` in this repository. Corresponding upstream
 source/model files: https://github.com/upscayl/upscayl/tree/v2.15.0/resources/models .
 Exact download URLs and SHA256 digests are in `scripts/prepare-ai-cpu.py`.
-Inference uses rlcut's CPU-only ncnn helper; no Upscayl application/backend
+Inference uses rlcut's CPU/Vulkan ncnn helpers; no Upscayl application/backend
 code is included.
+
+The optional Vulkan helper also statically links Khronos glslang 11.11.0 and
+builds against Vulkan-Headers v1.3.224. Their upstream license/notice texts are
+preserved as GLSLANG-LICENSE and VULKAN-HEADERS-LICENSE in the AI runtime.
+Pinned source URLs, SHA256 digests and exact build options are in
+`scripts/prepare-ai-gpu.py` and `native/ai-gpu/CMakeLists.txt`. Sources:
+https://github.com/KhronosGroup/glslang/tree/11.11.0 and
+https://github.com/KhronosGroup/Vulkan-Headers/tree/v1.3.224 .
+The Vulkan loader remains dynamically linked; the host supplies its GPU driver.
