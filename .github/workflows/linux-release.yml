@@ -88,6 +88,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           cat > /tmp/release-notes.md <<'NOTES'
@@ -101,6 +102,8 @@ jobs:
 
           This release was built without running tests, as requested. Check SHA256SUMS after downloading.
           NOTES
+          # Container checkout ownership can differ from the publishing user.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           # Ubuntu 22.04 ships an older gh without --verify-tag. Verify with Git first.
           git rev-parse --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
