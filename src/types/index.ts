@@ -112,6 +112,9 @@ export type TextOverlay = {
   scale: number;
   boxWidth: number;
   rotation: number;
+  renderedPath?: string;
+  renderedX?: number;
+  renderedY?: number;
   fontFamily: string;
   fontPath: string;
   fontBoldPath: string;

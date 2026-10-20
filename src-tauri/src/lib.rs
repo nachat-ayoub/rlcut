@@ -30,6 +30,7 @@ pub fn run() {
             commands::project_thumbnails,
             commands::list_system_fonts,
             commands::save_google_font,
+            commands::save_text_stamp,
             commands::import_video,
             commands::create_proxy,
             commands::create_timeline_proxy,

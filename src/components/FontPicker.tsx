@@ -2,13 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, CloudDownload, Search, Star, X } from 'lucide-react';
 import type { FontOption } from '../types';
 
-const fallbackGoogleFonts = [
-  'Anton', 'Archivo', 'Bebas Neue', 'Bitter', 'Bungee', 'Cairo', 'Comfortaa', 'DM Sans', 'Exo 2', 'Fira Sans',
-  'Fredoka', 'Inter', 'Kanit', 'Lato', 'League Spartan', 'Lexend', 'Libre Baskerville', 'Lilita One', 'Lobster',
-  'Manrope', 'Merriweather', 'Montserrat', 'Noto Sans', 'Nunito', 'Open Sans', 'Oswald', 'Outfit', 'Pacifico',
-  'Permanent Marker', 'Playfair Display', 'Poppins', 'Press Start 2P', 'Prompt', 'Raleway', 'Roboto', 'Roboto Condensed',
-  'Roboto Mono', 'Rubik', 'Russo One', 'Source Sans 3', 'Space Grotesk', 'Teko', 'Titillium Web', 'Ubuntu', 'Work Sans',
-];
+import googleFontFamilies from '../data/google-fonts.json';
 
 type FavoriteFont = { id: string; source: 'system'; family: string; font: FontOption } | { id: string; source: 'google'; family: string };
 
@@ -22,21 +16,13 @@ export function FontPicker({ value, fonts, favorites, onSystemFont, onGoogleFont
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false), [source, setSource] = useState<'system' | 'google'>('system'), [favoritesOnly, setFavoritesOnly] = useState(false), [query, setQuery] = useState('');
-  const [googleFonts, setGoogleFonts] = useState(fallbackGoogleFonts), [loading, setLoading] = useState(false), [installing, setInstalling] = useState<string | null>(null);
+  const googleFonts = googleFontFamilies;
+  const [installing, setInstalling] = useState<string | null>(null);
   useEffect(() => {
     if (!open) return;
     const outside = (event: globalThis.PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
     document.addEventListener('pointerdown', outside); return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
-  useEffect(() => {
-    if (!open || source !== 'google' || googleFonts.length > fallbackGoogleFonts.length) return;
-    setLoading(true);
-    fetch('https://fonts.google.com/metadata/fonts').then(response => response.text()).then(raw => {
-      const json = JSON.parse(raw.replace(/^\)\]\}'\s*/, '')) as { familyMetadataList?: { family: string }[] };
-      const names = json.familyMetadataList?.map(item => item.family).filter(Boolean) ?? [];
-      if (names.length) setGoogleFonts(names.sort((a, b) => a.localeCompare(b)));
-    }).catch(() => undefined).finally(() => setLoading(false));
-  }, [open, source, googleFonts.length]);
   const normalized = query.trim().toLocaleLowerCase();
   const favoriteSet = useMemo(() => new Set(favorites), [favorites]);
   const systemResults = useMemo(() => fonts.filter(font => !normalized || font.family.toLocaleLowerCase().includes(normalized)).slice(0, 100), [fonts, normalized]);
@@ -61,8 +47,7 @@ export function FontPicker({ value, fonts, favorites, onSystemFont, onGoogleFont
       <label className="font-search"><Search size={14} /><input autoFocus value={query} onChange={event => setQuery(event.target.value)} placeholder={favoritesOnly ? 'Search favorite fonts' : `Search ${source === 'system' ? 'installed' : 'Google'} fonts`} />{query && <button onClick={() => setQuery('')} aria-label="Clear font search"><X size={13} /></button>}</label>
       <div className="font-results">
         {favoritesOnly ? favoriteResults.map(item => <div className={`font-result ${item.family === value ? 'selected' : ''}`} key={item.id} style={{ fontFamily: item.family }}><button className="font-result-select" disabled={Boolean(installing)} onClick={() => item.source === 'system' ? chooseSystem(item.font) : void chooseGoogle(item.family)}><span>{installing === item.family ? `Installing ${item.family}…` : item.family}</span>{item.source === 'google' ? <CloudDownload className={installing === item.family ? 'spin' : ''} size={13} /> : item.family === value && <Check size={14} />}</button><button className="font-favorite active" title="Remove from favorites" aria-label={`Remove ${item.family} from favorites`} onClick={() => onToggleFavorite(item.id)}><Star size={14} fill="currentColor" /></button></div>) : source === 'system' ? systemResults.map(font => { const id = `system:${font.family}`, favorite = favoriteSet.has(id); return <div className={`font-result ${font.family === value ? 'selected' : ''}`} key={font.path} style={{ fontFamily: font.family }}><button className="font-result-select" onClick={() => chooseSystem(font)}><span>{font.family}</span>{font.family === value && <Check size={14} />}</button><button className={`font-favorite ${favorite ? 'active' : ''}`} title={favorite ? 'Remove from favorites' : 'Add to favorites'} aria-label={`${favorite ? 'Remove' : 'Add'} ${font.family} ${favorite ? 'from' : 'to'} favorites`} onClick={() => onToggleFavorite(id)}><Star size={14} fill={favorite ? 'currentColor' : 'none'} /></button></div> }) : googleResults.map(family => { const id = `google:${family}`, favorite = favoriteSet.has(id); return <div className={`font-result ${family === value ? 'selected' : ''}`} key={family} style={{ fontFamily: family }}><button className="font-result-select" disabled={Boolean(installing)} onClick={() => void chooseGoogle(family)}><span>{installing === family ? `Installing ${family}…` : family}</span><CloudDownload className={installing === family ? 'spin' : ''} size={13} /></button><button className={`font-favorite ${favorite ? 'active' : ''}`} title={favorite ? 'Remove from favorites' : 'Add to favorites'} aria-label={`${favorite ? 'Remove' : 'Add'} ${family} ${favorite ? 'from' : 'to'} favorites`} onClick={() => onToggleFavorite(id)}><Star size={14} fill={favorite ? 'currentColor' : 'none'} /></button></div> })}
-        {!loading && !(favoritesOnly ? favoriteResults : source === 'system' ? systemResults : googleResults).length && <div className="font-empty">{favoritesOnly ? 'No favorite fonts yet' : 'No matching fonts'}</div>}
-        {!favoritesOnly && loading && <div className="font-empty">Loading Google Fonts…</div>}
+        {!(favoritesOnly ? favoriteResults : source === 'system' ? systemResults : googleResults).length && <div className="font-empty">{favoritesOnly ? 'No favorite fonts yet' : 'No matching fonts'}</div>}
       </div>
     </div>}
   </div>;

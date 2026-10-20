@@ -11,6 +11,7 @@ use std::{
     collections::hash_map::DefaultHasher,
     fs,
     hash::{Hash, Hasher},
+    io::Read,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Instant, UNIX_EPOCH},
@@ -36,6 +37,90 @@ fn fingerprint(path: &Path) -> Result<serde_json::Value, String> {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_nanos().to_string())
     ]))
+}
+fn model_identity(path: &Path) -> Result<serde_json::Value, String> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hash = 0xcbf29ce484222325u64;
+    let mut buffer = [0u8; 65536];
+    loop {
+        let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if n == 0 {
+            break;
+        }
+        for byte in &buffer[..n] {
+            hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+        }
+    }
+    Ok(serde_json::json!([
+        path.file_name()
+            .ok_or("Missing model name")?
+            .to_string_lossy(),
+        file.metadata().map_err(|e| e.to_string())?.len(),
+        format!("{hash:016x}")
+    ]))
+}
+fn compatible(old: &serde_json::Value, current: &serde_json::Value) -> bool {
+    if old == current {
+        return true;
+    }
+    if current["algorithm"].as_str() != Some("parallel-cpu-vulkan-v1-full-ai")
+        || std::env::var_os("RLCUT_AI_DIR").is_some()
+        || !matches!(old["app"].as_str(), Some("0.5.0" | "0.5.1" | "0.6.0"))
+        || !matches!(
+            old["algorithm"].as_str(),
+            Some("persistent-cpu-v2-full-ai" | "parallel-cpu-vulkan-v1-full-ai")
+        )
+    {
+        return false;
+    }
+    for key in [
+        "sources",
+        "video",
+        "preset",
+        "ranges",
+        "quality",
+        "fps",
+        "smooth",
+        "upscale",
+        "lite",
+        "keepResolution",
+    ] {
+        if old[key] != current[key] {
+            return false;
+        }
+    }
+    let Some(new_models) = current["models"].as_array() else {
+        return false;
+    };
+    let Some(old_models) = old["models"].as_array() else {
+        return false;
+    };
+    new_models.iter().all(|model| {
+        // Legacy manifests lack content hashes. Only migrate known bundled
+        // full-AI releases, when the current assets still match those pins.
+        let pinned = match model[0].as_str() {
+            Some("flownet.param") => "61ff358d73afcf93",
+            Some("flownet.bin") => "fb9b9e1d0fd03f93",
+            Some("realesr-animevideov3-x2.param") => "4cb030183560779a",
+            Some("realesr-animevideov3-x2.bin") => "7937eb6532cc6cf2",
+            Some("upscayl-lite-4x.param") => "e18f74759a892f02",
+            Some("upscayl-lite-4x.bin") => "a9a3bc3d998d4132",
+            _ => return false,
+        };
+        model[2].as_str() == Some(pinned)
+            && old_models
+                .iter()
+                .any(|old| old[0] == model[0] && old[1] == model[1])
+    })
+}
+fn cache_warning(job: &Job) {
+    if let Ok(mut p) = job.progress.lock() {
+        let warning = "AI video could not be cached. Future exports will repeat AI processing; check free disk space and cache permissions.";
+        p.warning = Some(p.warning.take().map_or_else(
+            || warning.into(),
+            |previous| format!("{previous} {warning}"),
+        ));
+    }
 }
 fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
     let Ok(v) = metadata::probe(b, path) else {
@@ -114,7 +199,6 @@ pub fn run(
         .map(|v| fingerprint(Path::new(&v.path)))
         .collect::<Result<Vec<_>, _>>()?;
     let models = [
-        folder.join("rlcut-ai-cpu"),
         model.join("flownet.param"),
         model.join("flownet.bin"),
         folder.join(if o.ai_upscale_lite {
@@ -129,27 +213,42 @@ pub fn run(
         }),
     ]
     .iter()
-    .map(|p| {
-        let mut value = fingerprint(p)?;
-        // AppImage mount paths change on every launch; identify bundled models by
-        // filename, metadata and app version instead of their temporary mount.
-        value[0] = serde_json::json!(p.file_name().unwrap().to_string_lossy());
-        Ok::<_, String>(value)
-    })
+    .map(|path| model_identity(path))
     .collect::<Result<Vec<_>, _>>()?;
     let ranges = segments
         .iter()
         .map(|s| serde_json::json!([s.start, s.end, s.color_fix]))
         .collect::<Vec<_>>();
-    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"parallel-cpu-vulkan-v1-full-ai", "app":env!("CARGO_PKG_VERSION"),"sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
+    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"parallel-cpu-vulkan-v1-full-ai", "sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
     let mut hash = DefaultHasher::new();
     manifest.hash(&mut hash);
     let root = root()?;
     fs::create_dir_all(&root).map_err(|e| format!("Cannot prepare AI cache: {e}"))?;
-    let entry = root.join(format!("{:016x}", hash.finish()));
+    let current: serde_json::Value =
+        serde_json::from_slice(&manifest).map_err(|e| e.to_string())?;
+    let mut entry = root.join(format!("{:016x}", hash.finish()));
+    let mut hit = fs::read(entry.join("manifest.json")).ok().as_deref()
+        == Some(manifest.as_slice())
+        && valid(b, &entry.join("video.mp4"), o, duration);
+    // Text-only app updates and AppImage mount/packaging timestamps do not
+    // change neural output. Reuse validated full-AI caches from stock releases.
+    if !hit {
+        if let Ok(entries) = fs::read_dir(&root) {
+            for candidate in entries.flatten().map(|e| e.path()) {
+                let old = fs::read(candidate.join("manifest.json"))
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+                if old.as_ref().is_some_and(|old| compatible(old, &current))
+                    && valid(b, &candidate.join("video.mp4"), o, duration)
+                {
+                    entry = candidate;
+                    hit = true;
+                    break;
+                }
+            }
+        }
+    }
     let cache = entry.join("video.mp4");
-    let hit = fs::read(entry.join("manifest.json")).ok().as_deref() == Some(manifest.as_slice())
-        && valid(b, &cache, o, duration);
     let intermediate = out.with_extension("ai-base.mp4");
     let _cleanup = Temporary(intermediate.clone());
     let processed = out.with_extension("ai-processed.mp4");
@@ -159,7 +258,9 @@ pub fn run(
         if let Ok(mut progress) = job.progress.lock() {
             progress.percent = 90.;
             progress.stage = Some("Reusing prepared AI video · updating text/audio".into());
-            progress.warning = fs::read_to_string(entry.join("warning.txt")).ok();
+            progress.warning = fs::read_to_string(entry.join("warning.txt"))
+                .ok()
+                .map(|w| format!("Prepared AI video: {w}"));
         }
         cache.clone()
     } else {
@@ -242,7 +343,10 @@ pub fn run(
             })();
             if saved.is_err() {
                 let _ = fs::remove_dir_all(&temp);
+                cache_warning(&job);
             }
+        } else {
+            cache_warning(&job);
         }
         prune(&root, &entry);
         processed.clone()

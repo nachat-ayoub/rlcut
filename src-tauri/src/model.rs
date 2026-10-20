@@ -287,6 +287,15 @@ pub struct TextOverlay {
     pub scale: f64,
     pub box_width: f64,
     pub rotation: f64,
+    #[cfg_attr(
+        feature = "serialization",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub rendered_path: Option<String>,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub rendered_x: u32,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub rendered_y: u32,
     pub font_family: String,
     pub font_path: String,
     pub font_bold_path: String,

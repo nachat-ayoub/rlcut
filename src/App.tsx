@@ -11,6 +11,7 @@ import { CropEditor } from './components/CropEditor';
 import { Timeline } from './components/Timeline';
 import { ProjectHome } from './components/ProjectHome';
 import { TextInspector } from './components/TextInspector';
+import { stampText } from './lib/text-stamp';
 import { editedDuration, editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'shortcuts' | 'crop' | null;
 const shortcuts = [
@@ -339,7 +340,14 @@ export default function App() {
         rememberOutputFolder(folder);
       }
       const trackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
-      const exportTexts = [...texts].sort((a, b) => (trackOrder.get(b.trackId) ?? -1) - (trackOrder.get(a.trackId) ?? -1));
+      const orderedTexts = [...texts].sort((a, b) => (trackOrder.get(b.trackId) ?? -1) - (trackOrder.get(a.trackId) ?? -1));
+      const outputFactor = aiUpscale && !aiKeepResolution ? 2 : 1;
+      const exportTexts: TextOverlay[] = [];
+      // Render one static transparent image per text clip, then animate opacity in FFmpeg.
+      for (const text of orderedTexts) {
+        const rendered = await stampText(text, quality * outputFactor, (quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * outputFactor, quality);
+        exportTexts.push({ ...text, ...rendered });
+      }
       if (aiEnhance || aiUpscale) setPlaying(false);
       const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, folder, filename: outputName } };
       let p: Progress;
