@@ -56,6 +56,7 @@ export type Settings = {
   boostIntro?: boolean;
   musicFadeOut: boolean;
   musicFadeDuration: number;
+  favoriteFonts: string[];
 };
 export type Store = {
   version: number;

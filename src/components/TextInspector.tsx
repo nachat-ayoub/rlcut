@@ -3,17 +3,19 @@ import type { FontOption, TextOverlay } from '../types';
 import { Slider } from './Controls';
 import { FontPicker } from './FontPicker';
 
-export function TextInspector({ value, fonts, onChange, onAddGoogleFont, onDelete }: {
+export function TextInspector({ value, fonts, favoriteFonts, onChange, onAddGoogleFont, onToggleFavoriteFont, onDelete }: {
   value: TextOverlay;
   fonts: FontOption[];
+  favoriteFonts: string[];
   onChange: (next: TextOverlay) => void;
   onAddGoogleFont: (family: string) => Promise<void>;
+  onToggleFavoriteFont: (id: string) => void;
   onDelete: () => void;
 }) {
   const set = <K extends keyof TextOverlay>(key: K, next: TextOverlay[K]) => onChange({ ...value, [key]: next });
   return <div className="text-inspector">
     <label className="field text-content-field">Text<textarea value={value.text} rows={3} onChange={event => set('text', event.target.value)} /></label>
-    <label className="text-control-title">Font family<FontPicker value={value.fontFamily} fonts={fonts} onSystemFont={font => onChange({ ...value, fontPath: font.path, fontFamily: font.family, fontBoldPath: '', fontBlackPath: '', fontItalicPath: '', fontBoldItalicPath: '', fontBlackItalicPath: '' })} onGoogleFont={onAddGoogleFont} /></label>
+    <label className="text-control-title">Font family<FontPicker value={value.fontFamily} fonts={fonts} favorites={favoriteFonts} onSystemFont={font => onChange({ ...value, fontPath: font.path, fontFamily: font.family, fontBoldPath: '', fontBlackPath: '', fontItalicPath: '', fontBoldItalicPath: '', fontBlackItalicPath: '' })} onGoogleFont={onAddGoogleFont} onToggleFavorite={onToggleFavoriteFont} /></label>
     <div className="text-format-row" role="toolbar" aria-label="Text style and alignment">
       <div><button className={`${value.fontWeight > 400 ? 'active' : ''} ${value.fontWeight === 900 ? 'black' : ''}`} onClick={() => { const fontWeight = value.fontWeight === 400 ? 700 : value.fontWeight === 700 ? 900 : 400; onChange({ ...value, fontWeight, bold: fontWeight > 400 }); }} title={`Weight: ${value.fontWeight === 900 ? 'Black' : value.fontWeight === 700 ? 'Bold' : 'Normal'} · click to cycle`}><Bold size={15} /><small>{value.fontWeight === 900 ? 'BLK' : value.fontWeight === 700 ? 'B' : ''}</small></button><button className={value.italic ? 'active' : ''} onClick={() => set('italic', !value.italic)} title="Italic"><Italic size={15} /></button><button className={value.underline ? 'active' : ''} onClick={() => set('underline', !value.underline)} title="Underline"><Underline size={15} /></button></div>
       <span />
