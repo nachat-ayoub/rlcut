@@ -242,6 +242,31 @@ fn export_args_impl(
     let mut video_output = "out_edit".to_string();
     for (index, text) in texts.iter().enumerate() {
         let next = format!("text{index}");
+        if text.rendered_path.is_some() {
+            let image_index = videos.len()
+                + usize::from(music.is_some_and(|m| !m.segments.is_empty()))
+                + usize::from(enhanced.is_some())
+                + texts[..index]
+                    .iter()
+                    .filter(|t| t.rendered_path.is_some())
+                    .count();
+            let mut fades = String::new();
+            if let Some(duration) = text.fade_in {
+                fades.push_str(&format!(
+                    ",fade=t=in:st={:.6}:d={duration:.6}:alpha=1",
+                    text.start
+                ));
+            }
+            if let Some(duration) = text.fade_out {
+                fades.push_str(&format!(
+                    ",fade=t=out:st={:.6}:d={duration:.6}:alpha=1",
+                    (text.end - duration).max(text.start)
+                ));
+            }
+            graph.push_str(&format!(";[{image_index}:v:0]format=rgba,loop=loop=-1:size=1:start=0,settb=expr=1/{},setpts=N{fades}[stamp{index}];[{video_output}][stamp{index}]overlay=x={}:y={}:format=auto:shortest=1:enable='between(t,{:.6},{:.6})'[{next}]",o.fps,text.rendered_x,text.rendered_y,text.start,text.end));
+            video_output = next;
+            continue;
+        }
         let escaped_text = text
             .text
             .replace('\\', "\\\\")
@@ -465,6 +490,16 @@ fn export_args_impl(
     if let Some(enhanced) = enhanced {
         args.extend(["-i".into(), enhanced.to_string_lossy().into_owned()]);
     }
+    for text in texts {
+        if let Some(path) = &text.rendered_path {
+            args.extend([
+                "-framerate".into(),
+                o.fps.to_string(),
+                "-i".into(),
+                path.clone(),
+            ]);
+        }
+    }
     args.extend([
         "-filter_complex".into(),
         graph,
@@ -576,6 +611,9 @@ mod tests {
             scale: 1.,
             box_width: 0.7,
             rotation: 0.,
+            rendered_path: None,
+            rendered_x: 0,
+            rendered_y: 0,
             font_family: "Sans".into(),
             font_path: String::new(),
             font_bold_path: String::new(),

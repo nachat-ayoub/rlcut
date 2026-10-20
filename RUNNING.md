@@ -277,3 +277,36 @@ The GPU build requires CMake, a C++ toolchain, libpng development files and
 libvulkan1. Its pinned shader compiler/headers are downloaded at build time;
 users do not need Python or model downloads. The AppImage build includes both
 helpers. A working host GPU driver remains necessary.
+
+## Text export and AI cache reuse (v0.6.1)
+
+Export prepares one transparent PNG per text clip using the same browser font
+shaping engine as the preview. This honors Google variable-font weight selection
+and browser style synthesis. It includes layout, stroke, underline, spacing,
+shadow, background and rotation at the final export resolution. FFmpeg reuses
+the decoded image and applies clip timing/fades during the normal finishing
+pass, after AI processing. Transparent margins are cropped so each text clip
+retains only its visible image area in FFmpeg rather than a full video frame.
+Text images are removed after the export worker
+finishes; abandoned images older than seven days are removed during preparation.
+Reselecting an installed Google font preserves its downloaded variant paths.
+
+Google Fonts search uses a bundled catalog of 1,959 families, including
+Bricolage Grotesque. Searching works without the cross-origin metadata request
+that previously failed silently and left only a short fallback list. Installing
+a font still downloads its files using the existing Google Fonts flow.
+
+Repeating an export with the same footage, source file metadata, cuts, layout,
+color, output size, FPS and AI options reuses the completed AI video. Text,
+font/style changes, music, volume and destination are excluded from its identity.
+The final text/audio encoding pass still takes time. New/changed video edits or
+a missing/cleared/evicted cache require the full AI pass again, with similar
+runtime on the same hardware. Cache entries are bounded to 4 GiB. If caching
+fails, export displays a warning rather than silently promising reuse.
+
+Compatible validated full-AI caches from stock v0.5.0, v0.5.1 and v0.6.0 can be
+reused by this update; legacy timed-downgrade caches are excluded. New cache
+identities use model content and an explicit algorithm revision, independent
+of app version, helper rebuilds and AppImage packaging timestamps. Custom
+`RLCUT_AI_DIR` models use content identity; their legacy entries are not migrated.
+This patch changes text rendering and reuse, not inference speed for new work.

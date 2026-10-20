@@ -228,6 +228,48 @@ pub async fn list_system_fonts() -> Result<Vec<FontOption>, String> {
     .await
 }
 #[tauri::command]
+pub async fn save_text_stamp(state: State<'_, AppState>, bytes: Vec<u8>) -> Result<String, String> {
+    if bytes.len() < 33
+        || bytes.len() > 16 * 1024 * 1024
+        || &bytes[..8] != b"\x89PNG\r\n\x1a\n"
+        || &bytes[12..16] != b"IHDR"
+    {
+        return Err("Invalid text image".into());
+    }
+    let width = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+    let height = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+    if width == 0
+        || height == 0
+        || width > 4320
+        || height > 7680
+        || u64::from(width) * u64::from(height) > 34_000_000
+    {
+        return Err("Text image exceeds the size limit".into());
+    }
+    let folder = state.cache.join("text-stamps");
+    blocking(move || {
+        std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+        // Discard abandoned stamps from canceled dialogs/crashed apps, never a recent export.
+        if let Ok(entries) = std::fs::read_dir(&folder) {
+            for entry in entries.flatten() {
+                if entry
+                    .metadata()
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age.as_secs() > 7 * 86400)
+                {
+                    let _ = std::fs::remove_file(entry.path());
+                }
+            }
+        }
+        let path = folder.join(format!("{}.png", presets::id()));
+        std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().into_owned())
+    })
+    .await
+}
+#[tauri::command]
 pub async fn save_google_font(
     state: State<'_, AppState>,
     family: String,
@@ -434,6 +476,34 @@ pub fn start_export(
         .map(|segment| segment.end - segment.start)
         .sum();
     crate::model::TextOverlay::validate_all(&texts, edited_duration)?;
+    let stamp_root = state.cache.join("text-stamps");
+    let dimensions = options.output_resolution()?;
+    let mut stamp_paths = Vec::new();
+    for text in &texts {
+        if let Some(path) = &text.rendered_path {
+            let canonical = std::fs::canonicalize(path)
+                .map_err(|_| "Prepared text image is missing; retry export")?;
+            if canonical.parent() != std::fs::canonicalize(&stamp_root).ok().as_deref() {
+                return Err("Text image is outside the export cache".into());
+            }
+            let mut header = [0u8; 24];
+            use std::io::Read;
+            std::fs::File::open(&canonical)
+                .and_then(|mut f| f.read_exact(&mut header))
+                .map_err(|e| e.to_string())?;
+            let width = u32::from_be_bytes(header[16..20].try_into().unwrap());
+            let height = u32::from_be_bytes(header[20..24].try_into().unwrap());
+            if &header[..8] != b"\x89PNG\r\n\x1a\n"
+                || width == 0
+                || height == 0
+                || u64::from(width) + u64::from(text.rendered_x) > u64::from(dimensions.0)
+                || u64::from(height) + u64::from(text.rendered_y) > u64::from(dimensions.1)
+            {
+                return Err("Text image is outside the export frame".into());
+            }
+            stamp_paths.push(canonical);
+        }
+    }
     let out = export::destination(&videos[0], &options, overwrite)?;
     if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
         return Err("Output cannot replace a source video".into());
@@ -463,7 +533,10 @@ pub fn start_export(
             music,
             music_fade_out,
             texts,
-        )
+        );
+        for path in stamp_paths {
+            let _ = std::fs::remove_file(path);
+        }
     });
     *state
         .worker
