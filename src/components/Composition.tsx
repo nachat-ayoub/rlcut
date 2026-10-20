@@ -55,6 +55,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [mediaReady, setMediaReady] = useState(false);
+  const [playbackFailed, setPlaybackFailed] = useState(false), [playbackAttempt, setPlaybackAttempt] = useState(0);
   const [visualTime, setVisualTime] = useState(() => sourceToEdited(segments, timestamp));
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
@@ -99,24 +100,24 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
   }, [playbackPath, forceCPU, sourceVersion]);
   useEffect(() => {
     if (!playbackPath || !video || !segments.length) { setMediaReady(false); setWaiting(false); return; }
-    setMediaReady(false); setWaiting(true);
+    setMediaReady(false); setWaiting(true); setPlaybackFailed(false);
     let disposed = false;
     const session = new NativePlayback(playbackPath, callbacks.current.timestamp, segments, {
       frame: (_source, time) => { if (disposed) return; playbackTimestamp.current = time; const edited = sourceToEdited(callbacks.current.segments, time); if (Math.abs(edited - textFrame.current) >= 1 / 30) { textFrame.current = edited; setVisualTime(edited); } setMediaReady(true); draw.current(); snapshot.current(); },
       time: value => { if (!disposed) { playbackTimestamp.current = value; callbacks.current.onTimestamp(value); } },
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
-      error: error => { if (!disposed) { setMediaReady(false); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
+      error: error => { if (!disposed) { setMediaReady(false); setPlaybackFailed(true); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
     });
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
-  }, [playbackPath, sourceVersion, segments.length > 0]);
-  useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion]);
+  }, [playbackPath, sourceVersion, segments.length > 0, playbackAttempt]);
+  useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => {
     player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, segments: [], fadeOut: null } });
-  }, [music, musicFadeOut, playbackPath, sourceVersion]);
-  useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion]);
+  }, [music, musicFadeOut, playbackPath, sourceVersion, playbackAttempt]);
+  useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);
   useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments]);
   const updateZoom = (next: number) => {
@@ -232,7 +233,7 @@ export function Composition({ video, sourceVersion = 0, playbackPath, proxyPrepa
             <span className="composition-text-fill">{text.text}</span>
           </div>;
         })}
-        {!mediaReady && !proxyPreparing && <div className="preview-loading"><LoaderCircle className="spin" />Opening native decoder…</div>}
+        {!mediaReady && !proxyPreparing && <div className="preview-loading">{playbackFailed ? <><span>Playback unavailable. Check the error message.</span><button onClick={() => setPlaybackAttempt(value => value + 1)}>Retry playback</button></> : <><LoaderCircle className="spin" />Opening native decoder…</>}</div>}
         {!before && guides && (mediaReady || preview) && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
           {layer === target && <span>
             <Move size={10} />

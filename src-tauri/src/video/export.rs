@@ -305,10 +305,10 @@ pub fn execute(
     start: Instant,
     base: f64,
     span: f64,
-    budget: bool,
+    low_priority: bool,
 ) -> Result<(), String> {
     let mut command = command(b.ffmpeg()?);
-    if budget {
+    if low_priority {
         super::enhance::low_pressure(&mut command, false);
     }
     let mut child = command
@@ -344,17 +344,10 @@ pub fn execute(
         }
     });
     let result = loop {
-        if job.cancel.load(Ordering::SeqCst)
-            || (budget && job.started.elapsed() >= Duration::from_secs(45 * 60))
-        {
+        if job.cancel.load(Ordering::SeqCst) {
             let _ = child.kill();
             let _ = child.wait();
-            break Err(if job.cancel.load(Ordering::SeqCst) {
-                "Export canceled".into()
-            } else {
-                "Export reached the 45-minute safety deadline; no existing output was replaced"
-                    .into()
-            });
+            break Err("Export canceled".into());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -404,6 +397,8 @@ mod tests {
         let o = ExportOptions {
             ai_enhance: false,
             ai_upscale: false,
+            ai_upscale_lite: false,
+            ai_keep_resolution: false,
             quality: 480,
             fps: 30,
             folder: dir.to_string_lossy().into(),

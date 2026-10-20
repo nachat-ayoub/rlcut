@@ -49,6 +49,7 @@ prepare_dev_ai() {
     rife-ncnn-vulkan rlcut-ai-cpu
     rife-v4.6/flownet.param rife-v4.6/flownet.bin
     realesr-animevideov3-x2.param realesr-animevideov3-x2.bin
+    upscayl-lite-4x.param upscayl-lite-4x.bin
   )
   local file missing=()
   for file in "${required[@]}"; do [[ -f "$folder/$file" ]] || missing+=("$file"); done

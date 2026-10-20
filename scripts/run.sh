@@ -55,6 +55,21 @@ if [[ "$action" == dev ]]; then
   # FamilyWild allows the host cookie to work with the container hostname.
   xauth nlist "$DISPLAY" | sed 's/^..../ffff/' | xauth -f "$auth" nmerge -
   [[ -s "$auth" ]] || { echo 'No X11 cookie found. Check DISPLAY and XAUTHORITY in your desktop session.' >&2; exit 1; }
+  # Forward the host PulseAudio / PipeWire-Pulse socket when available. Without
+  # audio forwarding, playbin may never preroll on school Docker desktops.
+  pulse_socket="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/pulse/native"
+  if [[ "${PULSE_SERVER:-}" == unix:* ]]; then pulse_socket="${PULSE_SERVER#unix:}"; fi
+  if [[ -S "$pulse_socket" && "${RLCUT_PREVIEW_SILENT:-0}" != 1 ]]; then
+    args+=(--mount "type=bind,src=$pulse_socket,dst=/tmp/rlcut-pulse-native,readonly"
+      -e PULSE_SERVER=unix:/tmp/rlcut-pulse-native)
+    pulse_cookie="${PULSE_COOKIE:-$HOME/.config/pulse/cookie}"
+    if [[ -f "$pulse_cookie" ]]; then
+      args+=(--mount "type=bind,src=$pulse_cookie,dst=/tmp/rlcut-pulse-cookie,readonly" -e PULSE_COOKIE=/tmp/rlcut-pulse-cookie)
+    fi
+  else
+    args+=(-e RLCUT_PREVIEW_SILENT=1)
+    echo 'rlcut: no preview audio socket; video playback will be silent (export audio is preserved).'
+  fi
   args+=(--mount type=bind,src=/tmp/.X11-unix,dst=/tmp/.X11-unix,readonly
     --mount "type=bind,src=$auth,dst=/tmp/rlcut.xauth,readonly"
     -e "DISPLAY=$DISPLAY" -e XAUTHORITY=/tmp/rlcut.xauth -e GDK_BACKEND=x11

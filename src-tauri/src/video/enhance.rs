@@ -5,7 +5,7 @@ use super::{
 };
 use crate::model::ExportOptions;
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     fs,
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -38,6 +38,8 @@ pub fn installation() -> Option<(PathBuf, PathBuf)> {
             && dir.join("rlcut-ai-cpu").is_file()
             && dir.join("realesr-animevideov3-x2.param").is_file()
             && dir.join("realesr-animevideov3-x2.bin").is_file()
+            && dir.join("upscayl-lite-4x.param").is_file()
+            && dir.join("upscayl-lite-4x.bin").is_file()
             && model.join("flownet.param").is_file()
             && model.join("flownet.bin").is_file())
         .then_some((binary, model))
@@ -137,11 +139,6 @@ impl Drop for Scratch {
     }
 }
 fn canceled(job: &Job) -> Result<(), String> {
-    if job.started.elapsed() >= Duration::from_secs(45 * 60) {
-        return Err(
-            "Export reached its 45-minute safety deadline. No existing output was replaced.".into(),
-        );
-    }
     if job.cancel.load(Ordering::SeqCst) {
         Err("Export canceled".into())
     } else {
@@ -291,7 +288,6 @@ struct Session {
     folder: PathBuf,
     scratch: PathBuf,
     log: PathBuf,
-    fallback: Cell<bool>,
 }
 impl Session {
     fn request(
@@ -301,103 +297,82 @@ impl Session {
         job: &Job,
         mut report: impl FnMut(u64, u64),
     ) -> Result<(), String> {
-        loop {
-            if !self.fallback.get() && job.started.elapsed() >= Duration::from_secs(40 * 60) {
-                self.worker.borrow_mut().take();
-                self.fallback.set(true);
-                if let Ok(mut p) = job.progress.lock() {
-                    p.warning=Some("AI time budget reached: remaining frames use frame blending and standard upscaling. Completed neural work was retained.".into());
-                }
-            }
-            if self.worker.borrow().is_none() {
-                let mut command = command(&self.folder.join("rlcut-ai-cpu"));
-                command
-                    .arg("serve")
-                    .arg(&self.folder)
-                    .current_dir(&self.scratch)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::null())
-                    .stderr(
-                        fs::OpenOptions::new()
-                            .append(true)
-                            .open(&self.log)
-                            .map_err(|e| e.to_string())?,
-                    );
-                low_pressure(&mut command, true);
-                let mut process = Process(
-                    command
-                        .spawn()
-                        .map_err(|e| format!("Cannot start persistent AI worker: {e}"))?,
+        canceled(job)?;
+        if self.worker.borrow().is_none() {
+            let mut command = command(&self.folder.join("rlcut-ai-cpu"));
+            command
+                .arg("serve")
+                .arg(&self.folder)
+                .current_dir(&self.scratch)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(
+                    fs::OpenOptions::new()
+                        .append(true)
+                        .open(&self.log)
+                        .map_err(|e| e.to_string())?,
                 );
-                let input = process.0.stdin.take().ok_or("Missing AI command pipe")?;
-                nonblocking(&input)?;
-                *self.worker.borrow_mut() = Some(Worker { process, input });
-            }
-            let result = self.scratch.join("worker-result");
-            let _ = fs::remove_file(&result);
-            let _ = fs::remove_file(state);
-            let chosen = if self.fallback.get() {
-                if mode == "interpolate" {
-                    "blend"
-                } else {
-                    "resize"
+            low_pressure(&mut command, true);
+            let mut process = Process(
+                command
+                    .spawn()
+                    .map_err(|e| format!("Cannot start persistent AI worker: {e}"))?,
+            );
+            let input = process.0.stdin.take().ok_or("Missing AI command pipe")?;
+            nonblocking(&input)?;
+            *self.worker.borrow_mut() = Some(Worker { process, input });
+        }
+        let result = self.scratch.join("worker-result");
+        let _ = fs::remove_file(&result);
+        let _ = fs::remove_file(state);
+        write_frame(
+            &mut self.worker.borrow_mut().as_mut().unwrap().input,
+            format!("{mode}\n").as_bytes(),
+            job,
+        )?;
+        let mut last = None;
+        loop {
+            canceled(job)?;
+            if let Ok(text) = fs::read_to_string(&result) {
+                if text == "ok" {
+                    if let Some((a, b)) = status(state) {
+                        report(a, b);
+                    }
+                    return Ok(());
                 }
-            } else {
-                mode
-            };
+                return Err(format!("Persistent AI worker: {text}"));
+            }
+            if let Some(value) = status(state) {
+                if last != Some(value) {
+                    report(value.0, value.1);
+                    last = Some(value);
+                }
+            }
+            if self
+                .worker
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .process
+                .0
+                .try_wait()
+                .map_err(|e| e.to_string())?
+                .is_some()
             {
-                let mut worker = self.worker.borrow_mut();
-                write_frame(
-                    &mut worker.as_mut().unwrap().input,
-                    format!("{chosen}\n").as_bytes(),
-                    job,
-                )?;
+                return Err("AI worker exited unexpectedly; inspect export diagnostics".into());
             }
-            let mut last = None;
-            loop {
-                canceled(job)?;
-                if !self.fallback.get() && job.started.elapsed() >= Duration::from_secs(40 * 60) {
-                    break;
-                }
-                if let Ok(text) = fs::read_to_string(&result) {
-                    if text == "ok" {
-                        if let Some((a, b)) = status(state) {
-                            report(a, b);
-                        }
-                        return Ok(());
-                    }
-                    return Err(format!("Persistent AI worker: {text}"));
-                }
-                if let Some(value) = status(state) {
-                    if last != Some(value) {
-                        report(value.0, value.1);
-                        last = Some(value);
-                    }
-                }
-                if self
-                    .worker
-                    .borrow_mut()
-                    .as_mut()
-                    .unwrap()
-                    .process
-                    .0
-                    .try_wait()
-                    .map_err(|e| e.to_string())?
-                    .is_some()
-                {
-                    return Err("AI worker exited unexpectedly; inspect export diagnostics".into());
-                }
-                if let Ok(mut p) = job.progress.lock() {
-                    p.elapsed = job.started.elapsed().as_secs_f64();
-                }
-                pause(job)?;
+            if let Ok(mut p) = job.progress.lock() {
+                p.elapsed = job.started.elapsed().as_secs_f64();
             }
+            pause(job)?;
         }
     }
 }
 struct Upscale {
+    mode: &'static str,
     session: Rc<Session>,
     tiles: u64,
+    previous: RefCell<Option<(Vec<u8>, Vec<u8>)>>,
 }
 impl Upscale {
     fn frame(
@@ -408,13 +383,29 @@ impl Upscale {
         export_start: Instant,
         detail: &str,
     ) -> Result<Vec<u8>, String> {
+        // Frame-rate conversion and cuts can repeat an identical PNG. Keep only
+        // the previous input/output pair instead of running the network again.
+        if let Some((source, output)) = self.previous.borrow().as_ref() {
+            if source == bytes {
+                progress.report(
+                    job,
+                    export_start,
+                    self.tiles,
+                    self.tiles,
+                    1.,
+                    "reusing duplicate frame",
+                );
+                progress.finish(self.tiles, 1.);
+                return Ok(output.clone());
+            }
+        }
         let input = self.session.scratch.join("upscale-in.png");
         let output = self.session.scratch.join("upscale-out.png");
         let state = self.session.scratch.join("upscale-progress");
         fs::write(&input, bytes).map_err(|e| e.to_string())?;
         let _ = fs::remove_file(&output);
         self.session
-            .request("upscale", &state, job, |done, total| {
+            .request(self.mode, &state, job, |done, total| {
                 progress.report(job, export_start, done, total, 1., detail)
             })?;
         progress.report(job, export_start, self.tiles, self.tiles, 1., detail);
@@ -422,7 +413,9 @@ impl Upscale {
         if fs::metadata(&output).map_err(|e| e.to_string())?.len() > 96 * 1024 * 1024 {
             return Err("AI upscale output exceeds the frame safety limit".into());
         }
-        fs::read(output).map_err(|e| e.to_string())
+        let result = fs::read(output).map_err(|e| e.to_string())?;
+        *self.previous.borrow_mut() = Some((bytes.to_vec(), result.clone()));
+        Ok(result)
     }
 }
 fn write_timed_frame(
@@ -489,7 +482,7 @@ pub fn run(
         p.remaining = None;
     }
     let (binary, _model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
-    let (width, height) = o.resolution()?;
+    let (width, height) = o.ai_input_resolution()?;
     let upscale_tiles = tile_count(width, height, UPSCALE_CORE);
     let rife_tiles = tile_count(width, height, RIFE_STEP);
     let scratch_path = input.with_extension("frames");
@@ -504,11 +497,16 @@ pub fn run(
         folder: ai_folder.canonicalize().map_err(|e| e.to_string())?,
         scratch: scratch.0.clone(),
         log: log.to_path_buf(),
-        fallback: Cell::new(false),
     });
     let upscaler = o.ai_upscale.then(|| Upscale {
+        mode: if o.ai_upscale_lite {
+            "upscale-lite"
+        } else {
+            "upscale"
+        },
         session: session.clone(),
         tiles: upscale_tiles,
+        previous: RefCell::new(None),
     });
     let before = scratch.0.join("before.png");
     let after = scratch.0.join("after.png");
@@ -536,11 +534,13 @@ pub fn run(
             "-filter_threads",
             "1",
             "-vf",
-            "scale=in_color_matrix=bt709:in_range=tv:out_range=pc,format=rgb24",
+            &format!("scale={width}:{height}:flags=lanczos:in_color_matrix=bt709:in_range=tv:out_range=pc,format=rgb24"),
             "-threads",
             "1",
             "-c:v",
             "png",
+            "-compression_level",
+            "1",
             "-f",
             "image2pipe",
             "pipe:1",

@@ -71,6 +71,8 @@ export default function App() {
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-edit.mp4');
   const [aiEnhance, setAiEnhance] = useState(false);
   const [aiUpscale, setAiUpscale] = useState(false);
+  const [aiUpscaleLite, setAiUpscaleLite] = useState(false);
+  const [aiKeepResolution, setAiKeepResolution] = useState(true);
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
@@ -339,7 +341,7 @@ export default function App() {
       const trackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
       const exportTexts = [...texts].sort((a, b) => (trackOrder.get(b.trackId) ?? -1) - (trackOrder.get(a.trackId) ?? -1));
       if (aiEnhance || aiUpscale) setPlaying(false);
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, folder, filename: outputName } };
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -356,7 +358,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, aiEnhance, aiUpscale, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, init?.aiAvailable, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, init?.aiAvailable, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -587,6 +589,7 @@ export default function App() {
       </div>
     </aside>
     <main className="workspace">
+      {init?.previewAudio === false && <div className="runtime-notice">Preview audio is unavailable in this Docker session. Playback is silent; exports retain audio. Restart with a working PulseAudio/PipeWire socket to hear preview audio.</div>}
       {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, live composition previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
       </div>}
       {video && <div className="preview-toolbar">
@@ -741,11 +744,15 @@ export default function App() {
             <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
           </label>
           <label className="setting-toggle compact">
-            <div><strong>AI upscale ×2</strong><small>Optional · compact Real-ESRGAN video model</small></div>
-            <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
+            <div><strong>AI upscale / enhance</strong><small>Optional · video first, text and music last</small></div>
+            <input className="switch" type="checkbox" aria-label="AI upscale or enhance output" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
           </label>
-          {aiUpscale && <p className="enhancement-note">Final output: {quality * 2} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * 2}. Upscales the selected export resolution without reducing it first. This compact model is trained for animation; it may alter game textures or text.</p>}
-          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. AI video is prepared once and reused when only text, audio or the destination changes. Uses half the available CPU threads (up to four), low priority and bounded inference memory. After 40 minutes, remaining frames use blending/standard upscaling; a 45-minute safety deadline stops unfinished work. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
+          {aiUpscale && <>
+            <label className="field">AI model<Dropdown label="AI model" value={aiUpscaleLite ? 'lite' : 'fast'} onChange={value => setAiUpscaleLite(value === 'lite')} options={[{ value: 'fast', label: 'Fast · compact video model' }, { value: 'lite', label: 'Upscayl Lite · general images' }]} /></label>
+            <label className="field">AI output size<Dropdown label="AI output size" value={aiKeepResolution ? 'keep' : 'double'} onChange={value => setAiKeepResolution(value === 'keep')} options={[{ value: 'keep', label: 'Keep selected size · less AI work' }, { value: 'double', label: 'Double selected size · more AI work' }]} /></label>
+            <p className="enhancement-note">Final output: {quality * (aiKeepResolution ? 1 : 2)} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * (aiKeepResolution ? 1 : 2)}. {aiKeepResolution ? 'AI works from a half-size composition. This reduces work but trades native source detail for reconstructed detail; compare with a normal export for sharp 4K footage.' : 'AI works on the selected composition, rather than the original 4K recording.'} {aiUpscaleLite ? 'Uses Upscayl’s Lite 4× model, resized to the chosen output. Lite does not guarantee faster CPU processing.' : 'The compact model is trained for animation and may alter game textures.'}</p>
+          </>}
+          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only. Completed AI video is reused when only text, audio or the destination changes. Uses bounded CPU threads and low priority. Every frame receives AI processing; there is no timed quality downgrade or 45-minute cutoff. Live progress estimates the remaining time. 30 minutes for a 10-second clip is a target, not a hardware guarantee. AI can introduce flicker, motion and texture artifacts.</p>}
           {!init?.aiAvailable && <small className="enhancement-note">AI components are unavailable in this build. You can configure the options, but AI export requires the Linux AI AppImage or a prepared local AI runtime.</small>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>

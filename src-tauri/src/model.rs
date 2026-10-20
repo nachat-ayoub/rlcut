@@ -249,6 +249,10 @@ pub struct ExportOptions {
     pub ai_enhance: bool,
     #[cfg_attr(feature = "serialization", serde(default))]
     pub ai_upscale: bool,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub ai_upscale_lite: bool,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub ai_keep_resolution: bool,
     pub quality: u32,
     pub fps: u32,
     pub folder: String,
@@ -401,6 +405,24 @@ impl Segment {
     }
 }
 impl ExportOptions {
+    pub fn output_resolution(&self) -> Result<(u32, u32), String> {
+        let (w, h) = self.resolution()?;
+        let scale = if self.ai_upscale && !self.ai_keep_resolution {
+            2
+        } else {
+            1
+        };
+        Ok((w * scale, h * scale))
+    }
+    pub fn ai_input_resolution(&self) -> Result<(u32, u32), String> {
+        let (w, h) = self.resolution()?;
+        if self.ai_upscale && self.ai_keep_resolution {
+            Ok((w / 2, h / 2))
+        } else {
+            Ok((w, h))
+        }
+    }
+
     pub fn resolution(&self) -> Result<(u32, u32), String> {
         if self.ai_enhance && (!matches!(self.fps, 60 | 120) || self.quality > 1080) {
             return Err("AI smoothing requires 480p, 720p or 1080p and 60 or 120 FPS".into());

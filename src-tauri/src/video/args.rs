@@ -106,11 +106,11 @@ fn export_args_impl(
     texts: &[TextOverlay],
     enhanced: Option<&Path>,
 ) -> Result<Vec<String>, String> {
-    let (mut w, mut h) = o.resolution()?;
-    if enhanced.is_some() && o.ai_upscale {
-        w *= 2;
-        h *= 2;
-    }
+    let (w, h) = if enhanced.is_some() {
+        o.output_resolution()?
+    } else {
+        o.resolution()?
+    };
     if videos.is_empty()
         || videos
             .iter()
@@ -620,6 +620,8 @@ mod tests {
         let options = ExportOptions {
             ai_enhance: false,
             ai_upscale: false,
+            ai_upscale_lite: false,
+            ai_keep_resolution: false,
             quality: 1080,
             fps: 60,
             folder: "/tmp".into(),
@@ -671,6 +673,8 @@ mod tests {
         let o = ExportOptions {
             ai_enhance: false,
             ai_upscale: false,
+            ai_upscale_lite: false,
+            ai_keep_resolution: false,
             quality: 480,
             fps: 60,
             folder: "/tmp".into(),
@@ -700,6 +704,8 @@ mod tests {
             let o = ExportOptions {
                 ai_enhance: false,
                 ai_upscale: false,
+                ai_upscale_lite: false,
+                ai_keep_resolution: false,
                 quality: q,
                 fps: 30,
                 folder: "".into(),
@@ -710,6 +716,8 @@ mod tests {
         let o = ExportOptions {
             ai_enhance: false,
             ai_upscale: false,
+            ai_upscale_lite: false,
+            ai_keep_resolution: false,
             quality: 720,
             fps: 24,
             folder: "".into(),

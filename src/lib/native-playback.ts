@@ -23,6 +23,7 @@ export class NativePlayback {
   private commands: Promise<void>;
   private latestTime = 0;
   private waiting = true;
+  private waitingSince = performance.now();
   constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks) {
     this.latestTime = time;
     this.commands = invoke<void>('playback_open', { session: this.session, path, time, segments });
@@ -43,6 +44,8 @@ export class NativePlayback {
         const header = new DataView(buffer), width = header.getUint32(0, true), height = header.getUint32(4, true), sequence = header.getUint32(8, true), flags = header.getUint32(12, true);
         const time = header.getFloat64(16, true);
         const waiting = !(flags & 2);
+        if (!waiting) this.waitingSince = performance.now();
+        else if (performance.now() - this.waitingSince > 15000) throw new Error('Preview decoder did not deliver a frame within 15 seconds. Retry playback. In Docker, check audio forwarding or restart with RLCUT_PREVIEW_SILENT=1.');
         if (waiting !== this.waiting) { this.waiting = waiting; this.callbacks.waiting(waiting); }
         this.latestTime = time;
         if (flags & 2) this.callbacks.time(time);
@@ -73,6 +76,7 @@ export class NativePlayback {
     // Keep the local state in lockstep with the callback. Otherwise the next
     // ready packet can look unchanged and leave the React loading overlay up.
     this.waiting = true;
+    this.waitingSince = performance.now();
     this.callbacks.waiting(true);
     this.control({ time });
   }
