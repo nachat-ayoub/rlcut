@@ -246,22 +246,35 @@ small {
   max-height:none;
   scrollbar-width:thin
 }
+.preset-row {
+  position:relative;
+  display:flex;
+  align-items:stretch;
+  border:1px solid transparent;
+  border-radius:7px;
+  margin-bottom:5px
+}
+.preset-row.selected {
+  border-color:#44364f;
+  background:linear-gradient(90deg,#292232,#211d29)
+}
 .preset-item {
-  width:100%;
+  flex:1;
+  min-width:0;
   text-align:left;
   justify-content:flex-start;
   padding:12px 10px;
   gap:9px;
   color:#aaa5b3;
-  margin-bottom:5px
+  border:0;
+  background:transparent
 }
 .preset-item>span:first-of-type {
   overflow:hidden;
-  text-overflow:ellipsis
+  text-overflow:ellipsis;
+  white-space:nowrap
 }
-.preset-item.selected {
-  border:1px solid #44364f;
-  background:linear-gradient(90deg,#292232,#211d29);
+.preset-row.selected .preset-item {
   color:#e6d9ff
 }
 .preset-item small {
@@ -278,6 +291,33 @@ small {
   border-radius:50%;
   margin-left:auto;
   flex-shrink:0
+}
+.preset-actions {
+  display:flex;
+  align-items:center;
+  gap:1px;
+  padding-right:5px;
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .15s ease
+}
+.preset-row:hover .preset-actions,.preset-row:focus-within .preset-actions {
+  opacity:1;
+  pointer-events:auto
+}
+.preset-actions button {
+  width:27px;
+  height:27px;
+  padding:0;
+  color:#9c93a5;
+  border-radius:6px
+}
+.preset-actions button:hover {
+  color:#eadcff;
+  background:#352b3e
+}
+.preset-row:has(.preset-actions) .selection-dot {
+  display:none
 }
 .subtle-button {
   color:#898391;

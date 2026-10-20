@@ -385,11 +385,15 @@ export default function App() {
     } window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
   }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath, togglePlayback]);
   function create() { const p = copyPreset(preset, customPresetName(store.presets)); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
-  function remove() {
-    if (preset.id === 'classic')
-      return; setStore(s => ({ ...s, presets: s.presets.filter(p => p.id !== preset.id), activePreset: 'classic', settings: { ...s.settings, defaultPreset: s.settings.defaultPreset === preset.id ? 'classic' : s.settings.defaultPreset } })); setRename('');
+  function remove(id = preset.id) {
+    const target = allPresets.find(item => item.id === id);
+    if (!target || id === 'classic' || !window.confirm(`Delete “${target.name}”?`)) return;
+    setStore(s => ({ ...s, presets: s.presets.filter(p => p.id !== id), activePreset: s.activePreset === id ? 'classic' : s.activePreset, settings: { ...s.settings, defaultPreset: s.settings.defaultPreset === id ? 'classic' : s.settings.defaultPreset } }));
+    if (preset.id === id) setRename(classic.name);
+    setNotice('Preset deleted');
   }
   function select(id: string) { setStore(s => ({ ...s, activePreset: id })); setRename(allPresets.find(p => p.id === id)?.name ?? ''); }
+  function managePreset(id: string) { select(id); setModal('presets'); }
   async function importPreset() {
     try {
       const p = await invoke<Preset | null>('import_preset');
@@ -550,13 +554,19 @@ export default function App() {
       </button>
       </div>
       <div className="preset-list">
-        {allPresets.map(p => <button className={`preset-item ${p.id === preset.id ? 'selected' : ''}`} key={p.id} onClick={() => select(p.id)}>
-          <LayoutTemplate size={16} />
-          <span>
-            {p.name}{p.id === 'classic' && <small>BUILT-IN</small>}
-          </span>
-          {p.id === preset.id && <span className="selection-dot" />}
-        </button>)}
+        {allPresets.map(p => <div className={`preset-row ${p.id === preset.id ? 'selected' : ''}`} key={p.id}>
+          <button className="preset-item" onClick={() => select(p.id)}>
+            <LayoutTemplate size={16} />
+            <span>
+              {p.name}{p.id === 'classic' && <small>BUILT-IN</small>}
+            </span>
+            {p.id === preset.id && <span className="selection-dot" />}
+          </button>
+          {p.id !== 'classic' && <div className="preset-actions">
+            <button aria-label={`Rename ${p.name}`} title="Rename preset" onClick={() => managePreset(p.id)}><Pencil size={14} /></button>
+            <button aria-label={`Delete ${p.name}`} title="Delete preset" onClick={() => remove(p.id)}><Trash2 size={14} /></button>
+          </div>}
+        </div>)}
       </div>
       <button className="subtle-button" onClick={create}>
         <Plus size={15} />Create preset</button>
@@ -841,7 +851,7 @@ export default function App() {
           <div className="modal-actions">
             <button onClick={create}>
               <Copy size={15} />Duplicate</button>
-            <button disabled={preset.id === 'classic'} onClick={remove}>
+            <button disabled={preset.id === 'classic'} onClick={() => remove()}>
               <Trash2 size={15} />Delete custom</button>
             <button onClick={() => select('classic')}>
               <LayoutTemplate size={15} />Restore default</button>
