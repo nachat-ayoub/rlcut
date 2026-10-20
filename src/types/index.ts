@@ -162,7 +162,9 @@ export type Project = {
   outputName: string;
 };
 export type Init = {
+  version?: string;
   previewAudio?: boolean;
+  softwareRendering?: boolean;
   aiAvailable: boolean;
   store: Store;
   binaries: {

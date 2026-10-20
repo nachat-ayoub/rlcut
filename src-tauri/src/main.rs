@@ -2,6 +2,30 @@
 fn main() {
     #[cfg(target_os = "linux")]
     {
+        // Decide before GTK/WebKit starts: school Macs can expose a display
+        // without an accessible DRM render node or a working EGL driver.
+        let requested = std::env::var("RLCUT_SOFTWARE_RENDERING").ok();
+        let render_node = std::fs::read_dir("/dev/dri").is_ok_and(|entries| {
+            entries.flatten().any(|entry| {
+                entry.file_name().to_string_lossy().starts_with("renderD")
+                    && std::fs::File::open(entry.path()).is_ok()
+            })
+        });
+        if requested.as_deref() == Some("1")
+            || (requested.is_none()
+                && (!render_node || std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref() == Ok("1")))
+        {
+            for key in [
+                "LIBGL_ALWAYS_SOFTWARE",
+                "WEBKIT_DISABLE_COMPOSITING_MODE",
+                "WEBKIT_DISABLE_DMABUF_RENDERER",
+            ] {
+                if requested.as_deref() == Some("1") || std::env::var_os(key).is_none() {
+                    std::env::set_var(key, "1");
+                }
+            }
+            eprintln!("rlcut: software graphics compatibility enabled");
+        }
         // Prefer a predictable CPU decoder for the small editor proxy. Hardware
         // video decoding in WebKit can fail on school PC graphics drivers.
         if std::env::var_os("GST_PLUGIN_FEATURE_RANK").is_none() {

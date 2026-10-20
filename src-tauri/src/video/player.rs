@@ -18,8 +18,14 @@ unsafe extern "C" {
     fn rl_player_seek(player: *mut c_void, time: f64) -> c_int;
     fn rl_player_position(player: *mut c_void) -> f64;
     fn rl_player_status(player: *mut c_void, error: *mut c_char, size: usize) -> c_int;
-    fn rl_player_frame(player: *mut c_void, w: c_int, h: c_int, pts: *mut f64) -> *mut u8;
-    fn rl_frame_free(frame: *mut u8);
+    fn rl_player_frame_into(
+        player: *mut c_void,
+        w: c_int,
+        h: c_int,
+        pts: *mut f64,
+        target: *mut u8,
+        capacity: usize,
+    ) -> c_int;
 }
 #[cfg(target_os = "linux")]
 pub struct Player {
@@ -247,34 +253,36 @@ impl Player {
         }
         self.update_volume();
         let mut pts = 0.;
-        let bytes = unsafe {
-            rl_player_frame(
+        let length = self.width as usize * self.height as usize * 4;
+        self.rgba.resize(length, 0);
+        let received = unsafe {
+            rl_player_frame_into(
                 self.handle,
                 self.width as c_int,
                 self.height as c_int,
                 &mut pts,
+                self.rgba.as_mut_ptr(),
+                self.rgba.len(),
             )
         };
-        if !bytes.is_null() {
+        if received != 0 {
             if self
                 .seeking
                 .is_none_or(|target| (pts - target).abs() < 0.15)
             {
-                let length = self.width as usize * self.height as usize * 4;
-                self.rgba = unsafe { std::slice::from_raw_parts(bytes, length) }.to_vec();
                 self.sequence = self.sequence.wrapping_add(1);
                 self.frame_time = pts;
                 time = pts;
                 self.seeking = None;
             }
-            unsafe { rl_frame_free(bytes) };
         }
         self.position = time;
         self.sync_music(false)?;
         Ok(())
     }
     pub fn pump(&mut self) {
-        if self.error.is_none() {
+        if self.error.is_none() && (self.playing || self.seeking.is_some() || self.rgba.is_empty())
+        {
             if let Err(error) = self.tick() {
                 let _ = self.play(false);
                 self.error = Some(error);

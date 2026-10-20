@@ -1828,3 +1828,5 @@ progress::-moz-progress-bar {
 .playhead.snapped>span { background:#6fe2df }
 
 .enhancement-note { font-size: 11px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+
+.preview-performance { position:absolute; left:8px; bottom:8px; z-index:6; pointer-events:none; padding:3px 6px; border-radius:4px; background:#111116bb; color:#ccc; font-size:10px; font-variant-numeric:tabular-nums; }

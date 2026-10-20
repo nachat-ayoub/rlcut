@@ -76,7 +76,7 @@ Player *rl_player_open(const char *path, int width, int height, char *error, siz
     g_object_set(pipeline,"audio-sink",audio,NULL);
     gst_object_unref(audio);
   }
-  char *description = g_strdup_printf("videoconvert ! videoscale ! video/x-raw,format=RGBA,width=%d,height=%d,pixel-aspect-ratio=1/1 ! appsink name=frames sync=true max-buffers=1 drop=true wait-on-eos=false", width,height);
+  char *description = g_strdup_printf("videoscale ! videoconvert ! video/x-raw,format=RGBA,width=%d,height=%d,pixel-aspect-ratio=1/1 ! appsink name=frames sync=true max-buffers=1 drop=true wait-on-eos=false", width,height);
   GstElement *video = gst_parse_bin_from_description(description, 1, &issue); g_free(description);
   if (!pipeline || !video || issue) {
     copy_error(error,size,issue ? issue->message : "Bundled native playback plugins are missing");
@@ -112,19 +112,14 @@ int rl_player_status(Player *p,char *error,size_t size) {
   if(!m)return 0;
   gst_mini_object_unref(m);return 1;
 }
-/* Return a malloc-owned, tightly packed RGBA frame. Native queues retain only
- * one pending frame; the caller never downloads a growing event backlog. */
-unsigned char *rl_player_frame(Player *p,int width,int height,double *pts) {
+/* Copy directly into the caller-owned reusable RGBA buffer. Native queues
+ * retain only one pending frame; no malloc/copy/free round trip per frame. */
+int rl_player_frame_into(Player *p,int width,int height,double *pts,unsigned char *target,size_t capacity) {
   GstSample *sample=p->playing?gst_app_sink_try_pull_sample((GstAppSink*)p->sink,0):gst_app_sink_try_pull_preroll((GstAppSink*)p->sink,0);
-  if(!sample)return NULL;
+  if(!sample)return 0;
   GstBuffer *buffer=gst_sample_get_buffer(sample);
   size_t length=(size_t)width*(size_t)height*4;
-  unsigned char *result=NULL;
-  if(gst_buffer_get_size(buffer)>=length){
-    result=malloc(length);
-    if(gst_buffer_extract(buffer,0,result,length)!=length){free(result);result=NULL;}
-    else *pts=rl_player_position(p);
-  }
-  gst_mini_object_unref(sample);return result;
+  int copied=capacity>=length && gst_buffer_get_size(buffer)>=length && gst_buffer_extract(buffer,0,target,length)==length;
+  if(copied)*pts=rl_player_position(p);
+  gst_mini_object_unref(sample);return copied;
 }
-void rl_frame_free(unsigned char *frame){free(frame);}
