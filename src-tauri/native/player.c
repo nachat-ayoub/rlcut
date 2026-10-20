@@ -66,6 +66,16 @@ Player *rl_player_open(const char *path, int width, int height, char *error, siz
   char *uri = g_filename_to_uri(path, NULL, &issue);
   if (!uri) { copy_error(error,size,issue->message); g_error_free(issue); return NULL; }
   GstElement *pipeline = gst_element_factory_make("playbin", NULL);
+  const char *silent = getenv("RLCUT_PREVIEW_SILENT");
+  if (pipeline && silent && silent[0]=='1') {
+    GstElement *audio = gst_element_factory_make("fakesink", NULL);
+    if (!audio) { gst_object_unref(pipeline); g_free(uri); copy_error(error,size,"Silent preview sink is missing"); return NULL; }
+    gst_object_ref_sink(audio);
+    // Keep the media clock active even without an audio device/server.
+    g_object_set(audio,"sync",1,NULL);
+    g_object_set(pipeline,"audio-sink",audio,NULL);
+    gst_object_unref(audio);
+  }
   char *description = g_strdup_printf("videoconvert ! videoscale ! video/x-raw,format=RGBA,width=%d,height=%d,pixel-aspect-ratio=1/1 ! appsink name=frames sync=true max-buffers=1 drop=true wait-on-eos=false", width,height);
   GstElement *video = gst_parse_bin_from_description(description, 1, &issue); g_free(description);
   if (!pipeline || !video || issue) {

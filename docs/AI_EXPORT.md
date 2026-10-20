@@ -1,30 +1,40 @@
 # Optional AI export (Linux x86_64)
 
-Export offers two independent options, both off by default and reset when opening a project:
+Both AI options start off. Export always reads the original recordings, independently of the smaller preview proxies.
 
-* **AI smooth export** uses RIFE v4.6 to generate intermediate frames. Select 60 FPS for 30 FPS footage, or 120 FPS for 60 FPS footage. All resolutions, including **1080 × 1920**, remain available. Enabling smoothing preserves the chosen resolution.
-* **AI upscale ×2** uses the compact Real-ESRGAN anime-video-v3 neural model to double the selected export dimensions: 480 × 854 → 960 × 1708; 720 × 1280 → 1440 × 2560; **1080 × 1920 → 2160 × 3840**. It does not first reduce the selected resolution. It works with or without smoothing. The model was trained for animation and may change game textures, HUD text or fine details.
+## Video first, AI second, text and audio last
 
-Preview is unchanged. Native source detail cannot be recreated perfectly; these are open-source neural models, not Topaz's proprietary restoration engine. AI can introduce artifacts. Check fast ball movement, HUDs and tile edges before sharing. Timeline cuts are not interpolated across. 120 FPS output requires suitable player/display support; some upload services cap playback at 60 FPS.
+The first AI export renders the selected cuts, layout and color correction into a silent composition. AI processes that video, then a finishing pass adds text, clip audio and music. Text stays crisp at the final resolution. Completed AI videos are cached across app launches; text, font, music, volume and destination edits reuse the cache. Changes to sources, ranges, layout, color, FPS, resolution, AI options, model or app version prepare a new result. Incomplete/failed results are never cached. Settings → Clear AI cache removes prepared videos. Old entries are pruned at 4 GiB, retaining the current result. Storage uses `XDG_CACHE_HOME`, otherwise `~/.cache/io.rlcut.desktop/ai-exports-v4`.
 
-## Reusing prepared AI video
+## Upscaling choices
 
-The first enhanced export prepares a silent video without text, then renders text and audio in a separate finishing pass. Completed results are cached across app launches. Changing text, fonts, music, clip volume or the destination reuses the AI video. Changing source files, clip ranges, layout, color correction, FPS, resolution, AI options, models or app version prepares a new result. Failed/canceled preparation is never reused. Settings → Clear AI cache removes prepared results; older entries are pruned at 4 GiB (the current result is retained). Cache storage follows `XDG_CACHE_HOME`, otherwise `~/.cache/io.rlcut.desktop/ai-exports-v4`.
+**AI upscale / enhance** offers two models:
 
-## Memory versus time
+* **Fast · compact video model:** Real-ESRGAN animevideov3 ×2. Trained for animation; it can alter game textures/HUDs.
+* **Upscayl Lite · general images:** the unmodified `upscayl-lite-4x` model shipped with Upscayl v2.15.0. Its native ×4 prediction is resized inside each tile to the requested ×2 result. This bounds full-frame memory and does not construct a full ×4 frame. Lite is lighter than Upscayl's larger image models; it is not necessarily faster than the compact video model on a CPU.
 
-The export processes one frame at a time. RIFE sees overlapping 640px cores with a 64px context halo (at most 768 × 768 pixels); overlapping predictions are feathered together. Upscaling uses 256px cores with 32px context and crops to each core. This bounds inference memory independently of full-frame resolution while avoiding the heavy process and context overhead of very small tiles. Fast motion can extend beyond tile context and cause local inconsistencies; blending reduces seams but cannot guarantee their absence.
+The default **Keep selected size** mode processes a half-width/half-height composition. For 1080 × 1920 output, the AI input is **540 × 960**, not the raw PS5 4K recording. This reduces AI input pixels by four relative to the previous ×2 enlargement path. The final image remains 1080 × 1920. Reconstruction trades native source detail for learned detail: a normal export may look better when the recording is already sharp. Compare before committing to a long render.
 
-Enhancement processes use half the available CPU threads, bounded to 1–4, at nice priority 15. A persistent CPU helper loads each model once per job and runs tiles directly in memory, avoiding per-tile process startup, repeated model loading and PNG tile I/O. The helper has a 3 GiB address-space cap. No GPU is used for neural inference. The cap is not a total-app RAM budget: decoders, encoders and the UI need additional memory. `RLCUT_AI_THREADS=1..4` overrides the default thread count. Processing can still be slow on an old CPU, especially when smoothing and 2× upscaling are combined. There is no measured performance guarantee for an Intel HD 5500 laptop. To bound waiting, after 40 minutes from export start the app stops neural inference and finishes remaining frames with frame blending and bicubic upscaling. Completed neural frames are retained; a visible warning is saved with the cache and shown again on reuse. This can produce a visible quality change and blending can cause ghosting. At 45 minutes, unfinished enhanced exports stop with an error and preserve existing outputs. The deadline bounds processing rather than guaranteeing a successful export on every machine, especially for 4K/120 FPS output.
+**Double selected size** retains the previous behavior: AI processes the selected composition dimensions and doubles them, up to 2160 × 3840. It does not run the model on the original 4K source dimensions.
 
-The app pauses preview playback for AI exports. It renders a high-quality intermediate MP4, then streams decoded frames through optional interpolation and/or upscaling into the final encoder. Only a few full-frame PNGs are kept on disk; no clip-sized frame sequence is extracted. The completed video is cached. Disk still needs room for the intermediate and final videos. Cancellation kills the helper's entire process group, and removes temporary files. Existing inputs and outputs remain protected until final publication. A forced application/OS termination can leave `.rlcut-*.partial*` files for later manual cleanup.
+## Smoothing and time
+
+**AI smooth export** uses RIFE v4.6 to generate intermediate frames. Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage. Smoothing is optional and separate from upscaling. Cuts are never interpolated across. Combining smoothing and upscaling increases work. Upload services may cap playback at 60 FPS.
+
+Every requested frame receives neural processing. The previous 40-minute blending/scaling fallback and 45-minute abort are removed. The app remains cancellable and shows frame/tile progress, elapsed time and an estimate based on completed work. There is no measured speed guarantee for the user's laptop or school PC. A ten-second 60 FPS clip has 600 output frames: seven seconds per frame is 70 minutes, while thirty minutes requires an average below three seconds per frame plus rendering/encoding time.
+
+## CPU and memory limits
+
+A persistent CPU-only ncnn worker loads each model once per job. Tiles are processed in memory; only a few full-frame PNGs are kept on disk. Fast PNG writing reduces IPC overhead. Exact duplicate input PNGs reuse one previous enhanced frame rather than repeating inference. No sequence of decoded frames is retained.
+
+Parallelism happens inside neural layers, using half the available CPU threads bounded to 1–4, at nice priority 15. `RLCUT_AI_THREADS=1..4` overrides the default. Starting several full-frame workers would duplicate model buffers and compete for the same old CPU, so inference keeps one frame in flight. The helper has a 3 GiB address-space cap; UI, decoder and encoder memory is additional. Responsiveness still depends on total available RAM and other applications. Preview playback pauses during AI export.
+
+RIFE uses overlapping 640px cores with a 64px context halo; upscaling uses 256px cores with 32px context. Blending/cropping reduces tile seams. AI can still introduce flicker, motion errors, hallucinated texture and HUD artifacts. These open-source models do not reproduce Topaz's proprietary restoration.
+
+Cancellation kills the process group and removes job temporary files. Original inputs and existing outputs are protected until publication. Forced OS/app termination can leave `.rlcut-*.partial*` files for manual cleanup.
 
 ## Development and packaging
 
-Install CMake, a C++17 compiler, pkg-config and libpng development headers. On Linux, `bash scripts/run.sh dev` prepares the AI runtime automatically when it is missing; set `RLCUT_SKIP_AI_SETUP=1` to opt out. You can also run `python3 scripts/prepare-ai.py` directly. It stages checksum-pinned RIFE, builds a CPU-only static ncnn helper, and extracts only the required Real-ESRGAN x2 model from a checksum-pinned upstream archive. No model conversion, Python runtime, account, GPU driver or model download is needed on the user's laptop.
+Install CMake, a C++17 compiler, pkg-config and libpng development headers. `bash scripts/run.sh dev` prepares missing Linux AI assets automatically; `RLCUT_SKIP_AI_SETUP=1` skips setup. `python3 scripts/prepare-ai.py` stages checksum-pinned RIFE and builds the CPU helper with `scripts/prepare-ai-cpu.py`. Both upscaling models are pinned by checksum, bundled with licenses and require no account, GPU driver, Python runtime or model downloads on the user's machine. Upscayl normally uses Vulkan; this app runs its Lite weights in the CPU-only helper instead.
 
-The helper source is `native/ai-cpu.cpp`; its reproducible build is `scripts/prepare-ai-cpu.py`. CMake explicitly disables ncnn tests, tools, examples, benchmarks and Vulkan. RIFE inference runs directly in the CPU-only helper; the legacy RIFE executable and loader remain bundled for runtime compatibility. `RLCUT_AI_DIR` can override the staged directory for development. All required helper/model files must exist before the AI toggles become available.
-
-The Linux release workflow builds an AppImage and single-file FUSE-independent launcher on Ubuntu 22.04. **Publish existing Linux build** can recover a completed build using its run ID and matching tag; it verifies the source commit and SHA256SUMS before publishing without rebuilding or executing tests.
-
-Sources: https://github.com/nihui/rife-ncnn-vulkan (20221029, rife-v4.6), https://github.com/Tencent/ncnn (20220729), https://github.com/xinntao/Real-ESRGAN (v0.2.5.0 archive, realesr-animevideov3-x2). Licenses are bundled in `usr/bin/rlcut-ai` and recorded in THIRD_PARTY_NOTICES.md.
+CMake disables ncnn tests, examples, tools, benchmarks and Vulkan. The legacy RIFE executable/loader remain bundled for compatibility. `RLCUT_AI_DIR` overrides the runtime directory. The AppImage builds on Ubuntu 22.04, then a separate host job verifies checksums and publishes it using current GitHub CLI. **Publish existing Linux build** can recover artifacts after verifying their source commit matches the selected tag.

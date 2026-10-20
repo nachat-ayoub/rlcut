@@ -29,6 +29,8 @@ fn main() {
     let o = model::ExportOptions {
         ai_enhance: false,
             ai_upscale: false,
+            ai_upscale_lite: false,
+            ai_keep_resolution: false,
         quality,
         fps,
         folder: String::new(),

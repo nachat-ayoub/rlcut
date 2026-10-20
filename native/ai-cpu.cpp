@@ -34,7 +34,7 @@ Image load(const std::string& path) {
     return result;
 }
 void save(const Image& data, const std::string& path) {
-    png_image image{}; image.version = PNG_IMAGE_VERSION; image.width = data.w; image.height = data.h; image.format = PNG_FORMAT_RGB;
+    png_image image{}; image.version = PNG_IMAGE_VERSION; image.width = data.w; image.height = data.h; image.format = PNG_FORMAT_RGB; image.flags |= PNG_IMAGE_FLAG_FAST;
     if (!png_image_write_to_file(&image, path.c_str(), 0, data.rgb.data(), 0, nullptr)) throw std::runtime_error("Cannot write AI output PNG");
 }
 Image crop(const Image& in, int x, int y, int w, int h) {
@@ -131,7 +131,8 @@ void interpolate(char** args,const char* status) {
         out.rgb[i*3+c]=(unsigned char)std::clamp(std::lround(sums[i*3+c]/weights[i]),0L,255L);
     save(out,args[6]);
 }
-void upscale(char** args,const char* status) {
+void upscale(char** args,const char* status,bool lite=false) {
+    const int native_scale=lite ? 4 : 2;
     if(!upscale_net) {
         upscale_net=std::make_unique<ncnn::Net>(); configure(*upscale_net);
         if(upscale_net->load_param(args[2]) || upscale_net->load_model(args[3])) throw std::runtime_error("Cannot load AI upscale model");
@@ -155,7 +156,10 @@ void upscale(char** args,const char* status) {
         auto extractor=net.create_extractor(); extractor.set_light_mode(true);
         ncnn::Mat result;
         if (extractor.input("data",data) || extractor.extract("output",result)) throw std::runtime_error("AI upscale inference failed");
-        if (result.w!=patch.w*2 || result.h!=patch.h*2 || result.c!=3) throw std::runtime_error("Unexpected AI upscale output size");
+        if (result.w!=patch.w*native_scale || result.h!=patch.h*native_scale || result.c!=3) throw std::runtime_error("Unexpected AI upscale output size");
+        // Lite is a native 4x network. Downsample its float prediction to 2x
+        // inside each context-padded tile; do not allocate a clip-sized 4x frame.
+        if(lite) { ncnn::Mat reduced; ncnn::resize_bicubic(result,reduced,patch.w*2,patch.h*2); result=reduced; }
         for (int row=0;row<ch*2;++row) for (int col=0;col<cw*2;++col) for (int c=0;c<3;++c) {
             const float value=result.channel(c).row((y-top)*2+row)[(x-left)*2+col];
             output.rgb[((size_t)(y*2+row)*output.w+x*2+col)*3+c]=(unsigned char)std::clamp(std::lround(value*255),0L,255L);
@@ -174,9 +178,11 @@ void serve(const std::string& folder) {
             if(mode=="interpolate") {
                 std::vector<std::string> fields={"worker","interpolate","unused",folder+"/rife-v4.6","before.png","after.png","middle.png","."};
                 std::vector<char*> args;for(auto& f:fields)args.push_back(f.data());interpolate(args.data(),"rife-progress");
-            } else if(mode=="upscale") {
-                std::vector<std::string> fields={"worker","upscale",folder+"/realesr-animevideov3-x2.param",folder+"/realesr-animevideov3-x2.bin","upscale-in.png","upscale-out.png"};
-                std::vector<char*> args;for(auto& f:fields)args.push_back(f.data());upscale(args.data(),"upscale-progress");
+            } else if(mode=="upscale" || mode=="upscale-lite") {
+                bool lite=mode=="upscale-lite";
+                std::string model=lite?"upscayl-lite-4x":"realesr-animevideov3-x2";
+                std::vector<std::string> fields={"worker","upscale",folder+"/"+model+".param",folder+"/"+model+".bin","upscale-in.png","upscale-out.png"};
+                std::vector<char*> args;for(auto& f:fields)args.push_back(f.data());upscale(args.data(),"upscale-progress",lite);
             } else if(mode=="blend") {
                 Image a=load("before.png"),b=load("after.png");
                 if(a.w!=b.w || a.h!=b.h)throw std::runtime_error("Frame sizes differ");

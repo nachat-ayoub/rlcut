@@ -41,12 +41,11 @@ fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
     let Ok(v) = metadata::probe(b, path) else {
         return false;
     };
-    let Ok((w, h)) = o.resolution() else {
+    let Ok((w, h)) = o.output_resolution() else {
         return false;
     };
-    let scale = if o.ai_upscale { 2 } else { 1 };
-    v.width == w * scale
-        && v.height == h * scale
+    v.width == w
+        && v.height == h
         && (v.duration - duration).abs() < 0.15
         && (v.fps - o.fps as f64).abs() < 0.1
 }
@@ -118,8 +117,16 @@ pub fn run(
         folder.join("rlcut-ai-cpu"),
         model.join("flownet.param"),
         model.join("flownet.bin"),
-        folder.join("realesr-animevideov3-x2.param"),
-        folder.join("realesr-animevideov3-x2.bin"),
+        folder.join(if o.ai_upscale_lite {
+            "upscayl-lite-4x.param"
+        } else {
+            "realesr-animevideov3-x2.param"
+        }),
+        folder.join(if o.ai_upscale_lite {
+            "upscayl-lite-4x.bin"
+        } else {
+            "realesr-animevideov3-x2.bin"
+        }),
     ]
     .iter()
     .map(|p| {
@@ -134,7 +141,7 @@ pub fn run(
         .iter()
         .map(|s| serde_json::json!([s.start, s.end, s.color_fix]))
         .collect::<Vec<_>>();
-    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"persistent-cpu-v1-budget40", "app":env!("CARGO_PKG_VERSION"),"sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"models":models})).map_err(|e|e.to_string())?;
+    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"persistent-cpu-v2-full-ai", "app":env!("CARGO_PKG_VERSION"),"sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
     let mut hash = DefaultHasher::new();
     manifest.hash(&mut hash);
     let root = root()?;

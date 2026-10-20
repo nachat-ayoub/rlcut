@@ -48,6 +48,15 @@ with zipfile.ZipFile(models) as data:
         name='realesr-animevideov3-x2.'+ext
         with data.open('models/'+name) as src,(STAGE/name).open('wb') as dst:shutil.copyfileobj(src,dst)
         (STAGE/name).chmod(0o644)
+# Upscayl Lite weights, unmodified, pinned to the v2.15.0 release.
+for name,digest in {
+    'upscayl-lite-4x.param':'22174924330297357434ad21ed0af7f4b820008d2a502b492754d130d4142714',
+    'upscayl-lite-4x.bin':'85ee266b632a765a725425ba6a5620c088c8aa2939a03063b2d83b3462724cc1',
+}.items():
+    path=fetch('https://raw.githubusercontent.com/upscayl/upscayl/v2.15.0/resources/models/'+name,digest,name)
+    shutil.copyfile(path,STAGE/name)
+    (STAGE/name).chmod(0o644)
+shutil.copyfile(ROOT/'resources/licenses/UPSCAYL-LICENSE',STAGE/'UPSCAYL-LICENSE')
 shutil.copyfile(ROOT/'resources/licenses/REALESRGAN-LICENSE',STAGE/'REALESRGAN-LICENSE')
 (STAGE/'.helper-source-sha256').write_text(hashlib.sha256((ROOT/'native/ai-cpu.cpp').read_bytes()).hexdigest()+'\n')
 print('Built CPU-only tiled RIFE / Real-ESRGAN helper')

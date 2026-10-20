@@ -72,6 +72,8 @@ fn real_import_preview_and_export_worker() {
     let options = ExportOptions {
         ai_enhance: false,
         ai_upscale: false,
+        ai_upscale_lite: false,
+        ai_keep_resolution: false,
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),

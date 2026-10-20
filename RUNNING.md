@@ -40,6 +40,18 @@ Node dependencies and compiled artifacts persist under `.runtime/docker/`.
 These are separate from your laptop's native dependencies and settings. Keep
 presets by exporting them as JSON before moving machines or clearing caches.
 
+### Playback on school PCs
+
+Preview uses a small SDR H.264 proxy, not the raw 4K recording. The Docker launcher forwards the host PulseAudio/PipeWire-Pulse Unix socket and optional cookie when available. If no socket is available, it selects silent preview so the missing audio device cannot block video preroll; exports retain their audio. The UI shows when preview is silent.
+
+To force silent preview while diagnosing audio/socket problems:
+
+```sh
+RLCUT_PREVIEW_SILENT=1 bash scripts/run.sh dev
+```
+
+Decoder waits now time out after 15 seconds and show **Retry playback** rather than spinning forever. Report the visible error if retry fails. Clear the preview cache in Settings to rebuild a proxy. Restart the launcher after pulling these changes; Docker audio mounts are established at launch.
+
 ## Your Ubuntu laptop (native, no Docker)
 
 Use Ubuntu 24.04 or later. Install the native prerequisites once:

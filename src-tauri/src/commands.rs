@@ -114,6 +114,7 @@ pub struct Init {
     binaries: Binaries,
     storage_error: Option<String>,
     ai_available: bool,
+    preview_audio: bool,
 }
 #[tauri::command]
 pub fn initialize(state: State<AppState>) -> Init {
@@ -126,6 +127,7 @@ pub fn initialize(state: State<AppState>) -> Init {
         binaries: state.binaries.clone(),
         storage_error: error,
         ai_available: crate::video::enhance::available(),
+        preview_audio: std::env::var("RLCUT_PREVIEW_SILENT").as_deref() != Ok("1"),
     }
 }
 #[tauri::command]

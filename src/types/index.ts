@@ -162,6 +162,7 @@ export type Project = {
   outputName: string;
 };
 export type Init = {
+  previewAudio?: boolean;
   aiAvailable: boolean;
   store: Store;
   binaries: {
