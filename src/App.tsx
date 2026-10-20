@@ -745,7 +745,7 @@ export default function App() {
             <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
           </label>
           {aiUpscale && <p className="enhancement-note">Final output: {quality * 2} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * 2}. Upscales the selected export resolution without reducing it first. This compact model is trained for animation; it may alter game textures or text.</p>}
-          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. Larger overlapping tiles and up to four low-priority CPU threads accelerate processing while a 3 GiB inference limit keeps memory bounded. Higher resolutions and combining both AI options still take longer. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
+          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. AI video is prepared once and reused when only text, audio or the destination changes. Uses half the available CPU threads (up to four), low priority and bounded inference memory. After 40 minutes, remaining frames use blending/standard upscaling; a 45-minute safety deadline stops unfinished work. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
           {!init?.aiAvailable && <small className="enhancement-note">AI components are unavailable in this build. You can configure the options, but AI export requires the Linux AI AppImage or a prepared local AI runtime.</small>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
@@ -768,6 +768,7 @@ export default function App() {
               <X size={16} />
             </button> : <CheckCircle2 size={16} />}
           </div>
+          {progress.warning && <p role="status" className="enhancement-note">{progress.warning}</p>}
           {progress.error && <p role="alert" className="enhancement-note">{progress.error}</p>}
           <progress max="100" value={progress.percent} />
           <small>
@@ -905,6 +906,7 @@ export default function App() {
               }).catch(e => { if (ticket === importRevision.current && !message(e).includes('superseded')) report(e); }).finally(() => { if (ticket === importRevision.current) { setProxyPreparing(false); setImporting(false); } });
             }}>
               <Trash2 size={15} />Clear preview cache</button>
+            <button disabled={exporting || exportStarting} onClick={() => void invoke('clear_ai_cache').then(() => setNotice('Prepared AI video cache cleared')).catch(report)}><Trash2 size={15} />Clear AI cache</button>
             <button onClick={() => { setStore(s => ({ ...s, settings: structuredClone(initialStore.settings) })); setInit(data => data ? { ...data, storageError: null } : data); setNotice('App settings reset. Presets retained.'); }}>Reset settings</button>
             <button className="primary" onClick={() => { setAiEnhance(false); setAiUpscale(false); setQuality(store.settings.quality); setFps(store.settings.fps); setOutputFolder(store.settings.outputFolder); select(store.settings.defaultPreset); setModal(null); if (!video) setHome(true); }}>Apply defaults</button>
           </div>

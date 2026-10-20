@@ -40,6 +40,7 @@ pub fn run() {
             commands::playback_frame,
             commands::playback_close,
             commands::clear_cache,
+            commands::clear_ai_cache,
             commands::start_export,
             commands::export_progress,
             commands::cancel_export,

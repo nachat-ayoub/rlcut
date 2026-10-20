@@ -29,9 +29,11 @@ pub struct Progress {
     pub output: String,
     pub error: Option<String>,
     pub stage: Option<String>,
+    pub warning: Option<String>,
 }
 pub struct Job {
     pub cancel: AtomicBool,
+    pub started: Instant,
     pub overwrite: bool,
     pub progress: Mutex<Progress>,
 }
@@ -39,6 +41,7 @@ impl Job {
     pub fn new(id: String, output: String, overwrite: bool) -> Self {
         Self {
             cancel: AtomicBool::new(false),
+            started: Instant::now(),
             overwrite,
             progress: Mutex::new(Progress {
                 id,
@@ -49,6 +52,7 @@ impl Job {
                 output,
                 error: None,
                 stage: None,
+                warning: None,
             }),
         }
     }
@@ -167,132 +171,72 @@ pub fn run_timeline_sources(
         if enhanced && !super::enhance::available() {
             return Err("Optional AI engine is unavailable".into());
         }
-        let mut render_options = o.clone();
-        if o.ai_enhance {
-            render_options.fps = o.fps / 2;
-        }
-        // The AI input may be 30 FPS; output validation already ran on the user options.
-        render_options.ai_enhance = false;
-        render_options.ai_upscale = false;
-        let args = export_args_timeline_sources(
-            &videos,
-            &p,
-            &segments,
-            &render_options,
-            if enhanced { &rendered } else { &partial },
-            music.as_ref(),
-            music_fade_out,
-            &texts,
-        )?;
-        let stderr = fs::OpenOptions::new()
+        fs::OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&log)
-            .map_err(|e| format!("Cannot write in output folder: {e}"))?;
-        let mut export_command = command(b.ffmpeg()?);
+            .map_err(|e| format!("Cannot write export diagnostics: {e}"))?;
+        #[cfg(feature = "serialization")]
         if enhanced {
-            super::enhance::low_pressure(&mut export_command, false);
-            if let Ok(mut p) = job.progress.lock() {
-                p.stage = Some("Preparing AI export".into());
-            }
-        }
-        let mut child = export_command
-            .args(if enhanced {
-                super::args::safe_ai_render_args(args)
-            } else {
-                args
-            })
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(stderr)
-            .spawn()
-            .map_err(|e| format!("Cannot start export: {e}"))?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or("Missing FFmpeg progress stream")?;
-        let progress_job = job.clone();
-        let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
-        let ai = enhanced;
-        let reader = thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(seconds) = progress_seconds(&line) {
-                    if let Ok(mut p) = progress_job.progress.lock() {
-                        p.percent = (seconds / duration * if ai { 20. } else { 100. })
-                            .clamp(0., if ai { 20. } else { 99.9 });
-                        p.elapsed = start.elapsed().as_secs_f64();
-                        p.remaining = if seconds > 0. && p.elapsed > 0.5 {
-                            Some((duration - seconds).max(0.) * p.elapsed / seconds)
-                        } else {
-                            None
-                        };
-                    }
-                }
-            }
-        });
-        let status = loop {
-            if job.cancel.load(Ordering::SeqCst) {
-                let _ = child.kill();
-                let _ = child.wait();
-                break Err("Export canceled".to_string());
-            }
-            match child.try_wait() {
-                Ok(Some(s)) => break Ok(s),
-                Ok(None) => {
-                    if let Ok(mut p) = job.progress.lock() {
-                        p.elapsed = start.elapsed().as_secs_f64();
-                    }
-                    thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break Err(e.to_string());
-                }
-            }
-        };
-        let _ = reader.join();
-        let status = status?;
-        if !status.success() {
-            let error = (|| -> std::io::Result<String> {
-                let mut file = fs::File::open(&log)?;
-                let length = file.metadata()?.len();
-                file.seek(SeekFrom::Start(length.saturating_sub(6000)))?;
-                let mut bytes = Vec::new();
-                file.read_to_end(&mut bytes)?;
-                Ok(String::from_utf8_lossy(&bytes).into_owned())
-            })()
-            .unwrap_or_else(|e| format!("Cannot read FFmpeg diagnostics: {e}"));
-            eprintln!("rlcut export failed: {error}");
-            return Err(format!("FFmpeg export failed: {error}"));
-        }
-        if job.cancel.load(Ordering::SeqCst) {
-            return Err("Export canceled".into());
-        }
-        if enhanced {
-            let mut cursor = 0.;
-            let cuts = segments
-                .iter()
-                .map(|s| {
-                    cursor += s.end - s.start;
-                    cursor
-                })
-                .collect::<Vec<_>>();
-            let duration = cursor;
-            if let Ok(mut p) = job.progress.lock() {
-                p.stage = Some("AI smoothing · CPU safe mode".into());
-                p.remaining = None;
-            }
-            super::enhance::run(
+            super::ai_cache::run(
                 &b,
-                &rendered,
-                &partial,
+                &videos,
+                &p,
+                &segments,
                 &o,
-                duration,
-                &cuts,
+                &partial,
                 job.clone(),
+                music.as_ref(),
+                music_fade_out,
+                &texts,
                 start,
                 &log,
+            )?;
+        } else {
+            let duration = segments.iter().map(|s| s.end - s.start).sum();
+            execute(
+                &b,
+                export_args_timeline_sources(
+                    &videos,
+                    &p,
+                    &segments,
+                    &o,
+                    &partial,
+                    music.as_ref(),
+                    music_fade_out,
+                    &texts,
+                )?,
+                &log,
+                duration,
+                job.clone(),
+                start,
+                0.,
+                99.9,
+                false,
+            )?;
+        }
+        #[cfg(not(feature = "serialization"))]
+        {
+            let duration = segments.iter().map(|s| s.end - s.start).sum();
+            execute(
+                &b,
+                export_args_timeline_sources(
+                    &videos,
+                    &p,
+                    &segments,
+                    &o,
+                    &partial,
+                    music.as_ref(),
+                    music_fade_out,
+                    &texts,
+                )?,
+                &log,
+                duration,
+                job.clone(),
+                start,
+                0.,
+                99.9,
+                false,
             )?;
         }
         if job.cancel.load(Ordering::SeqCst) {
@@ -316,7 +260,7 @@ pub fn run_timeline_sources(
     let _ = fs::remove_file(&rendered);
     // Preserve useful diagnostics in the reported error before cleanup.
     let result = result.map_err(|error| {
-        if !enhanced || job.cancel.load(Ordering::SeqCst) {
+        if job.cancel.load(Ordering::SeqCst) {
             return error;
         }
         let detail = fs::File::open(&log)
@@ -350,6 +294,91 @@ pub fn run_timeline_sources(
             }
         }
     }
+}
+/// Run an existing FFmpeg pipeline with cancellation, a live clock and stage ranges.
+pub fn execute(
+    b: &Binaries,
+    args: Vec<String>,
+    log: &Path,
+    duration: f64,
+    job: Arc<Job>,
+    start: Instant,
+    base: f64,
+    span: f64,
+    budget: bool,
+) -> Result<(), String> {
+    let mut command = command(b.ffmpeg()?);
+    if budget {
+        super::enhance::low_pressure(&mut command, false);
+    }
+    let mut child = command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(
+            fs::OpenOptions::new()
+                .append(true)
+                .open(log)
+                .map_err(|e| e.to_string())?,
+        )
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Missing FFmpeg progress stream")?;
+    let progress_job = job.clone();
+    let reader = thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(seconds) = progress_seconds(&line) {
+                if let Ok(mut p) = progress_job.progress.lock() {
+                    p.percent = (base + seconds / duration * span).clamp(base, base + span);
+                    p.elapsed = start.elapsed().as_secs_f64();
+                    p.remaining = if seconds > 0. {
+                        Some((duration - seconds).max(0.) * p.elapsed / seconds)
+                    } else {
+                        None
+                    };
+                }
+            }
+        }
+    });
+    let result = loop {
+        if job.cancel.load(Ordering::SeqCst)
+            || (budget && job.started.elapsed() >= Duration::from_secs(45 * 60))
+        {
+            let _ = child.kill();
+            let _ = child.wait();
+            break Err(if job.cancel.load(Ordering::SeqCst) {
+                "Export canceled".into()
+            } else {
+                "Export reached the 45-minute safety deadline; no existing output was replaced"
+                    .into()
+            });
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                break if status.success() {
+                    Ok(())
+                } else {
+                    Err("FFmpeg processing failed".into())
+                }
+            }
+            Ok(None) => {
+                if let Ok(mut p) = job.progress.lock() {
+                    p.elapsed = start.elapsed().as_secs_f64();
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(e.to_string());
+            }
+        }
+    };
+    let _ = reader.join();
+    result
 }
 #[cfg(test)]
 mod tests {

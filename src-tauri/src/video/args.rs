@@ -60,7 +60,57 @@ pub fn export_args_timeline_sources(
     music_fade_out: Option<f64>,
     texts: &[TextOverlay],
 ) -> Result<Vec<String>, String> {
-    let (w, h) = o.resolution()?;
+    export_args_impl(
+        videos,
+        p,
+        segments,
+        o,
+        out,
+        music,
+        music_fade_out,
+        texts,
+        None,
+    )
+}
+pub fn finish_ai_args(
+    videos: &[Video],
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
+    enhanced: &Path,
+) -> Result<Vec<String>, String> {
+    export_args_impl(
+        videos,
+        p,
+        segments,
+        o,
+        out,
+        music,
+        music_fade_out,
+        texts,
+        Some(enhanced),
+    )
+}
+fn export_args_impl(
+    videos: &[Video],
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    music: Option<&MusicTrack>,
+    music_fade_out: Option<f64>,
+    texts: &[TextOverlay],
+    enhanced: Option<&Path>,
+) -> Result<Vec<String>, String> {
+    let (mut w, mut h) = o.resolution()?;
+    if enhanced.is_some() && o.ai_upscale {
+        w *= 2;
+        h *= 2;
+    }
     if videos.is_empty()
         || videos
             .iter()
@@ -104,84 +154,91 @@ pub fn export_args_timeline_sources(
     v.duration = total_duration;
     v.has_audio = videos.iter().any(|video| video.has_audio);
     let mut graph = String::new();
-    for source in 0..videos.len() {
-        let indices = resolved
-            .iter()
-            .enumerate()
-            .filter_map(|(index, value)| (value.0 == source).then_some(index))
-            .collect::<Vec<_>>();
-        if indices.is_empty() {
-            continue;
+    if enhanced.is_some() {
+        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty()));
+        graph.push_str(&format!("[{index}:v:0]setpts=PTS-STARTPTS[out_edit]"));
+    } else {
+        for source in 0..videos.len() {
+            let indices = resolved
+                .iter()
+                .enumerate()
+                .filter_map(|(index, value)| (value.0 == source).then_some(index))
+                .collect::<Vec<_>>();
+            if indices.is_empty() {
+                continue;
+            }
+            let outputs = indices
+                .iter()
+                .map(|index| format!("[edit{index}]"))
+                .collect::<String>();
+            if !graph.is_empty() {
+                graph.push(';');
+            }
+            graph.push_str(&format!(
+                "[{source}:v:0]{},split={}{outputs}",
+                color_filter(&videos[source]),
+                indices.len()
+            ));
         }
-        let outputs = indices
-            .iter()
-            .map(|index| format!("[edit{index}]"))
-            .collect::<String>();
-        if !graph.is_empty() {
-            graph.push(';');
-        }
-        graph.push_str(&format!(
-            "[{source}:v:0]{},split={}{outputs}",
-            color_filter(&videos[source]),
-            indices.len()
-        ));
-    }
-    for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
-        let normalize = if videos[source].width == videos[0].width
-            && videos[source].height == videos[0].height
-        {
-            ",setsar=1".to_string()
-        } else {
-            format!(
-                ",scale={}:{}:flags=lanczos,setsar=1",
-                videos[0].width, videos[0].height
-            )
-        };
-        let fix = segments[index].color_fix;
-        let correction = if fix > 0.0001 {
-            format!(
-                ",eq=brightness={:.5}:contrast={:.5}:saturation={:.5}:gamma={:.5}",
-                -0.018 * fix,
-                1. + 0.32 * fix,
-                1. + 0.28 * fix,
-                1. / (1. + 0.20 * fix)
-            )
-        } else {
-            String::new()
-        };
-        graph.push_str(&format!(
+        for (index, (source, start, end)) in resolved.iter().copied().enumerate() {
+            let normalize = if videos[source].width == videos[0].width
+                && videos[source].height == videos[0].height
+            {
+                ",setsar=1".to_string()
+            } else {
+                format!(
+                    ",scale={}:{}:flags=lanczos,setsar=1",
+                    videos[0].width, videos[0].height
+                )
+            };
+            let fix = segments[index].color_fix;
+            let correction = if fix > 0.0001 {
+                format!(
+                    ",eq=brightness={:.5}:contrast={:.5}:saturation={:.5}:gamma={:.5}",
+                    -0.018 * fix,
+                    1. + 0.32 * fix,
+                    1. + 0.28 * fix,
+                    1. / (1. + 0.20 * fix)
+                )
+            } else {
+                String::new()
+            };
+            graph.push_str(&format!(
             ";[edit{index}]trim=start={start:.6}:end={end:.6},setpts=PTS-STARTPTS{normalize}{correction}[v{index}]"
         ));
-    }
-    let video_inputs = (0..segments.len())
-        .map(|i| format!("[v{i}]"))
-        .collect::<String>();
-    graph.push_str(&format!(
-        ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
-        segments.len()
-    ));
-    let mut composition = filter_graph_normalized(&v, p, w, h)?
-        .replace("[0:v:0]", "[source_edit]")
-        .replace("[out]", "[out_edit]");
-    if p.boost.intro.enabled && p.boost.enabled {
-        let b = super::geometry::geometry(&v, p, w, h)?.boost;
-        let hidden = -(b.width as i32) - 5;
-        let duration = p.boost.intro.duration;
-        let u = format!("(t/{duration:.6})");
-        let easing = match &p.boost.intro.easing {
-            BoostEasing::Linear => u.clone(),
-            BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
-            BoostEasing::EaseIn => format!("pow({u},3)"),
-            BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
-            BoostEasing::EaseInOut => format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)"),
-        };
-        composition = composition.replace(
+        }
+        let video_inputs = (0..segments.len())
+            .map(|i| format!("[v{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(
+            ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
+            segments.len()
+        ));
+        let mut composition = filter_graph_normalized(&v, p, w, h)?
+            .replace("[0:v:0]", "[source_edit]")
+            .replace("[out]", "[out_edit]");
+        if p.boost.intro.enabled && p.boost.enabled {
+            let b = super::geometry::geometry(&v, p, w, h)?.boost;
+            let hidden = -(b.width as i32) - 5;
+            let duration = p.boost.intro.duration;
+            let u = format!("(t/{duration:.6})");
+            let easing = match &p.boost.intro.easing {
+                BoostEasing::Linear => u.clone(),
+                BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
+                BoostEasing::EaseIn => format!("pow({u},3)"),
+                BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
+                BoostEasing::EaseInOut => {
+                    format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)")
+                }
+            };
+            composition = composition.replace(
             &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
             &format!("[base][hud]overlay=x='if(lt(t,{duration:.6}),{hidden}+({}-({hidden}))*({easing}),{})':y={}:eval=frame", b.x, b.x, b.y),
         ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
+        }
+        graph.push(';');
+        graph.push_str(&composition);
     }
-    graph.push(';');
-    graph.push_str(&composition);
     let mut video_output = "out_edit".to_string();
     for (index, text) in texts.iter().enumerate() {
         let next = format!("text{index}");
@@ -405,6 +462,9 @@ pub fn export_args_timeline_sources(
     if let Some(music) = music {
         args.extend(["-i".into(), music.path.clone()]);
     }
+    if let Some(enhanced) = enhanced {
+        args.extend(["-i".into(), enhanced.to_string_lossy().into_owned()]);
+    }
     args.extend([
         "-filter_complex".into(),
         graph,
@@ -459,7 +519,7 @@ pub fn export_args_timeline_sources(
     args.extend(["-t".into(), format!("{edited_duration:.6}")]);
     args.extend(
         [
-            "-fps_mode",
+            "-vsync",
             "cfr",
             "-movflags",
             "+faststart",

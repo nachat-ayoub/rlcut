@@ -110,7 +110,11 @@ impl Store {
             return Err("Music fade duration must be between 0.1 and 10 seconds".into());
         }
         if self.settings.favorite_fonts.len() > 500
-            || self.settings.favorite_fonts.iter().any(|font| font.len() > 200)
+            || self
+                .settings
+                .favorite_fonts
+                .iter()
+                .any(|font| font.len() > 200)
         {
             return Err("Too many favorite fonts".into());
         }
