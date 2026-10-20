@@ -2,7 +2,9 @@ import type { Preset, Video } from '../types';
 import type { CompositionSource, Scene } from './compositor';
 const vertex = `attribute vec2 position;attribute vec2 uv;varying vec2 coord;void main(){coord=uv;gl_Position=vec4(position,0.,1.);}`;
 const sprite = `precision mediump float;uniform sampler2D image;uniform vec4 crop;uniform vec2 mask;uniform float feather;uniform float brightness;uniform float colorFix;varying vec2 coord;vec3 recover(vec3 c){float contrast=1.+.32*colorFix;float saturation=1.+.28*colorFix;float gamma=1.+.20*colorFix;c=pow(c,vec3(gamma));c=(c-.5)*contrast+.5;float luma=dot(c,vec3(.2126,.7152,.0722));return clamp(vec3(luma)+(c-vec3(luma))*saturation-.018*colorFix,0.,1.);}void main(){vec4 color=texture2D(image,crop.xy+coord*crop.zw);float alpha=1.;if(mask.x>0.){float distance=length((coord-.5)*mask);alpha=feather>0.?clamp((1.-distance)/feather,0.,1.):step(distance,1.);}gl_FragColor=vec4(clamp(recover(color.rgb)+brightness,0.,1.),alpha);}`;
-const blur = `precision mediump float;uniform sampler2D image;uniform vec2 stepSize;uniform float brightness;varying vec2 coord;void main(){vec2 base=vec2(coord.x,1.-coord.y);vec3 sum=vec3(0.);float weight=0.;for(int i=-8;i<=8;i++){float x=float(i)*.375;float w=exp(-.5*x*x);sum+=texture2D(image,base+float(i)*stepSize).rgb*w;weight+=w;}gl_FragColor=vec4(clamp(sum/weight+brightness,0.,1.),1.);}`;
+// A four-sigma separable Gaussian matches the soft, edge-repeated blur used by
+// desktop NLEs while staying fast enough for frame-paced preview playback.
+const blur = `precision highp float;uniform sampler2D image;uniform vec2 stepSize;uniform float brightness;varying vec2 coord;void main(){vec2 base=vec2(coord.x,1.-coord.y);vec3 sum=vec3(0.);float weight=0.;for(int i=-16;i<=16;i++){float x=float(i)*.25;float w=exp(-.5*x*x);sum+=texture2D(image,base+float(i)*stepSize).rgb*w;weight+=w;}gl_FragColor=vec4(clamp(sum/weight+brightness,0.,1.),1.);}`;
 export class GPUCompositor {
   private width = 0;
   private height = 0;
@@ -80,7 +82,7 @@ export class GPUCompositor {
       for (let pass = 0; pass < 2; pass++) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, pass === 0 ? this.targets[1].framebuffer : null);
         this.quad(this.blur, this.targets[pass].texture, 0, 0, width, height);
-        gl.uniform2f(gl.getUniformLocation(this.blur, 'stepSize'), pass === 0 ? sigma * .375 / width : 0, pass === 1 ? sigma * .375 / height : 0);
+        gl.uniform2f(gl.getUniformLocation(this.blur, 'stepSize'), pass === 0 ? sigma * .25 / width : 0, pass === 1 ? sigma * .25 / height : 0);
         gl.uniform1f(gl.getUniformLocation(this.blur, 'brightness'), pass === 1 ? brightness : 0); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
     } else this.paint(this.source, full, crop, [0, 0], 0, brightness, colorFix);

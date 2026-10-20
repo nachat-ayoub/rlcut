@@ -39,11 +39,10 @@ test('empty workspace has an actionable import control', () => {
 });
 test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () => {
   const html = renderToStaticMarkup(createElement(Timeline, {
-    duration: 20, timestamp: 2, segments: [{id:'a',start:0,end:8,volume:.5}], playing:false, playbackReady:true,
-    canUndo:false, canRedo:false, onSeek:()=>{}, onPlay:()=>{}, onSplit:()=>{}, onTrimLeft:()=>{}, onTrimRight:()=>{}, onTrim:()=>{}, onVolume:()=>{}, onDelete:()=>{}, onUndo:()=>{}, onRedo:()=>{},
+    duration: 20, sourceDurations:[20], timestamp: 2, segments: [{id:'a',start:0,end:8,volume:.5,colorFix:0}], music:null, markers:{video:[],music:[]}, texts:[], textTracks:[], selectedTextId:null, playing:false, playbackReady:true,
+    canUndo:false, canRedo:false, onSeek:()=>{}, onPlay:()=>{}, onEdit:()=>{}, onTextEdit:()=>{}, onTextSplit:()=>{}, onTextDelete:()=>{}, onTextSelect:()=>{}, onAddText:()=>{}, onAddTextTrack:()=>{}, onDeleteTextTrack:()=>{}, onMarker:()=>{}, onSelectionChange:()=>{}, onUndo:()=>{}, onRedo:()=>{}, onImportVideo:()=>{}, onImportMusic:()=>{},
   }));
-  for (const label of ['Video','Music','Timeline zoom','Selected video clip volume','Trim or extend clip from left','Trim or extend clip from right']) assert.match(html, new RegExp(label));
-  assert.match(html, /50%/);
+  for (const label of ['Append video','Add music','Timeline zoom','Show selected clip volume','Trim or extend video clip from left','Trim or extend video clip from right']) assert.match(html, new RegExp(label));
 });
 
 test('native drag/drop uses the Tauri 2 webview API and only imports dropped paths', async () => {
@@ -144,8 +143,8 @@ test('edited clock seeks across cuts and never lands inside deleted source inter
   assert.equal(editedToSource(segments,99),9);
   assert.equal(sourceToEdited(segments,5),2);
   assert.equal(sourceToEdited(segments,8),3);
-  assert.deepEqual(trimBounds(segments, 0, 12), { start: { min: 0, max: 3.95 }, end: { min: 2.05, max: 7 } });
-  assert.deepEqual(trimBounds(segments, 1, 12), { start: { min: 4, max: 8.95 }, end: { min: 7.05, max: 12 } });
+  assert.deepEqual(trimBounds(segments, 0, 12), { start: { min: 0, max: 3.95 }, end: { min: 2.05, max: 12 } });
+  assert.deepEqual(trimBounds(segments, 1, 12), { start: { min: 0, max: 8.95 }, end: { min: 7.05, max: 12 } });
 });
 
 
@@ -158,7 +157,7 @@ test('native commands send timeline ranges without editor IDs', async () => {
     const { invoke } = await import('../src/lib/native.ts');
     for (const command of ['playback_open', 'playback_control', 'start_export']) await invoke(command, { session: 7, segments });
     for (const call of calls) {
-      assert.deepEqual(call.args.segments, [{ start: 0, end: 12, volume: 1 }]);
+      assert.deepEqual(call.args.segments, [{ start: 0, end: 12, volume: 1, color_fix: 0 }]);
       assert.equal(call.args.session, 7);
     }
     assert.equal(segments[0].id, 'editor-only-id');

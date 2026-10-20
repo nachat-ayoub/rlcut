@@ -221,22 +221,19 @@ pub fn export_args_timeline_sources(
         let stroke = text.stroke_color.trim_start_matches('#');
         let background = text.background_color.trim_start_matches('#');
         let shadow = text.shadow_color.trim_start_matches('#');
+        // CSS text strokes are centered on the glyph edge, while FFmpeg's
+        // drawtext borderw grows entirely outwards. Export half of the CSS
+        // stroke width so the visible outline matches the live preview.
         let stroke_factor = match text.stroke_position.as_str() {
-            "outside" => 2.,
-            "inside" => 0.5,
-            _ => 1.,
+            "outside" => 1.,
+            "inside" => 0.25,
+            _ => 0.5,
         };
-        let fade_in = text
-            .fade_in
-            .map(|value| {
-                format!(
-                    "if(lt(t,{:.6}),0,if(lt(t,{:.6}), (t-{:.6})/{value:.6},",
-                    text.start,
-                    text.start + value,
-                    text.start
-                )
-            })
-            .unwrap_or_else(|| format!("if(lt(t,{:.6}),0,", text.start));
+        let line_spacing = (text.line_height - 1.) * size;
+        let border_width = text.stroke_width * stroke_factor * w as f64 / 1080.;
+        let shadow_x = text.shadow_x * w as f64 / 1080.;
+        let shadow_y = text.shadow_y * w as f64 / 1080.;
+        let blurred_shadow = text.shadow_enabled && text.shadow_blur > 0.001;
         let fade_out = text
             .fade_out
             .map(|value| {
@@ -248,11 +245,52 @@ pub fn export_args_timeline_sources(
                 )
             })
             .unwrap_or_else(|| format!("if(gt(t,{:.6}),0,1)", text.end));
-        let alpha = format!("{fade_in}{fade_out})");
+        let alpha = text
+            .fade_in
+            .map(|value| {
+                format!(
+                    "if(lt(t,{:.6}),0,if(lt(t,{:.6}),(t-{:.6})/{value:.6},{fade_out}))",
+                    text.start,
+                    text.start + value,
+                    text.start
+                )
+            })
+            .unwrap_or_else(|| format!("if(lt(t,{:.6}),0,{fade_out})", text.start))
+            // Commas inside a drawtext expression must survive the filtergraph
+            // option parser before the expression evaluator sees them.
+            .replace(',', "\\,");
+        let hard_shadow = if !text.shadow_enabled || blurred_shadow {
+            String::new()
+        } else {
+            format!(":shadowx={shadow_x:.3}:shadowy={shadow_y:.3}:shadowcolor=0x{shadow}")
+        };
         let style = format!(
-            "{font}text='{escaped_text}':fontsize={size:.3}:fontcolor=0x{color}@{:.4}:line_spacing={:.3}:borderw={:.3}:bordercolor=0x{stroke}:box={}:boxcolor=0x{background}@{:.4}:shadowx={:.3}:shadowy={:.3}:shadowcolor=0x{shadow}:alpha='{alpha}'",
-            text.opacity, (text.line_height - 1.) * size, text.stroke_width * stroke_factor * w as f64 / 1080., if text.background_opacity > 0. { 1 } else { 0 }, text.background_opacity, text.shadow_x * w as f64 / 1080., text.shadow_y * w as f64 / 1080.
+            "{font}text='{escaped_text}':fontsize={size:.3}:fontcolor=0x{color}@{:.4}:line_spacing={line_spacing:.3}:borderw={border_width:.3}:bordercolor=0x{stroke}:box={}:boxcolor=0x{background}@{:.4}{hard_shadow}:alpha='{alpha}'",
+            text.opacity, if text.background_opacity > 0. { 1 } else { 0 }, text.background_opacity
         );
+        if blurred_shadow {
+            let shadow_style = format!(
+                "{font}text='{escaped_text}':fontsize={size:.3}:fontcolor=0x{shadow}@{:.4}:line_spacing={line_spacing:.3}:borderw={border_width:.3}:bordercolor=0x{shadow}:alpha='{alpha}'",
+                text.opacity
+            );
+            let shadow_layer = format!("text_shadow_layer{index}");
+            let shadowed = format!("text_shadowed{index}");
+            // CSS filter blur() and FFmpeg gblur both express the Gaussian
+            // standard deviation, so the preview value maps directly.
+            let sigma = (text.shadow_blur * w as f64 / 1080.).max(0.1);
+            if text.rotation.abs() > 0.001 {
+                graph.push_str(&format!(
+                    ";color=c=black@0.0:s={w}x{h}:d={edited_duration:.6},format=rgba,drawtext={shadow_style}:x='(w-text_w)/2+{shadow_x:.3}':y='(h-text_h)/2+{shadow_y:.3}',gblur=sigma={sigma:.3}:steps=2:planes=8,rotate={:.8}:c=none:ow=iw:oh=ih[{shadow_layer}];[{video_output}][{shadow_layer}]overlay=x='W*{:.6}-w/2':y='H*{:.6}-h/2':format=auto[{shadowed}]",
+                    text.rotation.to_radians(), text.x, text.y
+                ));
+            } else {
+                graph.push_str(&format!(
+                    ";color=c=black@0.0:s={w}x{h}:d={edited_duration:.6},format=rgba,drawtext={shadow_style}:x='({x})+{shadow_x:.3}':y='h*{:.6}-text_h/2+{shadow_y:.3}',gblur=sigma={sigma:.3}:steps=2:planes=8[{shadow_layer}];[{video_output}][{shadow_layer}]overlay=x=0:y=0:format=auto[{shadowed}]",
+                    text.y
+                ));
+            }
+            video_output = shadowed;
+        }
         if text.rotation.abs() > 0.001 {
             let layer = format!("text_layer{index}");
             graph.push_str(&format!(
@@ -421,7 +459,7 @@ pub fn export_args_timeline_sources(
     args.extend(["-t".into(), format!("{edited_duration:.6}")]);
     args.extend(
         [
-            "-vsync",
+            "-fps_mode",
             "cfr",
             "-movflags",
             "+faststart",
@@ -445,6 +483,97 @@ pub fn progress_seconds(line: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn text(shadow_enabled: bool) -> TextOverlay {
+        TextOverlay {
+            id: "text".into(),
+            track_id: "track".into(),
+            text: "Shadow test".into(),
+            start: 0.,
+            end: 1.,
+            x: 0.5,
+            y: 0.5,
+            scale: 1.,
+            box_width: 0.7,
+            rotation: 0.,
+            font_family: "Sans".into(),
+            font_path: String::new(),
+            font_bold_path: String::new(),
+            font_black_path: String::new(),
+            font_italic_path: String::new(),
+            font_bold_italic_path: String::new(),
+            font_black_italic_path: String::new(),
+            font_weight: 700,
+            font_size: 54.,
+            color: "#ffffff".into(),
+            opacity: 1.,
+            align: "center".into(),
+            bold: true,
+            italic: false,
+            underline: false,
+            letter_spacing: 0.,
+            line_height: 1.2,
+            stroke_color: "#000000".into(),
+            stroke_width: 6.5,
+            stroke_position: "outside".into(),
+            background_color: "#000000".into(),
+            background_opacity: 0.,
+            shadow_enabled,
+            shadow_color: "#000000".into(),
+            shadow_blur: 4.,
+            shadow_x: 0.,
+            shadow_y: -17.,
+            fade_in: None,
+            fade_out: None,
+        }
+    }
+    fn text_graph(shadow_enabled: bool) -> String {
+        let video = Video {
+            path: "/tmp/input.mp4".into(),
+            width: 1920,
+            height: 1080,
+            duration: 1.,
+            fps: 60.,
+            has_audio: false,
+            color_transfer: String::new(),
+        };
+        let options = ExportOptions {
+            quality: 1080,
+            fps: 60,
+            folder: "/tmp".into(),
+            filename: "out.mp4".into(),
+        };
+        let args = export_args_timeline(
+            &video,
+            &Preset::default(),
+            &[Segment {
+                start: 0.,
+                end: 1.,
+                volume: 1.,
+                color_fix: 0.,
+            }],
+            &options,
+            Path::new("/tmp/out.mp4"),
+            None,
+            None,
+            &[text(shadow_enabled)],
+        )
+        .unwrap();
+        args.windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].clone())
+            .unwrap()
+    }
+    #[test]
+    fn text_shadow_is_explicit_and_preview_scaled() {
+        let disabled = text_graph(false);
+        assert!(!disabled.contains("text_shadow_layer"));
+        assert!(!disabled.contains("shadowx="));
+        assert!(disabled.contains("borderw=6.500"));
+        let enabled = text_graph(true);
+        assert!(enabled.contains("text_shadow_layer0"));
+        assert!(enabled.contains("gblur=sigma=4.000:steps=2:planes=8"));
+        assert!(enabled.contains("-17.000"));
+    }
     #[test]
     fn structured_args_cfr_optional_audio() {
         let mut v = Video {

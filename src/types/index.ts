@@ -97,8 +97,10 @@ export type TrackMarkers = {
   video: number[];
   music: number[];
 };
+export type TextTrack = { id: string; name: string };
 export type TextOverlay = {
   id: string;
+  trackId: string;
   text: string;
   start: number;
   end: number;
@@ -129,6 +131,7 @@ export type TextOverlay = {
   strokePosition: 'inside' | 'center' | 'outside';
   backgroundColor: string;
   backgroundOpacity: number;
+  shadowEnabled: boolean;
   shadowColor: string;
   shadowBlur: number;
   shadowX: number;
@@ -148,6 +151,7 @@ export type Project = {
   music: MusicTrack | null;
   markers: TrackMarkers;
   texts?: TextOverlay[];
+  textTracks?: TextTrack[];
   preset: Preset;
   quality: number;
   fps: number;

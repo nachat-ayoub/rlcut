@@ -5,7 +5,7 @@ use crate::{
     video::{
         binaries::Binaries,
         export::{self, Job, Progress},
-        metadata,
+        metadata, preview,
     },
 };
 use serde::Serialize;
@@ -167,6 +167,21 @@ pub async fn pick_folder() -> Result<Option<String>, String> {
         Ok(rfd::FileDialog::new()
             .pick_folder()
             .map(|p| p.to_string_lossy().into()))
+    })
+    .await
+}
+#[tauri::command]
+pub async fn project_thumbnails(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<Vec<Option<String>>, String> {
+    let binaries = state.binaries.clone();
+    let cache = state.cache.clone();
+    blocking(move || {
+        Ok(paths
+            .iter()
+            .map(|path| preview::thumbnail(&binaries, &PathBuf::from(path), &cache).ok())
+            .collect())
     })
     .await
 }

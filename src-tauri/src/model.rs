@@ -269,6 +269,8 @@ pub struct Segment {
 )]
 pub struct TextOverlay {
     pub id: String,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub track_id: String,
     pub text: String,
     pub start: f64,
     pub end: f64,
@@ -299,6 +301,8 @@ pub struct TextOverlay {
     pub stroke_position: String,
     pub background_color: String,
     pub background_opacity: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub shadow_enabled: bool,
     pub shadow_color: String,
     pub shadow_blur: f64,
     pub shadow_x: f64,

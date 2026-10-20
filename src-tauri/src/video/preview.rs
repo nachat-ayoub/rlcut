@@ -1,6 +1,7 @@
 use super::{
     binaries::{command, Binaries},
     geometry::{color_filter, filter_graph},
+    metadata,
 };
 use crate::model::{Preset, Video};
 use serde::Serialize;
@@ -51,6 +52,50 @@ fn image(path: &Path) -> Result<String, String> {
         "data:image/png;base64,{}",
         base64(&fs::read(path).map_err(|e| e.to_string())?)
     ))
+}
+pub fn thumbnail(b: &Binaries, path: &Path, cache: &Path) -> Result<String, String> {
+    let video = metadata::probe(b, path)?;
+    fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+    let mut hash = DefaultHasher::new();
+    "project-thumbnail-v1".hash(&mut hash);
+    video.path.hash(&mut hash);
+    fs::metadata(&video.path)
+        .ok()
+        .and_then(|value| value.modified().ok())
+        .hash(&mut hash);
+    let output = cache.join(format!("thumbnail-{:x}.png", hash.finish()));
+    if !output.exists() {
+        let filter = format!(
+            "{},scale=480:240:force_original_aspect_ratio=increase:flags=lanczos,crop=480:240,setsar=1",
+            color_filter(&video)
+        );
+        let result = command(b.ffmpeg()?)
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+            .arg(&video.path)
+            .args([
+                "-vf",
+                &filter,
+                "-frames:v",
+                "1",
+                "-threads",
+                "1",
+                "-update",
+                "1",
+            ])
+            .arg(&output)
+            .output()
+            .map_err(|error| format!("Cannot create project thumbnail: {error}"))?;
+        if !result.status.success() || !output.is_file() {
+            let _ = fs::remove_file(&output);
+            return Err(format!(
+                "Could not create project thumbnail: {}",
+                String::from_utf8_lossy(&result.stderr)
+            ));
+        }
+    }
+    let result = image(&output);
+    trim(cache);
+    result
 }
 #[allow(clippy::too_many_arguments)]
 fn run(
