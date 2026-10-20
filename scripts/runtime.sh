@@ -42,8 +42,33 @@ if [[ ! -f "$stamp" || "$(cat "$stamp")" != "$lock" ]]; then
   npm ci
   printf '%s' "$lock" > "$stamp"
 fi
+prepare_dev_ai() {
+  [[ "$(uname -s)" == Linux && "${RLCUT_SKIP_AI_SETUP:-0}" != 1 ]] || return 0
+  local folder=.runtime/ai
+  local required=(
+    rife-ncnn-vulkan rlcut-ai-cpu
+    rife-v4.6/flownet.param rife-v4.6/flownet.bin
+    realesr-animevideov3-x2.param realesr-animevideov3-x2.bin
+  )
+  local file missing=()
+  for file in "${required[@]}"; do [[ -f "$folder/$file" ]] || missing+=("$file"); done
+  ((${#missing[@]})) || return 0
+  for tool in python3 cmake c++ pkg-config; do command -v "$tool" >/dev/null || missing+=("tool:$tool"); done
+  if ! pkg-config --exists libpng 2>/dev/null; then missing+=("library:libpng"); fi
+  if printf '%s\n' "${missing[@]}" | grep -qE '^(tool|library):'; then
+    echo 'rlcut: AI dev runtime is missing and cannot be prepared yet.' >&2
+    echo 'Install cmake, g++, pkg-config and libpng-dev, then restart dev mode.' >&2
+    return 0
+  fi
+  echo 'rlcut: preparing the optional AI runtime for dev mode (first run only).' >&2
+  echo 'rlcut: this downloads the pinned RIFE archive and builds the local CPU helper.' >&2
+  if ! python3 scripts/prepare-ai.py; then
+    echo 'rlcut: AI preparation failed; starting without AI export. Retry by restarting dev mode.' >&2
+  fi
+}
 case "$action" in
   dev)
+    prepare_dev_ai
     if [[ "${RLCUT_CONTAINER:-}" == 1 ]]; then
       # A private bus supports GTK dialogs without mounting the host session bus.
       export XDG_RUNTIME_DIR=/tmp/rlcut-runtime
