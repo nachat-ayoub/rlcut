@@ -51,7 +51,7 @@ const migratePresetNames = (store: Store): Store => {
     const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
-  return { ...store, presets: renamed, projects: (store.projects ?? []).map(project => {
+  return { ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
     const sourceTexts = project.texts ?? [];
     const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
     return { ...project, markers: normalizeMarkers(project.markers as never), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
@@ -322,6 +322,10 @@ export default function App() {
   const startExport = useCallback(async () => {
     if (!video || exporting || exportStarting)
       return;
+    if ((aiEnhance || aiUpscale) && !init?.aiAvailable) {
+      setError('AI export components are not installed in this build. Use the Linux AI AppImage, or prepare the local AI runtime before exporting.');
+      return;
+    }
     setExportStarting(true);
     setError(null);
     try {
@@ -352,7 +356,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, aiEnhance, aiUpscale, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, texts, textTracks, quality, fps, aiEnhance, aiUpscale, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, init?.aiAvailable, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -518,6 +522,10 @@ export default function App() {
       if (selectedText) editText({ ...selectedText, fontFamily: font.family, fontPath: font.path, fontBoldPath: paths.bold ?? '', fontBlackPath: paths.black ?? '', fontItalicPath: paths.italic ?? '', fontBoldItalicPath: paths.boldItalic ?? '', fontBlackItalicPath: paths.blackItalic ?? '' });
     } catch (error) { report(error); throw error; }
   }, [selectedText, editText, report]);
+  const toggleFavoriteFont = useCallback((id: string) => setStore(current => {
+    const favorites = current.settings.favoriteFonts ?? [];
+    return { ...current, settings: { ...current.settings, favoriteFonts: favorites.includes(id) ? favorites.filter(item => item !== id) : [...favorites, id] } };
+  }), []);
   const selectedVideoSegment = selectedClip?.track === 'video' ? segments.find(segment => segment.id === selectedClip.id) ?? null : null;
   const colorFixValue = colorScope === 'all' ? (segments.every(segment => Math.abs(segment.colorFix - (segments[0]?.colorFix ?? 0)) < .001) ? segments[0]?.colorFix ?? 0 : selectedVideoSegment?.colorFix ?? 0) : selectedVideoSegment?.colorFix ?? 0;
   const setColorFix = (value: number) => {
@@ -648,7 +656,7 @@ export default function App() {
       </div>
       <div className="inspector-scroll">
         {!layer && !selectedText && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, boost, or text element in the preview to edit it.</span></div>}
-        {selectedText && <Section title="Text" icon={<Pencil size={16} />}><TextInspector value={selectedText} fonts={fonts} onChange={editText} onAddGoogleFont={addGoogleFont} onDelete={() => removeText(selectedText.id)} /></Section>}
+        {selectedText && <Section title="Text" icon={<Pencil size={16} />}><TextInspector value={selectedText} fonts={fonts} favoriteFonts={store.settings.favoriteFonts ?? []} onChange={editText} onAddGoogleFont={addGoogleFont} onToggleFavoriteFont={toggleFavoriteFont} onDelete={() => removeText(selectedText.id)} /></Section>}
         {layer === 'background' && <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
           <Slider label="Gaussian blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
           <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />
@@ -728,17 +736,17 @@ export default function App() {
             <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
-          <div className="setting-toggle compact">
+          <label className="setting-toggle compact">
             <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
-            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
-          </div>
-          <div className="setting-toggle compact">
+            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
+          </label>
+          <label className="setting-toggle compact">
             <div><strong>AI upscale ×2</strong><small>Optional · compact Real-ESRGAN video model</small></div>
-            <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting || !init?.aiAvailable} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
-          </div>
+            <input className="switch" type="checkbox" aria-label="AI upscale output by two" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
+          </label>
           {aiUpscale && <p className="enhancement-note">Final output: {quality * 2} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * 2}. Upscales the selected export resolution without reducing it first. This compact model is trained for animation; it may alter game textures or text.</p>}
           {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only, including 1080p. Overlapping tiles keep AI working memory bounded; one CPU core, low priority and a 1.5 GiB per-process limit remain active. Higher resolutions and upscaling take substantially longer. Preview is unchanged. AI can introduce artifacts around fast objects and tile edges. For 60 FPS sources choose 120 FPS when smoothing.</p>}
-          {!init?.aiAvailable && <small className="enhancement-note">AI smoothing is included in the Linux AI AppImage. Standard export works without it.</small>}
+          {!init?.aiAvailable && <small className="enhancement-note">AI components are unavailable in this build. You can configure the options, but AI export requires the Linux AI AppImage or a prepared local AI runtime.</small>}
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
           <label className="field">Destination folder<div className="folder-picker">

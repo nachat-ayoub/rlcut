@@ -20,6 +20,8 @@ pub struct Settings {
     pub music_fade_out: bool,
     #[serde(default = "default_music_fade_duration")]
     pub music_fade_duration: f64,
+    #[serde(default)]
+    pub favorite_fonts: Vec<String>,
 }
 fn default_wait_for_preview() -> bool {
     true
@@ -38,6 +40,7 @@ impl Default for Settings {
             boost_intro: false,
             music_fade_out: false,
             music_fade_duration: default_music_fade_duration(),
+            favorite_fonts: Vec::new(),
         }
     }
 }
@@ -105,6 +108,11 @@ impl Store {
             || !(0.1..=10.).contains(&self.settings.music_fade_duration)
         {
             return Err("Music fade duration must be between 0.1 and 10 seconds".into());
+        }
+        if self.settings.favorite_fonts.len() > 500
+            || self.settings.favorite_fonts.iter().any(|font| font.len() > 200)
+        {
+            return Err("Too many favorite fonts".into());
         }
         Ok(())
     }

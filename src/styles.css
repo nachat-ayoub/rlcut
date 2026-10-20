@@ -917,7 +917,7 @@ h1 {
 .font-picker-trigger svg { flex:none; color:#a98ac5 }
 .font-picker-trigger:hover,.font-picker-trigger.open { border-color:#765790; background:#211a29 }
 .font-picker-popover { position:absolute; z-index:40; top:calc(100% + 5px); left:0; right:0; padding:7px; border:1px solid #574366; border-radius:9px; background:#1c1722; box-shadow:0 16px 34px #060408cc }
-.font-source-tabs { display:grid; grid-template-columns:1fr 1fr; gap:3px; margin-bottom:6px; padding:3px; border-radius:6px; background:#100e14 }
+.font-source-tabs { display:grid; grid-template-columns:1fr 1fr 31px; gap:3px; margin-bottom:6px; padding:3px; border-radius:6px; background:#100e14 }
 .font-source-tabs button { min-height:27px; display:flex; align-items:center; justify-content:center; gap:5px; border:0; border-radius:4px; color:#95899e; font-size:9px }
 .font-source-tabs button.active { color:#e1cefa; background:#392b47 }
 .font-search { min-height:32px; display:flex; align-items:center; gap:6px; padding:0 8px; border:1px solid #3b3045; border-radius:6px; background:#100e14; color:#8f7c9d }
@@ -925,10 +925,14 @@ h1 {
 .font-search input { min-width:0; flex:1; border:0; outline:0; background:transparent; color:#e4dbe9; font-size:10px }
 .font-search button { display:grid; place-items:center; padding:2px; border:0; color:#9c8da6 }
 .font-results { max-height:245px; margin-top:6px; overflow:auto; scrollbar-width:thin }
-.font-results>button { width:100%; min-height:34px; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 8px; border:0; border-radius:5px; background:transparent; color:#c8bdce; text-align:left; font-size:11px }
-.font-results>button:hover { background:#30243b; color:#f0e4f8 }
-.font-results>button.selected { color:#d9baff; background:#352743 }
-.font-results>button svg { flex:none; color:#9679ad }
+.font-result { width:100%; min-height:34px; display:flex; align-items:center; border-radius:5px; color:#c8bdce; font-size:11px }
+.font-result:hover { background:#30243b; color:#f0e4f8 }
+.font-result.selected { color:#d9baff; background:#352743 }
+.font-result-select { min-width:0; flex:1; min-height:34px; display:flex; align-items:center; justify-content:space-between; gap:8px; overflow:hidden; padding:6px 5px 6px 8px; border:0; background:transparent; color:inherit; text-align:left }
+.font-result-select span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.font-result-select svg { flex:none; color:#9679ad }
+.font-favorite { width:29px; height:29px; flex:none; display:grid; place-items:center; padding:0; border:0; border-radius:5px; color:#6f6477 }
+.font-favorite:hover,.font-favorite.active { color:#c9a4ff; background:#3b2c48 }
 .font-empty { padding:18px 8px; color:#83768b; text-align:center; font-size:9px }
 .music-clip {
   position:absolute;
