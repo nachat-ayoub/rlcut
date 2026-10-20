@@ -4,7 +4,9 @@ Both AI options start off. Export always reads the original recordings, independ
 
 ## Video first, AI second, text and audio last
 
-The first AI export renders the selected cuts, layout and color correction into a silent composition. AI processes that video, then a finishing pass adds text, clip audio and music. Text stays crisp at the final resolution. Completed AI videos are cached across app launches; text, font, music, volume and destination edits reuse the cache. Changes to sources, ranges, layout, color, FPS, resolution, AI options, model or app version prepare a new result. Incomplete/failed results are never cached. Settings → Clear AI cache removes prepared videos. Old entries are pruned at 4 GiB, retaining the current result. Storage uses `XDG_CACHE_HOME`, otherwise `~/.cache/io.rlcut.desktop/ai-exports-v4`.
+The first AI export renders the selected cuts, gameplay/background layout and color correction into a silent composition. AI processes that video, then a finishing pass adds the boost cutout, text, clip audio and music. Text and the boost HUD therefore stay crisp at the final resolution instead of being distorted by an upscaler.
+
+Every completed enhanced frame is committed atomically to a content-addressed checkpoint. Canceling, closing the app or losing power discards at most the frame currently being processed; the next matching export consumes completed frames and continues from the first missing one. Once all frames finish, the prepared AI video is cached across app launches. Boost, text, font, music, volume, destination and filename edits reuse the same AI work. Changes to source files, cuts, gameplay/background layout, color correction, FPS, resolution, AI options or model files prepare a new checkpoint. Settings → Clear AI cache removes prepared videos and incomplete checkpoints. Old entries are pruned around 4 GiB while retaining the active result. Storage uses `XDG_CACHE_HOME`, otherwise `~/.cache/io.rlcut.desktop/ai-exports-v4`.
 
 ## Upscaling choices
 
@@ -25,13 +27,13 @@ Every requested frame receives neural processing. The previous 40-minute blendin
 
 ## CPU and memory limits
 
-A persistent CPU-only ncnn worker loads each model once per job. Tiles are processed in memory; only a few full-frame PNGs are kept on disk. Fast PNG writing reduces IPC overhead. Exact duplicate input PNGs reuse one previous enhanced frame rather than repeating inference. No sequence of decoded frames is retained.
+A persistent ncnn worker loads each model once per job. Tiles are processed in memory. Completed output frames are retained as lossless PNG checkpoints until the prepared video is safely published; this can use several gigabytes for a long 4K export and is the disk-space cost of resumability. Fast PNG writing reduces IPC overhead. Exact duplicate input PNGs reuse one previous enhanced frame rather than repeating inference.
 
 Parallelism happens inside neural layers, using half the available CPU threads bounded to 1–4, at nice priority 15. `RLCUT_AI_THREADS=1..4` overrides the default. Starting several full-frame workers would duplicate model buffers and compete for the same old CPU, so inference keeps one frame in flight. The helper has a 3 GiB address-space cap; UI, decoder and encoder memory is additional. Responsiveness still depends on total available RAM and other applications. Preview playback pauses during AI export.
 
 RIFE uses overlapping 640px cores with a 64px context halo; upscaling uses 256px cores with 32px context. Blending/cropping reduces tile seams. AI can still introduce flicker, motion errors, hallucinated texture and HUD artifacts. These open-source models do not reproduce Topaz's proprietary restoration.
 
-Cancellation kills the process group and removes job temporary files. Original inputs and existing outputs are protected until publication. Forced OS/app termination can leave `.rlcut-*.partial*` files for manual cleanup.
+Cancellation kills the process group and removes job output temporary files while deliberately preserving completed AI checkpoints. Original inputs and existing outputs are protected until publication. Forced OS/app termination can leave `.rlcut-*.partial*` files beside the requested output for manual cleanup; cache checkpoints remain managed by rlcut.
 
 ## Development and packaging
 

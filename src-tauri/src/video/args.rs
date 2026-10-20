@@ -153,11 +153,9 @@ fn export_args_impl(
     let mut v = videos[0].clone();
     v.duration = total_duration;
     v.has_audio = videos.iter().any(|video| video.has_audio);
+    let needs_source_video = enhanced.is_none() || p.boost.enabled;
     let mut graph = String::new();
-    if enhanced.is_some() {
-        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty()));
-        graph.push_str(&format!("[{index}:v:0]setpts=PTS-STARTPTS[out_edit]"));
-    } else {
+    if needs_source_video {
         for source in 0..videos.len() {
             let indices = resolved
                 .iter()
@@ -214,31 +212,64 @@ fn export_args_impl(
             ";{video_inputs}concat=n={}:v=1:a=0[source_edit]",
             segments.len()
         ));
-        let mut composition = filter_graph_normalized(&v, p, w, h)?
-            .replace("[0:v:0]", "[source_edit]")
-            .replace("[out]", "[out_edit]");
-        if p.boost.intro.enabled && p.boost.enabled {
-            let b = super::geometry::geometry(&v, p, w, h)?.boost;
-            let hidden = -(b.width as i32) - 5;
-            let duration = p.boost.intro.duration;
-            let u = format!("(t/{duration:.6})");
-            let easing = match &p.boost.intro.easing {
-                BoostEasing::Linear => u.clone(),
-                BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
-                BoostEasing::EaseIn => format!("pow({u},3)"),
-                BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
-                BoostEasing::EaseInOut => {
-                    format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)")
+    }
+    let mut composition = if enhanced.is_some() {
+        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty()));
+        let mut value = format!("[{index}:v:0]setpts=PTS-STARTPTS[base]");
+        if p.boost.enabled {
+            let g = super::geometry::geometry(&v, p, w, h)?;
+            let b = g.boost;
+            let c = g.crop;
+            let radius = b.width.min(b.height) as f64 / 2.;
+            let distance = match p.boost.shape {
+                crate::model::Shape::Circle => {
+                    format!("sqrt(pow((X-(W-1)/2)/{radius:.6},2)+pow((Y-(H-1)/2)/{radius:.6},2))")
+                }
+                crate::model::Shape::Ellipse => {
+                    "sqrt(pow((X-(W-1)/2)/(W/2),2)+pow((Y-(H-1)/2)/(H/2),2))".into()
                 }
             };
-            composition = composition.replace(
+            let alpha = if p.boost.feather == 0. {
+                format!("if(lte({distance},1),255,0)")
+            } else {
+                format!("255*clip((1-({distance}))/{:.6},0,1)", p.boost.feather)
+            };
+            value.push_str(&format!(
+                ";[source_edit]crop={}:{}:{}:{},scale={}:{}:flags=lanczos,format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='{alpha}'[hud];[base][hud]overlay=x={}:y={}:eval=init:shortest=1:format=yuv420,format=yuv420p,setsar=1[out_edit]",
+                c.width, c.height, c.x, c.y, b.width, b.height, b.x, b.y
+            ));
+        } else {
+            value.push_str(";[base]format=yuv420p,setsar=1[out_edit]");
+        }
+        value
+    } else {
+        filter_graph_normalized(&v, p, w, h)?
+            .replace("[0:v:0]", "[source_edit]")
+            .replace("[out]", "[out_edit]")
+    };
+    if p.boost.intro.enabled && p.boost.enabled {
+        let b = super::geometry::geometry(&v, p, w, h)?.boost;
+        let hidden = -(b.width as i32) - 5;
+        let duration = p.boost.intro.duration;
+        let u = format!("(t/{duration:.6})");
+        let easing = match &p.boost.intro.easing {
+            BoostEasing::Linear => u.clone(),
+            BoostEasing::Ease => format!("pow({u},2)*(3-2*{u})"),
+            BoostEasing::EaseIn => format!("pow({u},3)"),
+            BoostEasing::EaseOut => format!("1-pow(1-{u},3)"),
+            BoostEasing::EaseInOut => {
+                format!("if(lt({u},0.5),4*pow({u},3),1-pow(-2*{u}+2,3)/2)")
+            }
+        };
+        composition = composition.replace(
             &format!("[base][hud]overlay=x={}:y={}:eval=init", b.x, b.y),
             &format!("[base][hud]overlay=x='if(lt(t,{duration:.6}),{hidden}+({}-({hidden}))*({easing}),{})':y={}:eval=frame", b.x, b.x, b.y),
         ).replace("eval=frame:shortest=1:format=yuv420", "eval=frame:shortest=1:format=yuv444");
-        }
-        graph.push(';');
-        graph.push_str(&composition);
     }
+    if !graph.is_empty() {
+        graph.push(';');
+    }
+    graph.push_str(&composition);
     let mut video_output = "out_edit".to_string();
     for (index, text) in texts.iter().enumerate() {
         let next = format!("text{index}");

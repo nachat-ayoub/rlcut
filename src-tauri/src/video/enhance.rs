@@ -1,4 +1,4 @@
-//! Optional, offline RIFE interpolation. Frames are streamed; no clip-sized frame cache.
+//! Optional offline RIFE/upscaling with streamed decoding and resumable output-frame checkpoints.
 use super::{
     binaries::{command, Binaries},
     export::Job,
@@ -215,6 +215,45 @@ impl Drop for Scratch {
         let _ = fs::remove_dir_all(&self.0);
     }
 }
+struct FrameCache {
+    folder: PathBuf,
+}
+impl FrameCache {
+    fn path(&self, index: u64) -> PathBuf {
+        self.folder.join(format!("{index:08}.png"))
+    }
+    fn load(&self, index: u64) -> Option<Vec<u8>> {
+        let bytes = fs::read(self.path(index)).ok()?;
+        (bytes.len() <= 96 * 1024 * 1024 && bytes.starts_with(b"\x89PNG\r\n\x1a\n"))
+            .then_some(bytes)
+    }
+    fn contains(&self, index: u64) -> bool {
+        let path = self.path(index);
+        fs::metadata(&path)
+            .is_ok_and(|metadata| metadata.len() >= 8 && metadata.len() <= 96 * 1024 * 1024)
+            && fs::File::open(path)
+                .and_then(|mut file| {
+                    let mut signature = [0; 8];
+                    file.read_exact(&mut signature).map(|_| signature)
+                })
+                .is_ok_and(|signature| signature == *b"\x89PNG\r\n\x1a\n")
+    }
+    fn store(&self, index: u64, bytes: &[u8]) -> Result<(), String> {
+        if bytes.len() > 96 * 1024 * 1024 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+            return Err("AI checkpoint frame is invalid".into());
+        }
+        let output = self.path(index);
+        let temporary = self.folder.join(format!("{index:08}.partial"));
+        fs::write(&temporary, bytes)
+            .map_err(|e| format!("Cannot write AI checkpoint frame: {e}"))?;
+        #[cfg(target_os = "windows")]
+        if output.exists() {
+            fs::remove_file(&output).map_err(|e| e.to_string())?;
+        }
+        fs::rename(&temporary, &output)
+            .map_err(|e| format!("Cannot commit AI checkpoint frame: {e}"))
+    }
+}
 fn canceled(job: &Job) -> Result<(), String> {
     if job.cancel.load(Ordering::SeqCst) {
         Err("Export canceled".into())
@@ -319,14 +358,16 @@ fn status(path: &Path) -> Option<(u64, u64)> {
     Some((done.parse().ok()?, total.parse().ok()?))
 }
 struct AiProgress {
-    started: Instant,
     completed: f64,
     total: f64,
+    work_started: Option<Instant>,
+    work_completed: f64,
+    work_total: f64,
     label: String,
 }
 impl AiProgress {
     fn report(
-        &self,
+        &mut self,
         job: &Job,
         export_start: Instant,
         done: u64,
@@ -339,12 +380,14 @@ impl AiProgress {
         }
         let effective = (self.completed + done.min(total) as f64 * weight).min(self.total);
         let fraction = (effective / self.total.max(1.)).clamp(0., 1.);
-        let ai_elapsed = self.started.elapsed().as_secs_f64();
+        let measured = (self.work_completed + done.min(total) as f64 * weight).min(self.work_total);
+        let work_started = self.work_started.get_or_insert_with(Instant::now);
+        let work_elapsed = work_started.elapsed().as_secs_f64();
         if let Ok(mut progress) = job.progress.lock() {
             progress.percent = progress.percent.max((20. + fraction * 69.9).min(89.9));
             progress.elapsed = export_start.elapsed().as_secs_f64();
-            progress.remaining = (effective >= weight && fraction < 1.)
-                .then(|| (ai_elapsed / effective * (self.total - effective)).max(0.));
+            progress.remaining = (measured >= weight && measured < self.work_total)
+                .then(|| (work_elapsed / measured * (self.work_total - measured)).max(0.));
             progress.stage = Some(format!(
                 "{} · {detail} · tile {}/{total}",
                 self.label,
@@ -353,7 +396,19 @@ impl AiProgress {
         }
     }
     fn finish(&mut self, units: u64, weight: f64) {
+        let amount = units as f64 * weight;
+        self.completed = (self.completed + amount).min(self.total);
+        self.work_completed = (self.work_completed + amount).min(self.work_total);
+    }
+    fn cached(&mut self, job: &Job, export_start: Instant, units: u64, weight: f64, detail: &str) {
         self.completed = (self.completed + units as f64 * weight).min(self.total);
+        let fraction = (self.completed / self.total.max(1.)).clamp(0., 1.);
+        if let Ok(mut progress) = job.progress.lock() {
+            progress.percent = progress.percent.max((20. + fraction * 69.9).min(89.9));
+            progress.elapsed = export_start.elapsed().as_secs_f64();
+            progress.remaining = None;
+            progress.stage = Some(format!("{} · resumed {detail}", self.label));
+        }
     }
 }
 struct Worker {
@@ -574,17 +629,23 @@ fn write_timed_frame(
     upscaler: Option<&Upscale>,
     progress: &mut AiProgress,
     export_start: Instant,
+    cache: &FrameCache,
 ) -> Result<(), String> {
     if *written < limit {
-        if let Some(upscaler) = upscaler {
-            let detail = format!("frame {}/{}", *written + 1, limit);
-            write_frame(
-                w,
-                &upscaler.frame(bytes, job, progress, export_start, &detail)?,
-                job,
-            )?;
+        let detail = format!("frame {}/{}", *written + 1, limit);
+        if let Some(cached) = cache.load(*written) {
+            write_frame(w, &cached, job)?;
+            if let Some(upscaler) = upscaler {
+                progress.cached(job, export_start, upscaler.tiles, 1., &detail);
+            }
         } else {
-            write_frame(w, bytes, job)?;
+            let output = if let Some(upscaler) = upscaler {
+                upscaler.frame(bytes, job, progress, export_start, &detail)?
+            } else {
+                bytes.to_vec()
+            };
+            cache.store(*written, &output)?;
+            write_frame(w, &output, job)?;
         }
         *written += 1;
     }
@@ -616,6 +677,7 @@ pub fn run(
     job: Arc<Job>,
     start: Instant,
     log: &Path,
+    checkpoint: &Path,
 ) -> Result<(), String> {
     if let Ok(mut p) = job.progress.lock() {
         p.stage = Some(
@@ -635,6 +697,11 @@ pub fn run(
     let scratch_path = input.with_extension("frames");
     fs::create_dir(&scratch_path).map_err(|e| format!("Cannot create AI scratch folder: {e}"))?;
     let scratch = Scratch(scratch_path);
+    fs::create_dir_all(checkpoint)
+        .map_err(|e| format!("Cannot open resumable AI checkpoint: {e}"))?;
+    let frame_cache = FrameCache {
+        folder: checkpoint.to_path_buf(),
+    };
     let ai_folder = binary
         .parent()
         .ok_or("AI engine folder is unavailable")?
@@ -798,13 +865,13 @@ pub fn run(
     // PNGs after FFmpeg has reached -t and closed its input pipe.
     let frame_limit = (duration * o.fps as f64).ceil() as u64;
     let source_frames = (duration * base_fps).ceil() as u64;
+    let crosses_cut = |index: u64| {
+        let time = index as f64 / base_fps;
+        cuts.iter()
+            .any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001)
+    };
     let rife_calls = (0..source_frames.saturating_sub(1))
-        .filter(|index| {
-            let time = *index as f64 / base_fps;
-            !cuts
-                .iter()
-                .any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001)
-        })
+        .filter(|index| !crosses_cut(*index))
         .count() as u64;
     let total_units = (if o.ai_upscale {
         frame_limit * upscale_tiles
@@ -817,15 +884,37 @@ pub fn run(
             0
         }) as f64
             * RIFE_WEIGHT;
+    let upscale_work = if o.ai_upscale {
+        (0..frame_limit)
+            .filter(|frame| !frame_cache.contains(*frame))
+            .count() as u64
+            * upscale_tiles
+    } else {
+        0
+    };
+    let rife_work = if o.ai_enhance {
+        (0..source_frames.saturating_sub(1))
+            .filter(|index| {
+                let output = (*index).saturating_mul(2).saturating_add(1);
+                output < frame_limit && !crosses_cut(*index) && !frame_cache.contains(output)
+            })
+            .count() as u64
+            * rife_tiles
+    } else {
+        0
+    };
+    let work_total = upscale_work as f64 + rife_work as f64 * RIFE_WEIGHT;
     let label = match (o.ai_enhance, o.ai_upscale) {
         (true, true) => "AI smoothing + upscaling ×2",
         (true, false) => "AI smoothing",
         _ => "AI upscaling ×2",
     };
     let mut ai_progress = AiProgress {
-        started: Instant::now(),
         completed: 0.,
         total: total_units.max(1.),
+        work_started: None,
+        work_completed: 0.,
+        work_total,
         label: label.into(),
     };
     loop {
@@ -840,6 +929,7 @@ pub fn run(
             upscaler.as_ref(),
             &mut ai_progress,
             start,
+            &frame_cache,
         )?;
         if let Some(next) = next {
             if !o.ai_enhance {
@@ -862,35 +952,52 @@ pub fn run(
                     upscaler.as_ref(),
                     &mut ai_progress,
                     start,
+                    &frame_cache,
                 )?;
             } else {
-                fs::write(&before, &current).map_err(|e| e.to_string())?;
-                fs::write(&after, &next).map_err(|e| e.to_string())?;
-                let _ = fs::remove_file(&middle);
-                let state = scratch.0.join("rife-progress");
-                let _ = fs::remove_file(&state);
                 let detail = format!("source frame {}/{}", index + 1, source_frames);
-                session.request("interpolate", &state, &job, |done, total| {
-                    ai_progress.report(&job, start, done, total, RIFE_WEIGHT, &detail)
-                })?;
-                ai_progress.report(&job, start, rife_tiles, rife_tiles, RIFE_WEIGHT, &detail);
-                ai_progress.finish(rife_tiles, RIFE_WEIGHT);
-                let length = fs::metadata(&middle)
-                    .map_err(|e| format!("RIFE did not produce a frame: {e}"))?
-                    .len();
-                if length == 0 || length > 24 * 1024 * 1024 {
-                    return Err("RIFE output frame is invalid".into());
+                if written < frame_limit && frame_cache.contains(written) {
+                    ai_progress.cached(&job, start, rife_tiles, RIFE_WEIGHT, &detail);
+                    write_timed_frame(
+                        &mut sink,
+                        &[],
+                        &job,
+                        &mut written,
+                        frame_limit,
+                        upscaler.as_ref(),
+                        &mut ai_progress,
+                        start,
+                        &frame_cache,
+                    )?;
+                } else if written < frame_limit {
+                    fs::write(&before, &current).map_err(|e| e.to_string())?;
+                    fs::write(&after, &next).map_err(|e| e.to_string())?;
+                    let _ = fs::remove_file(&middle);
+                    let state = scratch.0.join("rife-progress");
+                    let _ = fs::remove_file(&state);
+                    session.request("interpolate", &state, &job, |done, total| {
+                        ai_progress.report(&job, start, done, total, RIFE_WEIGHT, &detail)
+                    })?;
+                    ai_progress.report(&job, start, rife_tiles, rife_tiles, RIFE_WEIGHT, &detail);
+                    ai_progress.finish(rife_tiles, RIFE_WEIGHT);
+                    let length = fs::metadata(&middle)
+                        .map_err(|e| format!("RIFE did not produce a frame: {e}"))?
+                        .len();
+                    if length == 0 || length > 24 * 1024 * 1024 {
+                        return Err("RIFE output frame is invalid".into());
+                    }
+                    write_timed_frame(
+                        &mut sink,
+                        &fs::read(&middle).map_err(|e| e.to_string())?,
+                        &job,
+                        &mut written,
+                        frame_limit,
+                        upscaler.as_ref(),
+                        &mut ai_progress,
+                        start,
+                        &frame_cache,
+                    )?;
                 }
-                write_timed_frame(
-                    &mut sink,
-                    &fs::read(&middle).map_err(|e| e.to_string())?,
-                    &job,
-                    &mut written,
-                    frame_limit,
-                    upscaler.as_ref(),
-                    &mut ai_progress,
-                    start,
-                )?;
             }
             current = next;
         } else {
@@ -904,6 +1011,7 @@ pub fn run(
                     upscaler.as_ref(),
                     &mut ai_progress,
                     start,
+                    &frame_cache,
                 )?;
             }
             break;
