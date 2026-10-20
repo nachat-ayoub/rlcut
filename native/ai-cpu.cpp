@@ -1,5 +1,8 @@
-// CPU-only export helper. The parent enforces affinity, priority, memory and cancellation.
+// Tiled CPU/Vulkan export helper. The parent enforces affinity, priority, memory and cancellation.
 #include <net.h>
+#if NCNN_VULKAN
+#include <gpu.h>
+#endif
 #include <png.h>
 #include <algorithm>
 #include <cmath>
@@ -15,6 +18,8 @@
 #include <iostream>
 #include <memory>
 #include <fstream>
+#include <atomic>
+#include <mutex>
 
 struct Image {
     int w, h;
@@ -45,7 +50,7 @@ Image crop(const Image& in, int x, int y, int w, int h) {
 int worker_threads() {
     const char* value=std::getenv("RLCUT_AI_THREADS");
     int threads=value ? std::atoi(value) : (int)std::thread::hardware_concurrency();
-    return std::clamp(threads,1,4);
+    return std::clamp(threads,1,16);
 }
 void progress(const char* path,int done,int total) {
     if (!path || !*path) return;
@@ -77,8 +82,29 @@ public:
 };
 DEFINE_LAYER_CREATOR(CpuWarp)
 std::unique_ptr<ncnn::Net> rife_net, upscale_net;
+int gpu_index=-1;
+int select_gpu() {
+#if NCNN_VULKAN
+    // Ignore software Vulkan (lavapipe): it competes for CPU and is much slower.
+    int selected=-1;
+    for(int i=0;i<ncnn::get_gpu_count();++i) {
+        const auto& info=ncnn::get_gpu_info(i);
+        if(info.type()>1) continue;
+        if(selected<0 || info.type()<ncnn::get_gpu_info(selected).type()) selected=i;
+    }
+    return selected;
+#else
+    return -1;
+#endif
+}
+void normalize(ncnn::Mat& data) {
+    for(int c=0;c<data.c;++c) {
+        float* values=data.channel(c);
+        for(int i=0;i<data.w*data.h;++i) values[i]*=1.f/255;
+    }
+}
 void configure(ncnn::Net& net) {
-    net.opt.num_threads=worker_threads(); net.opt.use_packing_layout=true;
+    net.opt.num_threads=worker_threads(); net.opt.use_packing_layout=true; net.opt.openmp_blocktime=0;
     net.opt.use_vulkan_compute=false;net.opt.use_fp16_storage=false;net.opt.use_fp16_arithmetic=false;
 }
 Image rife(const std::string& model, const Image& a, const Image& b) {
@@ -89,7 +115,7 @@ Image rife(const std::string& model, const Image& a, const Image& b) {
     }
     auto prepare=[](const Image& in) {
         auto rgb=ncnn::Mat::from_pixels(in.rgb.data(),ncnn::Mat::PIXEL_RGB,in.w,in.h);
-        const float norm[]={1.f/255,1.f/255,1.f/255};rgb.substract_mean_normalize(nullptr,norm);
+        normalize(rgb);
         ncnn::Mat padded;ncnn::copy_make_border(rgb,padded,0,(in.h+31)/32*32-in.h,0,(in.w+31)/32*32-in.w,ncnn::BORDER_CONSTANT,0.f);
         return padded;
     };
@@ -135,37 +161,65 @@ void upscale(char** args,const char* status,bool lite=false) {
     const int native_scale=lite ? 4 : 2;
     if(!upscale_net) {
         upscale_net=std::make_unique<ncnn::Net>(); configure(*upscale_net);
+#if NCNN_VULKAN
+        if(gpu_index>=0) {
+            upscale_net->set_vulkan_device(gpu_index);
+            upscale_net->opt.use_vulkan_compute=true;
+            upscale_net->opt.use_fp16_storage=true;
+        }
+#endif
         if(upscale_net->load_param(args[2]) || upscale_net->load_model(args[3])) throw std::runtime_error("Cannot load AI upscale model");
     }
     auto& net=*upscale_net;
     const Image input=load(args[4]); Image output(input.w*2,input.h*2);
-    const float normalization[3]={1.f/255,1.f/255,1.f/255};
     // A 256px core with 32px context keeps memory bounded while avoiding hundreds
     // of tiny extractor calls per frame. Network output is
     // cropped to the core, retaining context rather than exposing tile borders.
     constexpr int core=256;
-    const int total=((input.w+core-1)/core)*((input.h+core-1)/core); int done=0;
-    progress(status,done,total);
-    for (int y=0;y<input.h;y+=core) for (int x=0;x<input.w;x+=core) {
+    const int columns=(input.w+core-1)/core;
+    const int total=columns*((input.h+core-1)/core);
+    // Independent extractors share read-only model weights, but own activations.
+    // The parent chooses concurrency using available RAM and a global CPU budget.
+    const char* setting=std::getenv("RLCUT_AI_TILE_WORKERS");
+    const int workers=gpu_index>=0 ? 1 : std::clamp(setting?std::atoi(setting):1,1,3);
+    const int threads=std::max(1,worker_threads()/workers);
+    std::atomic<int> next{0}; int done=0;
+    std::mutex state_mutex; std::exception_ptr failure;
+    progress(status,0,total);
+    auto work=[&]() { try { for (;;) {
+        const int tile=next.fetch_add(1);
+        if(tile>=total) break;
+        const int x=(tile%columns)*core,y=(tile/columns)*core;
         int cw=std::min(core,input.w-x), ch=std::min(core,input.h-y);
         int left=std::max(0,x-32), top=std::max(0,y-32);
         int right=std::min(input.w,x+cw+32), bottom=std::min(input.h,y+ch+32);
         Image patch=crop(input,left,top,right-left,bottom-top);
         ncnn::Mat data=ncnn::Mat::from_pixels(patch.rgb.data(),ncnn::Mat::PIXEL_RGB,patch.w,patch.h);
-        data.substract_mean_normalize(nullptr,normalization);
-        auto extractor=net.create_extractor(); extractor.set_light_mode(true);
+        normalize(data);
+        auto extractor=net.create_extractor(); extractor.set_light_mode(true); extractor.set_num_threads(threads);
         ncnn::Mat result;
         if (extractor.input("data",data) || extractor.extract("output",result)) throw std::runtime_error("AI upscale inference failed");
         if (result.w!=patch.w*native_scale || result.h!=patch.h*native_scale || result.c!=3) throw std::runtime_error("Unexpected AI upscale output size");
         // Lite is a native 4x network. Downsample its float prediction to 2x
         // inside each context-padded tile; do not allocate a clip-sized 4x frame.
-        if(lite) { ncnn::Mat reduced; ncnn::resize_bicubic(result,reduced,patch.w*2,patch.h*2); result=reduced; }
+        if(lite) { ncnn::Mat reduced; ncnn::Option options; options.num_threads=threads; ncnn::resize_bicubic(result,reduced,patch.w*2,patch.h*2,options); result=reduced; }
         for (int row=0;row<ch*2;++row) for (int col=0;col<cw*2;++col) for (int c=0;c<3;++c) {
             const float value=result.channel(c).row((y-top)*2+row)[(x-left)*2+col];
             output.rgb[((size_t)(y*2+row)*output.w+x*2+col)*3+c]=(unsigned char)std::clamp(std::lround(value*255),0L,255L);
         }
+        std::lock_guard<std::mutex> lock(state_mutex);
         progress(status,++done,total);
-    }
+    }} catch(...) {
+        std::lock_guard<std::mutex> lock(state_mutex);
+        if(!failure) failure=std::current_exception();
+        next.store(total);
+    }};
+    std::vector<std::thread> pool;
+    // Join even if constructing a later thread fails.
+    try { for(int i=1;i<workers;++i) pool.emplace_back(work); }
+    catch(...) { next.store(total); for(auto& t:pool)t.join(); throw; }
+    work(); for(auto& t:pool)t.join();
+    if(failure)std::rethrow_exception(failure);
     save(output,args[5]);
 }
 // Fixed filenames inside a private per-job working directory keep the command
@@ -200,7 +254,19 @@ void serve(const std::string& folder) {
 }
 int main(int argc,char** argv) {
     try {
-        if(argc==3 && std::string(argv[1])=="serve") serve(argv[2]);
+        if(argc==2 && std::string(argv[1])=="probe-gpu") {
+            const int device=select_gpu();
+            if(device<0) return 2;
+#if NCNN_VULKAN
+            std::cout << device << "\n" << ncnn::get_gpu_info(device).device_name() << "\n";
+#endif
+        }
+        else if(argc==3 && std::string(argv[1])=="serve-gpu") {
+            gpu_index=select_gpu();
+            if(gpu_index<0) throw std::runtime_error("No hardware Vulkan GPU available");
+            serve(argv[2]);
+        }
+        else if(argc==3 && std::string(argv[1])=="serve") serve(argv[2]);
         else if ((argc==8 || argc==9) && std::string(argv[1])=="interpolate") interpolate(argv,argc==9?argv[8]:nullptr);
         else if ((argc==6 || argc==7) && std::string(argv[1])=="upscale") upscale(argv,argc==7?argv[6]:nullptr);
         else throw std::runtime_error("Invalid AI CPU helper arguments");

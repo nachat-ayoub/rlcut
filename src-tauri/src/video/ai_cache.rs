@@ -141,7 +141,7 @@ pub fn run(
         .iter()
         .map(|s| serde_json::json!([s.start, s.end, s.color_fix]))
         .collect::<Vec<_>>();
-    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"persistent-cpu-v2-full-ai", "app":env!("CARGO_PKG_VERSION"),"sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
+    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"parallel-cpu-vulkan-v1-full-ai", "app":env!("CARGO_PKG_VERSION"),"sources":source,"video":videos,"preset":p,"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
     let mut hash = DefaultHasher::new();
     manifest.hash(&mut hash);
     let root = root()?;

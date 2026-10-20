@@ -242,3 +242,38 @@ workflow has not been upgraded for this engine; do not distribute its output yet
 
 `Failed to load module "canberra-gtk-module"` is an optional GTK desktop sound
 hook message; it is unrelated to decoding or exports.
+
+## Parallel AI export (v0.6.0)
+
+The AppImage includes separate CPU and Vulkan upscalers. Hardware Vulkan devices
+are selected automatically (discrete before integrated); software Vulkan devices
+are excluded. The live progress label names the selected GPU or CPU thread/tile
+count. Missing drivers, probe failure, inference errors or a GPU tile stalled
+for three minutes cause full-neural CPU fallback. No frames are skipped. RIFE
+smoothing remains CPU-based. GPU availability for export is independent of the
+software preview setting; forcing software preview does not disable AI GPU use.
+
+CPU upscaling shares read-only model weights across one to three concurrent
+tile extractors. A single global thread budget is split between them rather than
+multiplying it per tile. Default CPU budget: half the available logical CPUs
+on smaller machines, all but two on machines with at least eight, capped at 12.
+Two tile workers require at least six budgeted threads and 3 GiB MemAvailable;
+three require ten threads and 6 GiB. Less RAM uses one worker. CPU helpers retain
+a 3 GiB address-space ceiling and low scheduling priority. GPU helpers use
+bounded tiles instead of an address-space limit that would break driver mappings.
+This reduces pressure; it cannot guarantee temperature, memory use or export time
+on every machine. There is no benchmark claim or fixed 30-minute guarantee.
+
+Override the CPU budget with `RLCUT_AI_THREADS=4` (range 1–12); force CPU inference
+with `RLCUT_AI_DEVICE=cpu`. These apply when starting the application. For a native
+development checkout, prepare the CPU runtime first, then build Vulkan support:
+
+```sh
+python3 scripts/prepare-ai.py
+python3 scripts/prepare-ai-gpu.py
+```
+
+The GPU build requires CMake, a C++ toolchain, libpng development files and
+libvulkan1. Its pinned shader compiler/headers are downloaded at build time;
+users do not need Python or model downloads. The AppImage build includes both
+helpers. A working host GPU driver remains necessary.

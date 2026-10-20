@@ -5,7 +5,7 @@ use super::{
 };
 use crate::model::ExportOptions;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     fs,
     io::{BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -55,9 +55,84 @@ fn ai_threads() -> usize {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| {
-            std::thread::available_parallelism().map_or(2, |value| (value.get() / 2).max(1))
+            std::thread::available_parallelism().map_or(2, |value| {
+                let cpus = value.get();
+                if cpus >= 8 {
+                    cpus.saturating_sub(2)
+                } else {
+                    (cpus / 2).max(1)
+                }
+            })
         })
-        .clamp(1, 4)
+        .clamp(1, 12)
+}
+
+fn tile_workers() -> usize {
+    // Reserve RAM for the editor/decoder and bound concurrent activation tensors.
+    let available_kib = fs::read_to_string("/proc/meminfo")
+        .ok()
+        .and_then(|text| {
+            text.lines().find_map(|line| {
+                line.strip_prefix("MemAvailable:")
+                    .and_then(|v| v.split_whitespace().next())
+                    .and_then(|v| v.parse::<u64>().ok())
+            })
+        })
+        .unwrap_or(0);
+    if ai_threads() >= 10 && available_kib >= 6 * 1024 * 1024 {
+        3
+    } else if ai_threads() >= 6 && available_kib >= 3 * 1024 * 1024 {
+        2
+    } else {
+        1
+    }
+}
+
+fn gpu_backend(
+    folder: &Path,
+    scratch: &Path,
+    job: &Job,
+    log: &Path,
+) -> Result<Option<String>, String> {
+    if std::env::var("RLCUT_AI_DEVICE").as_deref() == Ok("cpu")
+        || !folder.join("rlcut-ai-gpu").is_file()
+    {
+        return Ok(None);
+    }
+    let result = scratch.join("gpu-probe");
+    let mut c = command(&folder.join("rlcut-ai-gpu"));
+    c.arg("probe-gpu")
+        .stdin(Stdio::null())
+        .stdout(fs::File::create(&result).map_err(|e| e.to_string())?)
+        .stderr(
+            fs::OpenOptions::new()
+                .append(true)
+                .open(log)
+                .map_err(|e| e.to_string())?,
+        );
+    // Vulkan drivers reserve large virtual address ranges; CPU RLIMIT_AS would
+    // prevent valid drivers from starting. Tile sizes bound device allocations.
+    low_pressure(&mut c, false);
+    let Ok(child) = c.spawn() else {
+        return Ok(None);
+    };
+    let mut process = Process(child);
+    let began = Instant::now();
+    loop {
+        canceled(job)?;
+        if let Some(status) = process.0.try_wait().map_err(|e| e.to_string())? {
+            if status.success() {
+                return Ok(fs::read_to_string(&result)
+                    .ok()
+                    .and_then(|s| s.lines().nth(1).map(str::to_owned)));
+            }
+            return Ok(None);
+        }
+        if began.elapsed() > Duration::from_secs(5) {
+            return Ok(None);
+        }
+        pause(job)?;
+    }
 }
 
 // Use a small bounded CPU set and low priority so exports finish materially faster without
@@ -68,7 +143,9 @@ pub fn low_pressure(c: &mut Command, inference: bool) {
     c.env("RLCUT_AI_THREADS", threads.to_string())
         .env("OMP_NUM_THREADS", threads.to_string())
         .env("OMP_THREAD_LIMIT", threads.to_string())
-        .env("OPENBLAS_NUM_THREADS", threads.to_string());
+        .env("OPENBLAS_NUM_THREADS", threads.to_string())
+        .env("RLCUT_AI_TILE_WORKERS", tile_workers().to_string())
+        .env("OMP_WAIT_POLICY", "PASSIVE");
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
@@ -288,9 +365,50 @@ struct Session {
     folder: PathBuf,
     scratch: PathBuf,
     log: PathBuf,
+    gpu: Cell<bool>,
+    backend: String,
+    tile_workers: usize,
 }
 impl Session {
+    fn description(&self) -> String {
+        if self.gpu.get() {
+            format!("Vulkan GPU · {}", self.backend)
+        } else {
+            format!(
+                "CPU · {} threads · {} parallel tiles",
+                ai_threads(),
+                self.tile_workers
+            )
+        }
+    }
     fn request(
+        &self,
+        mode: &str,
+        state: &Path,
+        job: &Job,
+        mut report: impl FnMut(u64, u64),
+    ) -> Result<(), String> {
+        let first = self.request_once(mode, state, job, &mut report);
+        if first.is_err() && self.gpu.get() && mode.starts_with("upscale") {
+            canceled(job)?;
+            // A driver may enumerate successfully but fail allocation/inference.
+            // Kill its private process before retrying the same full-AI frame.
+            if let Err(error) = &first {
+                if let Ok(mut log) = fs::OpenOptions::new().append(true).open(&self.log) {
+                    let _ = writeln!(log, "Vulkan fallback: {error}");
+                }
+            }
+            self.worker.borrow_mut().take();
+            self.gpu.set(false);
+            if let Ok(mut p) = job.progress.lock() {
+                p.warning = Some("Vulkan inference failed; continuing full AI processing on CPU. See export diagnostics.".into());
+            }
+            self.request_once(mode, state, job, report)
+        } else {
+            first
+        }
+    }
+    fn request_once(
         &self,
         mode: &str,
         state: &Path,
@@ -299,9 +417,15 @@ impl Session {
     ) -> Result<(), String> {
         canceled(job)?;
         if self.worker.borrow().is_none() {
-            let mut command = command(&self.folder.join("rlcut-ai-cpu"));
+            let gpu = self.gpu.get();
+            let mut command =
+                command(
+                    &self
+                        .folder
+                        .join(if gpu { "rlcut-ai-gpu" } else { "rlcut-ai-cpu" }),
+                );
             command
-                .arg("serve")
+                .arg(if gpu { "serve-gpu" } else { "serve" })
                 .arg(&self.folder)
                 .current_dir(&self.scratch)
                 .stdin(Stdio::piped())
@@ -312,7 +436,8 @@ impl Session {
                         .open(&self.log)
                         .map_err(|e| e.to_string())?,
                 );
-            low_pressure(&mut command, true);
+            low_pressure(&mut command, !gpu);
+            command.env("RLCUT_AI_TILE_WORKERS", self.tile_workers.to_string());
             let mut process = Process(
                 command
                     .spawn()
@@ -331,6 +456,7 @@ impl Session {
             job,
         )?;
         let mut last = None;
+        let mut activity = Instant::now();
         loop {
             canceled(job)?;
             if let Ok(text) = fs::read_to_string(&result) {
@@ -346,7 +472,14 @@ impl Session {
                 if last != Some(value) {
                     report(value.0, value.1);
                     last = Some(value);
+                    activity = Instant::now();
                 }
+            }
+            if self.gpu.get()
+                && mode.starts_with("upscale")
+                && activity.elapsed() > Duration::from_secs(180)
+            {
+                return Err("Vulkan inference stopped reporting tile progress".into());
             }
             if self
                 .worker
@@ -406,9 +539,23 @@ impl Upscale {
         let _ = fs::remove_file(&output);
         self.session
             .request(self.mode, &state, job, |done, total| {
-                progress.report(job, export_start, done, total, 1., detail)
+                progress.report(
+                    job,
+                    export_start,
+                    done,
+                    total,
+                    1.,
+                    &format!("{detail} · {}", self.session.description()),
+                )
             })?;
-        progress.report(job, export_start, self.tiles, self.tiles, 1., detail);
+        progress.report(
+            job,
+            export_start,
+            self.tiles,
+            self.tiles,
+            1.,
+            &format!("{detail} · {}", self.session.description()),
+        );
         progress.finish(self.tiles, 1.);
         if fs::metadata(&output).map_err(|e| e.to_string())?.len() > 96 * 1024 * 1024 {
             return Err("AI upscale output exceeds the frame safety limit".into());
@@ -492,12 +639,28 @@ pub fn run(
         .parent()
         .ok_or("AI engine folder is unavailable")?
         .to_path_buf();
+    let gpu = if o.ai_upscale {
+        gpu_backend(&ai_folder, &scratch.0, &job, log)?
+    } else {
+        None
+    };
+    if o.ai_upscale && gpu.is_none() {
+        if let Ok(mut p) = job.progress.lock() {
+            p.warning = Some(format!("No usable hardware Vulkan GPU detected; using {} CPU threads with {} parallel tile workers. A working GPU driver is required for GPU acceleration.", ai_threads(), tile_workers()));
+        }
+    }
     let session = Rc::new(Session {
         worker: RefCell::new(None),
         folder: ai_folder.canonicalize().map_err(|e| e.to_string())?,
         scratch: scratch.0.clone(),
         log: log.to_path_buf(),
+        gpu: Cell::new(gpu.is_some()),
+        backend: gpu.unwrap_or_default(),
+        tile_workers: tile_workers(),
     });
+    if let Ok(mut log) = fs::OpenOptions::new().append(true).open(log) {
+        let _ = writeln!(log, "AI execution: {}", session.description());
+    }
     let upscaler = o.ai_upscale.then(|| Upscale {
         mode: if o.ai_upscale_lite {
             "upscale-lite"
