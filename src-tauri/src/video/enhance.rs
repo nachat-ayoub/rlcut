@@ -46,13 +46,23 @@ pub fn available() -> bool {
     installation().is_some()
 }
 
-// Restrict every enhancement subprocess to the same single allowed CPU and nice 15.
-// Limit only RIFE's address space: encoders, Vulkan discovery and frame data remain separate.
+fn ai_threads() -> usize {
+    std::env::var("RLCUT_AI_THREADS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(2, |value| value.get()))
+        .clamp(1, 4)
+}
+
+// Use a small bounded CPU set and low priority so exports finish materially faster without
+// monopolizing the laptop. Limit only inference address space; encoders remain separate.
 // These are hard process limits, not a promise about total machine RAM or temperature.
 pub fn low_pressure(c: &mut Command, inference: bool) {
-    c.env("OMP_NUM_THREADS", "1")
-        .env("OMP_THREAD_LIMIT", "1")
-        .env("OPENBLAS_NUM_THREADS", "1");
+    let threads = ai_threads();
+    c.env("RLCUT_AI_THREADS", threads.to_string())
+        .env("OMP_NUM_THREADS", threads.to_string())
+        .env("OMP_THREAD_LIMIT", threads.to_string())
+        .env("OPENBLAS_NUM_THREADS", threads.to_string());
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
@@ -71,10 +81,16 @@ pub fn low_pressure(c: &mut Command, inference: bool) {
                     return Err(std::io::Error::last_os_error());
                 }
                 let mut selected = [0u8; 128];
-                for (index, byte) in mask.iter().enumerate() {
-                    if *byte != 0 {
-                        selected[index] = 1 << byte.trailing_zeros();
-                        break;
+                let mut count = 0usize;
+                'cpus: for (index, byte) in mask.iter().enumerate() {
+                    for bit in 0..8 {
+                        if byte & (1 << bit) != 0 {
+                            selected[index] |= 1 << bit;
+                            count += 1;
+                            if count >= threads {
+                                break 'cpus;
+                            }
+                        }
                     }
                 }
                 if sched_setaffinity(0, selected.len(), selected.as_ptr()) != 0
@@ -82,7 +98,7 @@ pub fn low_pressure(c: &mut Command, inference: bool) {
                 {
                     return Err(std::io::Error::last_os_error());
                 }
-                if inference && setrlimit(9, &[1536 * 1024 * 1024; 2]) != 0 {
+                if inference && setrlimit(9, &[3 * 1024 * 1024 * 1024; 2]) != 0 {
                     return Err(std::io::Error::last_os_error());
                 }
                 Ok(())
@@ -208,17 +224,55 @@ fn write_frame(w: &mut impl Write, mut bytes: &[u8], job: &Job) -> Result<(), St
     }
     Ok(())
 }
+const UPSCALE_CORE: u64 = 256;
+const RIFE_STEP: u64 = 576;
+const RIFE_WEIGHT: f64 = 6.;
+fn tile_count(width: u32, height: u32, step: u64) -> u64 {
+    (u64::from(width).div_ceil(step)) * (u64::from(height).div_ceil(step))
+}
+fn status(path: &Path) -> Option<(u64, u64)> {
+    let text = fs::read_to_string(path).ok()?;
+    let (done, total) = text.trim().split_once('/')?;
+    Some((done.parse().ok()?, total.parse().ok()?))
+}
+struct AiProgress {
+    started: Instant,
+    completed: f64,
+    total: f64,
+    label: String,
+}
+impl AiProgress {
+    fn report(&self, job: &Job, export_start: Instant, done: u64, total: u64, weight: f64, detail: &str) {
+        if total == 0 { return; }
+        let effective = (self.completed + done.min(total) as f64 * weight).min(self.total);
+        let fraction = (effective / self.total.max(1.)).clamp(0., 1.);
+        let ai_elapsed = self.started.elapsed().as_secs_f64();
+        if let Ok(mut progress) = job.progress.lock() {
+            progress.percent = progress.percent.max((20. + fraction * 79.9).min(99.9));
+            progress.elapsed = export_start.elapsed().as_secs_f64();
+            progress.remaining = (effective >= weight && fraction < 1.)
+                .then(|| (ai_elapsed / effective * (self.total - effective)).max(0.));
+            progress.stage = Some(format!("{} · {detail}", self.label));
+        }
+    }
+    fn finish(&mut self, units: u64, weight: f64) {
+        self.completed = (self.completed + units as f64 * weight).min(self.total);
+    }
+}
 struct Upscale {
     folder: PathBuf,
     scratch: PathBuf,
     log: PathBuf,
+    tiles: u64,
 }
 impl Upscale {
-    fn frame(&self, bytes: &[u8], job: &Job) -> Result<Vec<u8>, String> {
+    fn frame(&self, bytes: &[u8], job: &Job, progress: &mut AiProgress, export_start: Instant, detail: &str) -> Result<Vec<u8>, String> {
         let input = self.scratch.join("upscale-in.png");
         let output = self.scratch.join("upscale-out.png");
+        let state = self.scratch.join("upscale-progress");
         fs::write(&input, bytes).map_err(|e| e.to_string())?;
         let _ = fs::remove_file(&output);
+        let _ = fs::remove_file(&state);
         let mut worker = command(&self.folder.join("rlcut-ai-cpu"));
         worker
             .arg("upscale")
@@ -226,6 +280,7 @@ impl Upscale {
             .arg(self.folder.join("realesr-animevideov3-x2.bin"))
             .arg(&input)
             .arg(&output)
+            .arg(&state)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(
@@ -235,20 +290,19 @@ impl Upscale {
                     .map_err(|e| e.to_string())?,
             );
         low_pressure(&mut worker, true);
-        wait(
+        wait_reporting(
             &mut Process(
                 worker
                     .spawn()
                     .map_err(|e| format!("Cannot start AI upscaling: {e}"))?,
             ),
             job,
+            &state,
+            |done, total| progress.report(job, export_start, done, total, 1., detail),
         )?;
+        progress.finish(self.tiles, 1.);
         if fs::metadata(&output).map_err(|e| e.to_string())?.len() > 96 * 1024 * 1024 {
             return Err("AI upscale output exceeds the frame safety limit".into());
-        }
-        // Yield between frames even when smoothing is off.
-        for _ in 0..5 {
-            pause(job)?;
         }
         fs::read(output).map_err(|e| e.to_string())
     }
@@ -260,16 +314,41 @@ fn write_timed_frame(
     written: &mut u64,
     limit: u64,
     upscaler: Option<&Upscale>,
+    progress: &mut AiProgress,
+    export_start: Instant,
 ) -> Result<(), String> {
     if *written < limit {
         if let Some(upscaler) = upscaler {
-            write_frame(w, &upscaler.frame(bytes, job)?, job)?;
+            let detail = format!("frame {}/{}", *written + 1, limit);
+            write_frame(w, &upscaler.frame(bytes, job, progress, export_start, &detail)?, job)?;
         } else {
             write_frame(w, bytes, job)?;
         }
         *written += 1;
     }
     Ok(())
+}
+fn wait_reporting(
+    process: &mut Process,
+    job: &Job,
+    state: &Path,
+    mut report: impl FnMut(u64, u64),
+) -> Result<(), String> {
+    let mut last = None;
+    loop {
+        if let Some(value) = status(state) {
+            if last != Some(value) { report(value.0, value.1); last = Some(value); }
+        }
+        canceled(job)?;
+        match process.0.try_wait().map_err(|e| e.to_string())? {
+            Some(exit) if exit.success() => {
+                if let Some(value) = status(state) { report(value.0, value.1); }
+                return Ok(());
+            }
+            Some(_) => return Err("AI export subprocess failed. Try 480p and close other apps; see the export diagnostics.".into()),
+            None => pause(job)?,
+        }
+    }
 }
 fn wait(process: &mut Process, job: &Job) -> Result<(), String> {
     let started = Instant::now();
@@ -310,6 +389,9 @@ pub fn run(
         p.remaining = None;
     }
     let (binary, model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
+    let (width, height) = o.resolution()?;
+    let upscale_tiles = tile_count(width, height, UPSCALE_CORE);
+    let rife_tiles = tile_count(width, height, RIFE_STEP);
     let scratch_path = input.with_extension("frames");
     fs::create_dir(&scratch_path).map_err(|e| format!("Cannot create AI scratch folder: {e}"))?;
     let scratch = Scratch(scratch_path);
@@ -321,6 +403,7 @@ pub fn run(
         folder: ai_folder.clone(),
         scratch: scratch.0.clone(),
         log: log.to_path_buf(),
+        tiles: upscale_tiles,
     });
     let before = scratch.0.join("before.png");
     let after = scratch.0.join("after.png");
@@ -446,6 +529,19 @@ pub fn run(
     // A fractional source duration can end on a half-pair. Do not write extra
     // PNGs after FFmpeg has reached -t and closed its input pipe.
     let frame_limit = (duration * o.fps as f64).ceil() as u64;
+    let source_frames = (duration * base_fps).ceil() as u64;
+    let rife_calls = (0..source_frames.saturating_sub(1)).filter(|index| {
+        let time = *index as f64 / base_fps;
+        !cuts.iter().any(|cut| *cut > time && *cut <= time + 1. / base_fps + 0.00001)
+    }).count() as u64;
+    let total_units = (if o.ai_upscale { frame_limit * upscale_tiles } else { 0 }) as f64
+        + (if o.ai_enhance { rife_calls * rife_tiles } else { 0 }) as f64 * RIFE_WEIGHT;
+    let label = match (o.ai_enhance, o.ai_upscale) {
+        (true, true) => "AI smoothing + upscaling ×2",
+        (true, false) => "AI smoothing",
+        _ => "AI upscaling ×2",
+    };
+    let mut ai_progress = AiProgress { started: Instant::now(), completed: 0., total: total_units.max(1.), label: label.into() };
     loop {
         canceled(&job)?;
         let next = frame(&mut reader, &job)?;
@@ -456,22 +552,13 @@ pub fn run(
             &mut written,
             frame_limit,
             upscaler.as_ref(),
+            &mut ai_progress,
+            start,
         )?;
         if let Some(next) = next {
             if !o.ai_enhance {
                 current = next;
                 index += 1;
-                if let Ok(mut p) = job.progress.lock() {
-                    let fraction = (index as f64 / base_fps / duration).clamp(0., 1.);
-                    p.percent = (20. + fraction * 79.9).min(99.9);
-                    p.elapsed = start.elapsed().as_secs_f64();
-                    p.remaining = if fraction > 0. {
-                        Some(p.elapsed * (1. - fraction) / fraction)
-                    } else {
-                        None
-                    };
-                    p.stage = Some("AI upscaling ×2 · CPU tiles".into());
-                }
                 continue;
             }
             let time = index as f64 / base_fps;
@@ -487,11 +574,15 @@ pub fn run(
                     &mut written,
                     frame_limit,
                     upscaler.as_ref(),
+                    &mut ai_progress,
+                    start,
                 )?;
             } else {
                 fs::write(&before, &current).map_err(|e| e.to_string())?;
                 fs::write(&after, &next).map_err(|e| e.to_string())?;
                 let _ = fs::remove_file(&middle);
+                let state = scratch.0.join("rife-progress");
+                let _ = fs::remove_file(&state);
                 let mut inference = command(&ai_folder.join("rlcut-ai-cpu"));
                 inference
                     .arg("interpolate")
@@ -501,6 +592,7 @@ pub fn run(
                     .arg(&after)
                     .arg(&middle)
                     .arg(&scratch.0)
+                    .arg(&state)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(diagnostics()?);
@@ -510,14 +602,18 @@ pub fn run(
                     .env("VK_ICD_FILENAMES", "/dev/null")
                     .env("VK_DRIVER_FILES", "/dev/null");
                 low_pressure(&mut inference, true);
-                wait(
+                let detail = format!("source frame {}/{}", index + 1, source_frames);
+                wait_reporting(
                     &mut Process(
                         inference
                             .spawn()
                             .map_err(|e| format!("Cannot start RIFE: {e}"))?,
                     ),
                     &job,
+                    &state,
+                    |done, total| ai_progress.report(&job, start, done, total, RIFE_WEIGHT, &detail),
                 )?;
+                ai_progress.finish(rife_tiles, RIFE_WEIGHT);
                 let length = fs::metadata(&middle)
                     .map_err(|e| format!("RIFE did not produce a frame: {e}"))?
                     .len();
@@ -531,11 +627,9 @@ pub fn run(
                     &mut written,
                     frame_limit,
                     upscaler.as_ref(),
+                    &mut ai_progress,
+                    start,
                 )?;
-                // A short idle interval reduces sustained pressure; inference never uses the GPU.
-                for _ in 0..5 {
-                    pause(&job)?;
-                }
             }
             current = next;
         } else {
@@ -547,29 +641,13 @@ pub fn run(
                     &mut written,
                     frame_limit,
                     upscaler.as_ref(),
+                    &mut ai_progress,
+                    start,
                 )?;
             }
             break;
         }
         index += 1;
-        if let Ok(mut p) = job.progress.lock() {
-            let fraction = (index as f64 / base_fps / duration).clamp(0., 1.);
-            p.percent = (20. + fraction * 79.9).min(99.9);
-            p.elapsed = start.elapsed().as_secs_f64();
-            p.remaining = if fraction > 0. {
-                Some(p.elapsed * (1. - fraction) / fraction)
-            } else {
-                None
-            };
-            p.stage = Some(
-                if o.ai_upscale {
-                    "AI smoothing + upscaling ×2 · CPU tiles"
-                } else {
-                    "AI smoothing · CPU tiles"
-                }
-                .into(),
-            );
-        }
     }
     drop(sink);
     wait(&mut decoder, &job)?;

@@ -6,10 +6,12 @@
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <cerrno>
+#include <cstdlib>
 
 struct Image {
     int w, h;
@@ -37,27 +39,40 @@ Image crop(const Image& in, int x, int y, int w, int h) {
     for (int row=0; row<h; ++row) std::copy_n(in.rgb.data()+((size_t)(row+y)*in.w+x)*3, (size_t)w*3, out.rgb.data()+(size_t)row*w*3);
     return out;
 }
+int worker_threads() {
+    const char* value=std::getenv("RLCUT_AI_THREADS");
+    int threads=value ? std::atoi(value) : (int)std::thread::hardware_concurrency();
+    return std::clamp(threads,1,4);
+}
+void progress(const char* path,int done,int total) {
+    if (!path || !*path) return;
+    if (FILE* file=std::fopen(path,"w")) { std::fprintf(file,"%d/%d\n",done,total); std::fclose(file); }
+}
 void rife(const std::string& binary, const std::string& model, const std::string& a, const std::string& b, const std::string& out) {
     pid_t child = fork();
     if (child == -1) throw std::runtime_error("Cannot start tiled RIFE worker");
     if (child == 0) {
-        execl(binary.c_str(), binary.c_str(), "-0", a.c_str(), "-1", b.c_str(), "-o", out.c_str(), "-m", model.c_str(), "-g", "-1", "-j", "1:1:1", (char*)nullptr);
+        const std::string jobs=std::to_string(worker_threads())+":"+std::to_string(worker_threads())+":"+std::to_string(worker_threads());
+        execl(binary.c_str(), binary.c_str(), "-0", a.c_str(), "-1", b.c_str(), "-o", out.c_str(), "-m", model.c_str(), "-g", "-1", "-j", jobs.c_str(), (char*)nullptr);
         _exit(127);
     }
     int status=0; pid_t waited;
     do { waited = waitpid(child, &status, 0); } while (waited == -1 && errno == EINTR);
     if (waited == -1 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) throw std::runtime_error("Tiled RIFE inference failed within the memory limit");
 }
-void interpolate(char** args) {
+void interpolate(char** args,const char* status) {
     const Image a=load(args[4]), b=load(args[5]);
     if (a.w!=b.w || a.h!=b.h) throw std::runtime_error("AI frame sizes differ");
     Image out(a.w, a.h);
     std::vector<float> sums((size_t)a.w*a.h*3, 0), weights((size_t)a.w*a.h, 0);
     const std::string directory=args[7], pa=directory+"/tile-a.png", pb=directory+"/tile-b.png", pm=directory+"/tile-mid.png";
-    // 384px cores overlap by 64px; 64px context reduces motion and tile seams.
-    // Every RIFE invocation sees at most 512x512, regardless of output resolution.
-    for (int y=0; y<a.h; y+=320) for (int x=0; x<a.w; x+=320) {
-        int cw=std::min(384,a.w-x), ch=std::min(384,a.h-y);
+    // Larger overlapping cores substantially reduce model/process startup overhead while
+    // retaining the same 64px motion context and feathered seams.
+    constexpr int step=576, core=640;
+    const int total=((a.w+step-1)/step)*((a.h+step-1)/step); int done=0;
+    progress(status,done,total);
+    for (int y=0; y<a.h; y+=step) for (int x=0; x<a.w; x+=step) {
+        int cw=std::min(core,a.w-x), ch=std::min(core,a.h-y);
         int left=std::max(0,x-64), top=std::max(0,y-64);
         int right=std::min(a.w,x+cw+64), bottom=std::min(a.h,y+ch+64);
         save(crop(a,left,top,right-left,bottom-top),pa); save(crop(b,left,top,right-left,bottom-top),pb);
@@ -71,22 +86,27 @@ void interpolate(char** args) {
             float weight=wx*wy; weights[target]+=weight;
             for (int c=0;c<3;++c) sums[target*3+c]+=mid.rgb[source*3+c]*weight;
         }
+        progress(status,++done,total);
     }
     for (size_t i=0;i<weights.size();++i) for (int c=0;c<3;++c)
         out.rgb[i*3+c]=(unsigned char)std::clamp(std::lround(sums[i*3+c]/weights[i]),0L,255L);
     save(out,args[6]);
 }
-void upscale(char** args) {
+void upscale(char** args,const char* status) {
     ncnn::Net net;
-    net.opt.num_threads=1; net.opt.use_packing_layout=false; net.opt.use_vulkan_compute=false;
+    net.opt.num_threads=worker_threads(); net.opt.use_packing_layout=true; net.opt.use_vulkan_compute=false;
     net.opt.use_fp16_storage=false; net.opt.use_fp16_arithmetic=false;
     if (net.load_param(args[2]) || net.load_model(args[3])) throw std::runtime_error("Cannot load AI upscale model");
     const Image input=load(args[4]); Image output(input.w*2,input.h*2);
     const float normalization[3]={1.f/255,1.f/255,1.f/255};
-    // A 64px core with 32px context bounds working memory. Network output is
+    // A 256px core with 32px context keeps memory bounded while avoiding hundreds
+    // of tiny extractor calls per frame. Network output is
     // cropped to the core, retaining context rather than exposing tile borders.
-    for (int y=0;y<input.h;y+=64) for (int x=0;x<input.w;x+=64) {
-        int cw=std::min(64,input.w-x), ch=std::min(64,input.h-y);
+    constexpr int core=256;
+    const int total=((input.w+core-1)/core)*((input.h+core-1)/core); int done=0;
+    progress(status,done,total);
+    for (int y=0;y<input.h;y+=core) for (int x=0;x<input.w;x+=core) {
+        int cw=std::min(core,input.w-x), ch=std::min(core,input.h-y);
         int left=std::max(0,x-32), top=std::max(0,y-32);
         int right=std::min(input.w,x+cw+32), bottom=std::min(input.h,y+ch+32);
         Image patch=crop(input,left,top,right-left,bottom-top);
@@ -100,13 +120,14 @@ void upscale(char** args) {
             const float value=result.channel(c).row((y-top)*2+row)[(x-left)*2+col];
             output.rgb[((size_t)(y*2+row)*output.w+x*2+col)*3+c]=(unsigned char)std::clamp(std::lround(value*255),0L,255L);
         }
+        progress(status,++done,total);
     }
     save(output,args[5]);
 }
 int main(int argc,char** argv) {
     try {
-        if (argc==8 && std::string(argv[1])=="interpolate") interpolate(argv);
-        else if (argc==6 && std::string(argv[1])=="upscale") upscale(argv);
+        if ((argc==8 || argc==9) && std::string(argv[1])=="interpolate") interpolate(argv,argc==9?argv[8]:nullptr);
+        else if ((argc==6 || argc==7) && std::string(argv[1])=="upscale") upscale(argv,argc==7?argv[6]:nullptr);
         else throw std::runtime_error("Invalid AI CPU helper arguments");
         return 0;
     } catch (const std::exception& error) { std::fprintf(stderr,"AI CPU worker: %s\n",error.what());return 1; }

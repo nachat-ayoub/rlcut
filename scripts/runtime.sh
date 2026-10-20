@@ -52,6 +52,9 @@ prepare_dev_ai() {
   )
   local file missing=()
   for file in "${required[@]}"; do [[ -f "$folder/$file" ]] || missing+=("$file"); done
+  local helper_hash
+  helper_hash="$(sha256sum native/ai-cpu.cpp | awk '{print $1}')"
+  [[ -f "$folder/.helper-source-sha256" && "$(cat "$folder/.helper-source-sha256")" == "$helper_hash" ]] || missing+=("helper-source")
   ((${#missing[@]})) || return 0
   for tool in python3 cmake c++ pkg-config; do command -v "$tool" >/dev/null || missing+=("tool:$tool"); done
   if ! pkg-config --exists libpng 2>/dev/null; then missing+=("library:libpng"); fi
