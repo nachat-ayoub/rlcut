@@ -345,7 +345,13 @@ export default function App() {
       const exportTexts: TextOverlay[] = [];
       // Render one static transparent image per text clip, then animate opacity in FFmpeg.
       for (const text of orderedTexts) {
-        const rendered = await stampText(text, quality * outputFactor, (quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * outputFactor, quality);
+        let rendered: Awaited<ReturnType<typeof stampText>>;
+        try {
+          rendered = await stampText(text, quality * outputFactor, (quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * outputFactor, quality);
+        } catch (error) {
+          const label = text.text.trim().replace(/\s+/g, ' ').slice(0, 32) || 'Untitled text';
+          throw new Error(`Could not prepare text “${label}”: ${message(error)}`);
+        }
         exportTexts.push({ ...text, ...rendered });
       }
       if (aiEnhance || aiUpscale) setPlaying(false);

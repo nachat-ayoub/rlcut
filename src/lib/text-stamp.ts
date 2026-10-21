@@ -1,5 +1,5 @@
 import type { TextOverlay } from '../types';
-import { fileUrl, invoke } from './native';
+import { invoke } from './native';
 
 const loadedFaces = new Map<string, Promise<void>>();
 
@@ -15,8 +15,14 @@ export async function stampText(text: TextOverlay, width: number, height: number
     const key = JSON.stringify([text.fontFamily, path, weight, style]);
     let loading = loadedFaces.get(key);
     if (!loading) {
-      const face = new FontFace(text.fontFamily, `url("${fileUrl(path)}")`, { weight, style });
-      loading = face.load().then(loaded => { document.fonts.add(loaded); }).catch(error => { loadedFaces.delete(key); throw error; });
+      // Export text must not depend on WebKit's asset URL loader. After a long
+      // export is canceled that loader can reject a perfectly valid local font
+      // with the generic "A network error occurred" message. Read the local
+      // bytes through Tauri and give FontFace an in-memory source instead.
+      loading = invoke<number[]>('load_font_bytes', { path })
+        .then(bytes => new FontFace(text.fontFamily, new Uint8Array(bytes).buffer, { weight, style }).load())
+        .then(loaded => { document.fonts.add(loaded); })
+        .catch(error => { loadedFaces.delete(key); throw error; });
       loadedFaces.set(key, loading);
     }
     return loading;

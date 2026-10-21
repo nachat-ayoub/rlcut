@@ -228,6 +228,38 @@ pub async fn list_system_fonts() -> Result<Vec<FontOption>, String> {
     .await
 }
 #[tauri::command]
+pub async fn load_font_bytes(path: String) -> Result<Vec<u8>, String> {
+    blocking(move || {
+        let path = PathBuf::from(path);
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .ok_or("Font file has no supported extension")?;
+        if !matches!(extension.as_str(), "ttf" | "otf" | "ttc" | "woff" | "woff2") {
+            return Err("Font file has no supported extension".into());
+        }
+        let metadata = std::fs::metadata(&path)
+            .map_err(|error| format!("Could not open the selected font: {error}"))?;
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 10_000_000 {
+            return Err("Font file is empty or too large".into());
+        }
+        let bytes = std::fs::read(path)
+            .map_err(|error| format!("Could not read the selected font: {error}"))?;
+        let signature = bytes.get(..4).ok_or("Font file is incomplete")?;
+        if signature != b"OTTO"
+            && signature != b"ttcf"
+            && signature != b"wOFF"
+            && signature != b"wOF2"
+            && signature != [0, 1, 0, 0]
+        {
+            return Err("The selected file is not a supported font".into());
+        }
+        Ok(bytes)
+    })
+    .await
+}
+#[tauri::command]
 pub async fn save_text_stamp(state: State<'_, AppState>, bytes: Vec<u8>) -> Result<String, String> {
     if bytes.len() < 33
         || bytes.len() > 16 * 1024 * 1024
@@ -513,6 +545,19 @@ pub fn start_export(
         if j.snapshot()?.phase == "running" {
             return Err("An export is already running".into());
         }
+    }
+    // A canceled job publishes its terminal state just before its worker removes
+    // temporary text stamps. Reap that short cleanup tail before accepting new
+    // stamps/job state, so cancel -> edit -> export cannot overlap two workers.
+    if let Some(worker) = state
+        .worker
+        .lock()
+        .map_err(|_| "Export worker unavailable")?
+        .take()
+    {
+        worker
+            .join()
+            .map_err(|_| "The previous export worker stopped unexpectedly")?;
     }
     let job = Arc::new(Job::new(
         presets::id(),

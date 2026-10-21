@@ -29,6 +29,7 @@ pub fn run() {
             commands::pick_folder,
             commands::project_thumbnails,
             commands::list_system_fonts,
+            commands::load_font_bytes,
             commands::save_google_font,
             commands::save_text_stamp,
             commands::import_video,
