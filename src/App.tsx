@@ -105,6 +105,15 @@ export default function App() {
     invoke<Init>('initialize').then(data => { const migrated = migratePresetNames(data.store); setInit(data); setStore(migrated); lastSaved.current = JSON.stringify(data.store); setOutputFolder(migrated.settings.outputFolder); setQuality(migrated.settings.quality); setFps(migrated.settings.fps); setError(data.storageError); setReady(true); }).catch(e => { report(e); setReady(true); });
   }, [report]);
   useEffect(() => { if (ready && isDesktop()) invoke<FontOption[]>('list_system_fonts').then(setFonts).catch(() => undefined); }, [ready]);
+  useEffect(() => {
+    const path = music?.path;
+    if (!path || music.waveform?.length) return;
+    let disposed = false;
+    invoke<number[]>('music_waveform', { path }).then(waveform => {
+      if (!disposed) setMusic(current => current?.path === path ? { ...current, waveform } : current);
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [music?.path, music?.waveform?.length]);
   useEffect(() => { for (const text of texts) { const variants: Array<[string, string, string]> = [[text.fontPath, '400', 'normal'], [text.fontBoldPath, '700', 'normal'], [text.fontBlackPath, '900', 'normal'], [text.fontItalicPath, '400', 'italic'], [text.fontBoldItalicPath, '700', 'italic'], [text.fontBlackItalicPath, '900', 'italic']]; for (const [path, weight, style] of variants) { if (!path || loadedFonts.current.has(path)) continue; loadedFonts.current.add(path); const face = new FontFace(text.fontFamily, `url("${fileUrl(path)}")`, { weight, style }); face.load().then(loaded => document.fonts.add(loaded)).catch(() => loadedFonts.current.delete(path)); } } }, [texts]);
   useEffect(() => {
     if (!ready || !isDesktop() || !init || init.storageError)
@@ -475,7 +484,7 @@ export default function App() {
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
       const sourceTexts = project.texts ?? [], restoredTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, waveform: project.music.waveform ?? [], segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }

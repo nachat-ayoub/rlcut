@@ -2,6 +2,48 @@ use super::binaries::{command, Binaries};
 use crate::model::{MusicFile, Video};
 use serde_json::Value;
 use std::path::Path;
+pub fn audio_waveform(b: &Binaries, path: &Path) -> Result<Vec<f32>, String> {
+    // A low sample rate is enough for a timeline overview and keeps import fast.
+    // The final 1,200 peak buckets are stored with the project, so this is decoded once.
+    let out = command(b.ffmpeg()?)
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-i"])
+        .arg(path)
+        .args([
+            "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "200", "-f", "f32le", "pipe:1",
+        ])
+        .output()
+        .map_err(|e| format!("Cannot decode audio waveform: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    let samples = out
+        .stdout
+        .chunks_exact(4)
+        .filter_map(|bytes| {
+            let value = f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]).abs();
+            value.is_finite().then_some(value)
+        })
+        .collect::<Vec<_>>();
+    if samples.is_empty() {
+        return Ok(Vec::new());
+    }
+    let bucket_count = samples.len().min(1_200);
+    let peaks = (0..bucket_count)
+        .map(|index| {
+            let start = index * samples.len() / bucket_count;
+            let end = ((index + 1) * samples.len() / bucket_count).max(start + 1);
+            samples[start..end].iter().copied().fold(0_f32, f32::max)
+        })
+        .collect::<Vec<_>>();
+    // Normalize against the 95th percentile so one transient does not flatten the song.
+    let mut levels = peaks.clone();
+    levels.sort_by(|a, b| a.total_cmp(b));
+    let reference = levels[((levels.len() - 1) as f32 * 0.95).round() as usize].max(0.01);
+    Ok(peaks
+        .into_iter()
+        .map(|peak| (peak / reference).min(1.).sqrt())
+        .collect())
+}
 fn ratio(s: &str) -> Option<f64> {
     let (a, b) = s.split_once('/').or_else(|| s.split_once(':'))?;
     let a = a.parse::<f64>().ok()?;
@@ -167,6 +209,7 @@ pub fn probe_music(b: &Binaries, path: &Path) -> Result<MusicFile, String> {
         path: path.to_string_lossy().into(),
         name,
         duration,
+        waveform: audio_waveform(b, &path).unwrap_or_default(),
     })
 }
 #[cfg(test)]

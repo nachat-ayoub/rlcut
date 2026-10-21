@@ -21,6 +21,20 @@ const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d=
 const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" /><path d="M13.5 3H11v12h2.5" strokeDasharray="1 2" /></svg>;
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5M13.5 3H11v12h2.5" /></svg>;
 const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3h8v7.25L9 15l-4-4.75z" /></svg>;
+const waveformPath = (samples: number[], start: number, end: number, duration: number) => {
+  if (samples.length < 2 || duration <= 0 || end <= start) return '';
+  const first = Math.max(0, Math.floor(start / duration * samples.length));
+  const last = Math.min(samples.length, Math.max(first + 1, Math.ceil(end / duration * samples.length)));
+  const source = samples.slice(first, last), columns = Math.min(180, source.length);
+  const peaks = Array.from({ length: columns }, (_, index) => {
+    const from = index * source.length / columns, to = (index + 1) * source.length / columns;
+    let peak = 0;
+    for (let cursor = Math.floor(from); cursor < Math.max(Math.floor(from) + 1, Math.ceil(to)); cursor++) peak = Math.max(peak, source[Math.min(cursor, source.length - 1)] ?? 0);
+    return Math.max(.025, Math.min(1, peak));
+  });
+  const point = (index: number, level: number, lower = false) => `${columns === 1 ? 50 : index / (columns - 1) * 100} ${12 + (lower ? 1 : -1) * level * 10}`;
+  return `M 0 12 L ${peaks.map((peak, index) => point(index, peak)).join(' L ')} L ${[...peaks].reverse().map((peak, reverseIndex) => point(peaks.length - reverseIndex - 1, peak, true)).join(' L ')} Z`;
+};
 
 export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, markers, texts, textTracks, selectedTextId, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
@@ -296,8 +310,10 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     const inset = trimPreview?.mode === 'edge' && trimPreview.track === track && trimPreview.id === clip.id && trimPreview.edge === 'start' ? trimPreview.value - clip.start : 0;
     const Icon = track === 'video' ? Film : Music2;
     const offset = trimPreview?.mode === 'body' ? displayOffsets[track][index] : offsets[track][index];
+    const wave = track === 'music' ? waveformPath(music?.waveform ?? [], preview.start, preview.end, music?.duration ?? 0) : '';
     return <div key={clip.id} className={`timeline-segment ${track === 'music' ? 'music-segment' : ''} ${selection.track === track && selection.id === clip.id ? 'selected' : ''} ${trimPreview?.track === track && trimPreview.id === clip.id ? 'trimming' : ''} ${reorderPreview?.id === clip.id ? 'reordering' : ''}`} style={{ left: `${(offset + inset) * pixelsPerSecond}px`, width: `${(preview.end - preview.start) * pixelsPerSecond}px` }} title="Drag to reorder · Shift-drag to trim the start · use edge handles to trim" onPointerDown={event => beginClip(event, 'body', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip}>
       <button className="trim-handle start" aria-label={`Trim or extend ${track} clip from left`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'start', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
+      {wave && <svg className="music-waveform" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path d={wave} /></svg>}
       <span className="clip-fill"><Icon size={12} /><b>{track === 'music' ? music?.name : `Clip ${index + 1}`}</b><small>{time(preview.start)} – {time(preview.end)}</small>{clip.volume === 0 && <VolumeX size={11} />}</span>
       <button className="trim-handle end" aria-label={`Trim or extend ${track} clip from right`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'end', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'end', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
     </div>;

@@ -94,6 +94,7 @@ export type MusicFile = {
   path: string;
   name: string;
   duration: number;
+  waveform: number[];
 };
 export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | null };
 export type TrackMarkers = {

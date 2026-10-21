@@ -204,6 +204,8 @@ pub struct MusicFile {
     pub path: String,
     pub name: String,
     pub duration: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub waveform: Vec<f32>,
 }
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -213,7 +215,11 @@ pub struct MusicFile {
 )]
 pub struct MusicTrack {
     pub path: String,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub name: String,
     pub duration: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub waveform: Vec<f32>,
     pub segments: Vec<Segment>,
     #[cfg_attr(feature = "serialization", serde(default))]
     pub fade_out: Option<f64>,
