@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react';
-import { Check, MousePointer2, RotateCcw, X } from 'lucide-react';
+import { Check, Crop as CropIcon, RotateCcw, X } from 'lucide-react';
 import type { Preset, Rect } from '../types';
 import { Dropdown } from './Dropdown';
 import { Slider } from './Controls';
-import { Alignment } from './Alignment';
 import { corners, resizeCrop, type Corner } from '../lib/geometry';
 import { clamp } from '../lib/presets';
 type Gesture = {
@@ -28,7 +27,8 @@ export function CropEditor({ source, preset, aspect, onApply, onCancel }: {
   const [draw, setDraw] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
   const cutoutRatio = boost.width * 9 / (boost.height * 16);
-  const cutoutWidth = Math.min(200, 200 * cutoutRatio);
+  const cutoutWidth = cutoutRatio >= 1 ? 178 : 178 * cutoutRatio;
+  const cutoutHeight = cutoutRatio >= 1 ? 178 / cutoutRatio : 178;
   function zoomTo(value: number) {
     setZoom(value);
     requestAnimationFrame(() => {
@@ -58,17 +58,13 @@ export function CropEditor({ source, preset, aspect, onApply, onCancel }: {
   return <div className="modal-backdrop">
     <div className="modal crop-modal" role="dialog" aria-modal="true" aria-labelledby="crop-title">
       <div className="modal-heading">
-        <div>
-          <span className="eyebrow">SOURCE FRAME</span>
-          <h2 id="crop-title">Find your boost meter</h2>
-        </div>
+        <div className="crop-title"><span><CropIcon size={17} /></span><div><h2 id="crop-title">Boost cutout</h2><small>Select the boost meter in the source frame</small></div></div>
         <button aria-label="Cancel crop" onClick={onCancel}>
-          <X size={20} />
+          <X size={18} />
         </button>
       </div>
-      <p>Draw around the HUD, then move or resize the selection. Only the masked area appears in your clip.</p>
-      <div className="crop-layout"><div>
-        <label className="crop-zoom">Source zoom <Dropdown label="Source zoom" value={zoom} onChange={value => zoomTo(Number(value))} options={[1, 2, 3, 4, 6, 8].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /> <span>Scroll to inspect the HUD</span></label>
+      <div className="crop-layout"><div className="crop-canvas">
+        <div className="crop-canvas-toolbar"><span>Source frame</span><div><Dropdown label="Source zoom" value={zoom} onChange={value => zoomTo(Number(value))} options={[1, 2, 3, 4, 6, 8].map(z => ({ value: z, label: z === 1 ? 'Fit' : `${z * 100}%` }))} /><button onClick={() => setDraw(true)} className={draw ? 'active' : ''} title="Draw a new selection"><CropIcon size={14} /><span>New selection</span></button><button onClick={() => setBoost(structuredClone(preset.boost))} title="Reset boost selection" aria-label="Reset boost selection"><RotateCcw size={14} /></button></div></div>
         <div className="crop-viewport" ref={viewport}><div className="crop-frame" style={{ width: `${zoom * 100}%` }} ref={frame} onPointerDown={e => start(e, 'draw')} onPointerMove={move} onPointerUp={finish} onPointerCancel={finish}>
           <img src={source} alt="Original frame for boost crop selection" draggable={false} />
           <div className="crop-selection" style={style} onPointerDown={e => start(e, draw ? 'draw' : 'move')}>
@@ -78,36 +74,18 @@ export function CropEditor({ source, preset, aspect, onApply, onCancel }: {
           </div>
         </div>
         </div></div><aside className="crop-settings">
-          <span className="eyebrow">CUTOUT PREVIEW</span>
-          <div className="cutout-preview"><div style={{ width: cutoutWidth, height: cutoutWidth / cutoutRatio, position: 'relative', overflow: 'hidden', maskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)`, WebkitMaskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)` }}><img src={source} alt="Boost cutout result" style={{ position: 'absolute', width: `${100 / crop.width}%`, height: `${100 / crop.height}%`, maxWidth: 'none', left: `${-100 * crop.x / crop.width}%`, top: `${-100 * crop.y / crop.height}%` }} /></div></div>
-          <label className="row">Show boost cutout<input type="checkbox" checked={boost.enabled} onChange={e => update({ enabled: e.target.checked })} /></label>
-          <div className="segmented">{(['circle', 'ellipse'] as const).map(shape => <button key={shape} className={boost.shape === shape ? 'active' : ''} onClick={() => update({ shape })}>{shape}</button>)}</div>
-          <Slider label="Scale" value={boost.scale} min={.25} max={4} defaultValue={preset.boost.scale} suffix="×" onChange={scale => update({ scale })} />
-          <div className="two-controls">
-            <Slider label="Width" value={boost.width} min={.01} max={1} step={.001} defaultValue={preset.boost.width} onChange={width => update({ width })} />
-            <Slider label="Height" value={boost.height} min={.005} max={1} step={.001} defaultValue={preset.boost.height} onChange={height => update({ height })} />
-            <Slider label="X position" value={boost.x - .5} min={-.5} max={.5} defaultValue={preset.boost.x - .5} onChange={x => update({ x: x + .5 })} />
-            <Slider label="Y position" value={boost.y - .5} min={-.5} max={.5} defaultValue={preset.boost.y - .5} onChange={y => update({ y: y + .5 })} />
+          <div className="crop-preview-card"><span>Preview</span><div className="cutout-preview"><div style={{ width: cutoutWidth, height: cutoutHeight, position: 'relative', overflow: 'hidden', maskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)`, WebkitMaskImage: `radial-gradient(${boost.shape === 'circle' ? 'circle closest-side' : 'ellipse closest-side'}, black ${100 * (1 - boost.feather)}%, transparent 100%)` }}><img src={source} alt="Boost cutout result" style={{ position: 'absolute', width: `${100 / crop.width}%`, height: `${100 / crop.height}%`, maxWidth: 'none', left: `${-100 * crop.x / crop.width}%`, top: `${-100 * crop.y / crop.height}%` }} /></div></div></div>
+          <div className="crop-options">
+            <label className="crop-visible"><span><strong>Visible</strong><small>Show this cutout in the edit</small></span><input className="switch" type="checkbox" checked={boost.enabled} onChange={e => update({ enabled: e.target.checked })} /></label>
+            <div className="crop-shape"><span>Shape</span><div className="segmented">{(['circle', 'ellipse'] as const).map(shape => <button key={shape} className={boost.shape === shape ? 'active' : ''} onClick={() => update({ shape })}>{shape}</button>)}</div></div>
+            <Slider label="Soft edge" value={boost.feather} max={.25} step={.005} defaultValue={preset.boost.feather} onChange={feather => update({ feather })} />
           </div>
-          <Alignment width={boost.width * boost.scale} height={boost.height * boost.scale} onChange={(x, y) => update({ x, y })} />
-          <Slider label="Edge feather" value={boost.feather} max={.25} step={.005} defaultValue={preset.boost.feather} onChange={feather => update({ feather })} />
-          <details><summary>Source crop coordinates</summary><div className="two-controls">
-            <Slider label="Crop X" value={crop.x} max={1 - crop.width} step={.001} defaultValue={preset.boost.crop.x} onChange={x => setCrop({ ...crop, x })} />
-            <Slider label="Crop Y" value={crop.y} max={1 - crop.height} step={.001} defaultValue={preset.boost.crop.y} onChange={y => setCrop({ ...crop, y })} />
-            <Slider label="Crop width" value={crop.width} min={.002} max={1 - crop.x} step={.001} defaultValue={preset.boost.crop.width} onChange={width => setCrop({ ...crop, width })} />
-            <Slider label="Crop height" value={crop.height} min={.002} max={1 - crop.y} step={.001} defaultValue={preset.boost.crop.height} onChange={height => setCrop({ ...crop, height })} />
-          </div></details>
         </aside></div>
       <div className="crop-footer">
-        <button onClick={() => setDraw(true)} className={draw ? 'active' : ''}>
-          <MousePointer2 size={15} />Draw new selection</button>
-        <button onClick={() => setBoost(structuredClone(preset.boost))}>
-          <RotateCcw size={15} />Reset</button>
-        <span>
-          {Math.round(crop.width * 100)}% × {Math.round(crop.height * 100)}% of source</span>
+        <span>{Math.round(crop.width * 100)}% × {Math.round(crop.height * 100)}% selection</span>
         <button onClick={onCancel}>Cancel</button>
         <button className="primary" onClick={() => onApply({ ...boost, crop: { ...crop, width: Math.min(crop.width, 1 - crop.x), height: Math.min(crop.height, 1 - crop.y) } })}>
-          <Check size={16} />Apply boost settings</button>
+          <Check size={15} />Apply cutout</button>
       </div>
     </div>
   </div>;

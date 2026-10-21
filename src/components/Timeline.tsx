@@ -273,19 +273,20 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       ? [{ ...segment, end: at }, { ...segment, id: crypto.randomUUID(), start: at }]
       : [{ ...segment, [operation]: at }]));
   };
-  const zoom = (next: number) => {
+  const zoom = (next: number, anchor = cursorTime(), screenX?: number) => {
     const bounded = Math.max(12, Math.min(240, next));
-    setPixelsPerSecond(Math.abs(bounded - 64) <= 4 ? 64 : bounded);
+    const value = Math.abs(bounded - 64) <= 5 ? 64 : 12 + Math.round((bounded - 12) / 4) * 4;
+    const viewport = scroll.current;
+    const anchorX = screenX ?? (viewport ? Math.max(0, Math.min(viewport.clientWidth, anchor * pixelsPerSecond - viewport.scrollLeft)) : 0);
+    setPixelsPerSecond(value);
+    if (viewport) requestAnimationFrame(() => { viewport.scrollLeft = Math.max(0, anchor * value - anchorX); });
   };
   const wheelZoom = (event: WheelEvent<HTMLElement>) => {
     if (!event.ctrlKey || !scroll.current) return;
     event.preventDefault();
     const viewport = scroll.current, rect = viewport.getBoundingClientRect();
     const anchor = (viewport.scrollLeft + event.clientX - rect.left) / pixelsPerSecond;
-    const next = Math.max(12, Math.min(240, pixelsPerSecond * (event.deltaY < 0 ? 1.14 : 1 / 1.14)));
-    const snapped = Math.abs(next - 64) <= 5 ? 64 : next;
-    setPixelsPerSecond(snapped);
-    requestAnimationFrame(() => { viewport.scrollLeft = Math.max(0, anchor * snapped - (event.clientX - rect.left)); });
+    zoom(pixelsPerSecond * (event.deltaY < 0 ? 1.14 : 1 / 1.14), anchor, event.clientX - rect.left);
   };
   useEffect(() => {
     const keyboard = (event: globalThis.KeyboardEvent) => {
@@ -360,7 +361,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <button className="editor-tool" onClick={() => selectedText ? onTextDelete(selectedText.id) : selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selectedText && !selected} title="Delete selected clip (Delete)" aria-label="Delete selected clip"><Trash2 size={16} /></button>
       <button className={`editor-tool marker-action ${!selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
-      <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
+      <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} style={{ '--range-fill': `${(pixelsPerSecond - 12) / 228 * 100}%` } as React.CSSProperties} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
       <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={Boolean(selectedText) || !selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
     </div>
     {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>
