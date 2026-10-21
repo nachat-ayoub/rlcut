@@ -17,8 +17,8 @@ const MIN_CLIP = .05;
 const SNAP_PIXELS = 9;
 const offsetsOf = (clips: Segment[]) => { let cursor = 0; return clips.map(clip => { const offset = cursor; cursor += clip.end - clip.start; return offset; }); };
 const unique = (values: number[]) => values.filter((value, index) => values.findIndex(other => Math.abs(other - value) < .0001) === index);
-const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" strokeDasharray="1 2" /><path d="M13.5 3H11v12h2.5" /></svg>;
-const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" /><path d="M13.5 3H11v12h2.5" strokeDasharray="1 2" /></svg>;
+const TrimStartIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" strokeDasharray="1 2" opacity=".38" /><path d="M13.5 3H11v12h2.5" /></svg>;
+const TrimEndIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5" /><path d="M13.5 3H11v12h2.5" strokeDasharray="1 2" opacity=".38" /></svg>;
 const SplitIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M4.5 3H7v12H4.5M13.5 3H11v12h2.5" /></svg>;
 const MarkerIcon = () => <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M5 3h8v7.25L9 15l-4-4.75z" /></svg>;
 const waveformPath = (samples: number[], start: number, end: number, duration: number) => {
