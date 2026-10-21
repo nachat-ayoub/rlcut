@@ -14,6 +14,7 @@ import { TextInspector } from './components/TextInspector';
 import { stampText } from './lib/text-stamp';
 import { editedDuration, editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'shortcuts' | 'crop' | null;
+type InspectorView = 'edit' | 'export';
 const shortcuts = [
   ['Playback', [['Space', 'Play or pause'], ['← / →', 'Move one frame'], ['Shift + ← / →', 'Move one second'], ['Home / End', 'Jump to timeline start or end']]],
   ['Editing', [['Ctrl / ⌘ + K', 'Split selected clip'], ['Q', 'Trim left side to playhead'], ['W', 'Trim right side to playhead'], ['Delete', 'Ripple-delete selected clip'], ['M', 'Toggle marker at playhead'], ['Ctrl / ⌘ + Z', 'Undo'], ['Ctrl / ⌘ + Shift + Z', 'Redo']]],
@@ -70,6 +71,7 @@ export default function App() {
   const [previewExpanded, setPreviewExpanded] = useState(false);
   const [modal, setModal] = useState<Modal>(null), [error, setError] = useState<string | null>(null), [errorCopied, setErrorCopied] = useState(false), [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null), [exportStarting, setExportStarting] = useState(false), [outputFolder, setOutputFolder] = useState(''), [outputName, setOutputName] = useState('rlcut-edit.mp4');
+  const [inspectorView, setInspectorView] = useState<InspectorView>('edit');
   const [aiEnhance, setAiEnhance] = useState(false);
   const [aiUpscale, setAiUpscale] = useState(false);
   const [aiUpscaleLite, setAiUpscaleLite] = useState(false);
@@ -281,6 +283,7 @@ export default function App() {
     }, 450);
     return () => { disposed = true; clearInterval(timer); };
   }, [exporting, report]);
+  useEffect(() => { setInspectorView('edit'); }, [layer, selectedTextId, selectedClip?.id, selectedClip?.track]);
   const jump = useCallback((delta: number) => {
     const value = editedToSource(segments, sourceToEdited(segments, playhead.current) + delta);
     playhead.current = value; setPlaying(false); setTimestamp(value);
@@ -543,6 +546,7 @@ export default function App() {
     return { ...current, settings: { ...current.settings, favoriteFonts: favorites.includes(id) ? favorites.filter(item => item !== id) : [...favorites, id] } };
   }), []);
   const selectedVideoSegment = selectedClip?.track === 'video' ? segments.find(segment => segment.id === selectedClip.id) ?? null : null;
+  const selectedMusicSegment = selectedClip?.track === 'music' ? music?.segments.find(segment => segment.id === selectedClip.id) ?? null : null;
   const colorFixValue = colorScope === 'all' ? (segments.every(segment => Math.abs(segment.colorFix - (segments[0]?.colorFix ?? 0)) < .001) ? segments[0]?.colorFix ?? 0 : selectedVideoSegment?.colorFix ?? 0) : selectedVideoSegment?.colorFix ?? 0;
   const setColorFix = (value: number) => {
     if (!selectedVideoSegment) return;
@@ -550,6 +554,7 @@ export default function App() {
   };
   let selectedSource: Video | null = null, sourceOffset = 0;
   if (selectedVideoSegment) for (const source of videoSources) { if (selectedVideoSegment.start >= sourceOffset && selectedVideoSegment.start < sourceOffset + source.duration) { selectedSource = source; break; } sourceOffset += source.duration; }
+  const inspectorTitle = selectedText ? 'Text' : layer === 'background' ? 'Background' : layer === 'gameplay' ? 'Gameplay' : layer === 'boost' ? 'Boost HUD' : selectedVideoSegment ? 'Video clip' : selectedMusicSegment ? 'Music clip' : 'Inspector';
   if (!ready)
     return <div className="boot">
       <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
@@ -630,8 +635,8 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) setSelectedTextId(null); }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} markers={markers} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedClip({ track, id }); }}
+      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) { setSelectedTextId(null); setSelectedClip(null); } }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} markers={markers} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => void importMusic()} onSelectionChange={(track, id) => { setSelectedTextId(null); setLayer(null); setSelectedClip({ track, id }); }}
         onMarker={(track, values) => {
           if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
           undoStack.current.push(snapshot());
@@ -659,22 +664,28 @@ export default function App() {
     </main>
     {video && <aside className="inspector">
       <div className="inspector-heading">
-        <span className="eyebrow">TEMPLATE SETTINGS</span>
-        <h2>
-          {preset.name}
-        </h2>
+        <div className="inspector-title-row">
+          <span className="inspector-object-icon">
+            {inspectorView === 'export' ? <Download size={17} /> : selectedText ? <Pencil size={17} /> : layer === 'background' ? <Layers3 size={17} /> : layer === 'gameplay' ? <Film size={17} /> : layer === 'boost' ? <Gauge size={17} /> : selectedMusicSegment ? <Music2 size={17} /> : selectedVideoSegment ? <Palette size={17} /> : <SlidersHorizontal size={17} />}
+          </span>
+          <div>
+            <span className="eyebrow">{inspectorView === 'export' ? 'DELIVERY' : 'SELECTED'}</span>
+            <h2>{inspectorView === 'export' ? 'Export' : inspectorTitle}</h2>
+          </div>
+        </div>
         <span className="save-status">
-          {preset.id === 'classic' ? <>
-            <ShieldCheck size={12} />Built-in · edits create a copy</> : <>
-            <Check size={12} />
-            {saved ? 'All changes saved' : 'Saving changes…'}
-          </>}
+          {preset.id === 'classic' ? <><ShieldCheck size={12} />{preset.name} · built-in</> : <><Check size={12} />{preset.name} · {saved ? 'saved' : 'saving…'}</>}
         </span>
       </div>
+      <div className="inspector-tabs" role="tablist" aria-label="Inspector mode">
+        <button role="tab" aria-selected={inspectorView === 'edit'} className={inspectorView === 'edit' ? 'active' : ''} onClick={() => setInspectorView('edit')}><SlidersHorizontal size={14} />Edit</button>
+        <button role="tab" aria-selected={inspectorView === 'export'} className={inspectorView === 'export' ? 'active' : ''} onClick={() => setInspectorView('export')}><Download size={14} />Export</button>
+      </div>
       <div className="inspector-scroll">
-        {!layer && !selectedText && <div className="selection-empty"><SlidersHorizontal size={22} /><strong>Select a layer</strong><span>Click the background, gameplay, boost, or text element in the preview to edit it.</span></div>}
-        {selectedText && <Section title="Text" icon={<Pencil size={16} />}><TextInspector value={selectedText} fonts={fonts} favoriteFonts={store.settings.favoriteFonts ?? []} onChange={editText} onAddGoogleFont={addGoogleFont} onToggleFavoriteFont={toggleFavoriteFont} onDelete={() => removeText(selectedText.id)} /></Section>}
-        {layer === 'background' && <Section title="Background" icon={<Layers3 size={16} />} reset={() => reset('background')}>
+        {inspectorView === 'edit' ? <div className="inspector-pane">
+        {!layer && !selectedText && !selectedVideoSegment && !selectedMusicSegment && <div className="selection-empty"><span className="selection-empty-icon"><SlidersHorizontal size={20} /></span><strong>What do you want to adjust?</strong><span>Select an element in the preview or jump directly to a canvas layer.</span><div className="layer-quick-actions"><button onClick={() => { setSelectedClip(null); setLayer('background'); }}><Layers3 size={15} /><span>Background</span></button><button onClick={() => { setSelectedClip(null); setLayer('gameplay'); }}><Film size={15} /><span>Gameplay</span></button><button onClick={() => { setSelectedClip(null); setLayer('boost'); }}><Gauge size={15} /><span>Boost HUD</span></button></div></div>}
+        {selectedText && <Section title="Typography & style" icon={<Pencil size={16} />}><TextInspector value={selectedText} fonts={fonts} favoriteFonts={store.settings.favoriteFonts ?? []} onChange={editText} onAddGoogleFont={addGoogleFont} onToggleFavoriteFont={toggleFavoriteFont} onDelete={() => removeText(selectedText.id)} /></Section>}
+        {layer === 'background' && <Section title="Appearance" icon={<Layers3 size={16} />} reset={() => reset('background')}>
           <Slider label="Gaussian blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
           <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />
           <div className="two-controls">
@@ -684,22 +695,23 @@ export default function App() {
           <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
           <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} defaultValue={classic.background.brightness} onChange={brightness => edit('background', { brightness })} />
         </Section>}
-        {layer === 'gameplay' && <Section title="Gameplay" icon={<Film size={16} />} reset={() => reset('gameplay')}>
+        {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
           <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
           <div className="two-controls">
             <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />
             <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} defaultValue={classic.gameplay.y - .5} onChange={y => edit('gameplay', { y: y + .5 })} />
           </div>
           <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
-          <button className="text-button" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}>Center gameplay</button>
+          <button className="quiet-action" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}><ScanLine size={14} />Center on canvas</button>
         </Section>}
-        {layer === 'boost' && <Section title="Boost HUD" icon={<Gauge size={16} />} reset={() => reset('boost')}>
-          <div className="row">
-            <label htmlFor="boost-enabled">Show boost cutout</label>
-            <input id="boost-enabled" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
+        {layer === 'boost' && <>
+        <Section title="Cutout" icon={<Gauge size={16} />} reset={() => reset('boost')}>
+          <div className="setting-toggle compact flush">
+            <div><strong>Show boost HUD</strong><small>Overlay the cropped meter above gameplay.</small></div>
+            <input id="boost-enabled" aria-label="Show boost cutout" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
           </div>
           <button className="crop-button" disabled={!preview} onClick={() => { setPlaying(false); setLayer('boost'); setModal('crop'); }}>
-            <Maximize2 size={15} />Select boost area<span>↗</span>
+            <Maximize2 size={15} />Edit source area<span>↗</span>
           </button>
           <div className="segmented">
             <button className={b.shape === 'circle' ? 'active' : ''} onClick={() => edit('boost', { shape: 'circle' })}>
@@ -716,16 +728,8 @@ export default function App() {
           </div>
           <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
           <Slider label="Edge feather" value={b.feather} max={.25} step={.005} defaultValue={classic.boost.feather} onChange={feather => edit('boost', { feather })} />
-          <div className="setting-toggle compact">
-            <div><strong>Entrance animation</strong></div>
-            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
-          </div>
-          {b.intro.enabled && <div className="boost-intro-settings">
-            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} defaultValue={classic.boost.intro.duration} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
-            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
-          </div>}
           <details className="crop-numbers">
-            <summary>Source crop coordinates</summary>
+            <summary>Precise source crop</summary>
             <div className="two-controls">
               <Slider label="Crop X" value={b.crop.x} max={1 - b.crop.width} step={.001} onChange={x => edit('boost', { crop: { ...b.crop, x } })} />
               <Slider label="Crop Y" value={b.crop.y} max={1 - b.crop.height} step={.001} onChange={y => edit('boost', { crop: { ...b.crop, y } })} />
@@ -733,26 +737,39 @@ export default function App() {
               <Slider label="Crop height" value={b.crop.height} min={.001} max={1 - b.crop.y} step={.001} onChange={height => edit('boost', { crop: { ...b.crop, height } })} />
             </div>
           </details>
-        </Section>}
-        {music && <Section title="Music" icon={<Music2 size={16} />}>
+        </Section>
+        <Section title="Entrance animation" icon={<ArrowRight size={16} />}>
           <div className="setting-toggle compact">
-            <div><strong>Fade at timeline end</strong></div>
+            <div><strong>Animate from the left</strong><small>Previewed directly on the timeline.</small></div>
+            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
+          </div>
+          {b.intro.enabled && <div className="boost-intro-settings">
+            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} defaultValue={classic.boost.intro.duration} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
+            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
+          </div>}
+        </Section></>}
+        {selectedMusicSegment && music && <Section title="Ending" icon={<Music2 size={16} />}>
+          <div className="setting-toggle compact">
+            <div><strong>Fade at timeline end</strong><small>So the music does not stop abruptly.</small></div>
             <input className="switch" type="checkbox" aria-label="Fade music at end" checked={store.settings.musicFadeOut} onChange={e => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeOut: e.target.checked } }))} />
           </div>
           {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
         </Section>}
-        {selectedVideoSegment && <Section title="Color recovery" icon={<Palette size={16} />}>
+        {selectedVideoSegment && <Section title="Color correction" icon={<Palette size={16} />}>
           <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
           <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .65 : 0); }} /></div>
-          {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Current playhead frame</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
+          {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
         </Section>}
-        <Section title="Export" icon={<Download size={16} />}>
+        </div> : <div className="inspector-pane export-pane">
+        <Section title="Video" icon={<Film size={16} />}>
           <div className="two-controls">
             <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
             </label>
             <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
             </label>
           </div>
+        </Section>
+        <Section title="AI enhancement" icon={<Gauge size={16} />}>
           <label className="setting-toggle compact">
             <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
             <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
@@ -764,10 +781,12 @@ export default function App() {
           {aiUpscale && <>
             <label className="field">AI model<Dropdown label="AI model" value={aiUpscaleLite ? 'lite' : 'fast'} onChange={value => setAiUpscaleLite(value === 'lite')} options={[{ value: 'fast', label: 'Fast · compact video model' }, { value: 'lite', label: 'Upscayl Lite · general images' }]} /></label>
             <label className="field">AI output size<Dropdown label="AI output size" value={aiKeepResolution ? 'keep' : 'double'} onChange={value => setAiKeepResolution(value === 'keep')} options={[{ value: 'keep', label: 'Keep selected size · less AI work' }, { value: 'double', label: 'Double selected size · more AI work' }]} /></label>
-            <p className="enhancement-note">Final output: {quality * (aiKeepResolution ? 1 : 2)} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * (aiKeepResolution ? 1 : 2)}. {aiKeepResolution ? 'AI works from a half-size composition. This reduces work but trades native source detail for reconstructed detail; compare with a normal export for sharp 4K footage.' : 'AI works on the selected composition, rather than the original 4K recording.'} {aiUpscaleLite ? 'Uses Upscayl’s Lite 4× model, resized to the chosen output. Lite does not guarantee faster CPU processing.' : 'The compact model is trained for animation and may alter game textures.'}</p>
+            <div className="output-resolution-note"><strong>{quality * (aiKeepResolution ? 1 : 2)} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * (aiKeepResolution ? 1 : 2)}</strong><span>Final AI output</span></div>
           </>}
-          {(aiEnhance || aiUpscale) && <p className="enhancement-note">Export only. Completed AI video is reused when only text, audio or the destination changes. Upscaling automatically uses a hardware Vulkan GPU when available; otherwise it uses parallel CPU tiles within a CPU/RAM budget. Smoothing runs on CPU. The progress label shows the active upscaling backend. Every frame receives AI processing; there is no timed quality downgrade or 45-minute cutoff. Live progress estimates the remaining time. 30 minutes for a 10-second clip is a target, not a hardware guarantee. AI can introduce flicker, motion and texture artifacts.</p>}
-          {!init?.aiAvailable && <small className="enhancement-note">AI components are unavailable in this build. You can configure the options, but AI export requires the Linux AI AppImage or a prepared local AI runtime.</small>}
+          {(aiEnhance || aiUpscale) && <details className="inspector-help"><summary>How AI processing works</summary><p>Gameplay is processed first, then boost, text, and music are applied. Completed AI frames are cached so interrupted exports can continue.</p></details>}
+          {!init?.aiAvailable && <div className="inline-warning">AI runtime is not available in this build.</div>}
+        </Section>
+        <Section title="File" icon={<FolderOpen size={16} />}>
           <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
           </label>
           <label className="field">Destination folder<div className="folder-picker">
@@ -778,6 +797,7 @@ export default function App() {
           </div>
           </label>
         </Section>
+        </div>}
       </div>
       <div className="export-bottom">
         {progress && <div className={`export-progress ${progress.phase}`}>
@@ -799,10 +819,11 @@ export default function App() {
             <button onClick={() => void invoke('open_export', { folder: false }).catch(report)}>Open file</button>
             <button onClick={() => void invoke('open_export', { folder: true }).catch(report)}>Open folder</button>
           </div>}
-        </div>}<button className="primary export-button" disabled={!video || exporting || exportStarting} onClick={() => void startExport()}>
+        </div>}
+        <div className="export-summary"><div><small>Output</small><strong>{quality}p · {fps} FPS{aiEnhance || aiUpscale ? ' · AI' : ''}</strong></div>{inspectorView === 'edit' && <button title="Review export settings" aria-label="Review export settings" onClick={() => setInspectorView('export')}><Settings2 size={15} /></button>}</div>
+        <button className="primary export-button" disabled={!video || exporting || exportStarting} onClick={() => void startExport()}>
           {exportStarting ? <LoaderCircle size={18} className="spin" /> : <ArrowDownToLine size={18} />}Export clip<kbd>⌘ E</kbd>
         </button>
-        <small>No watermark. Just your gameplay.</small>
       </div>
     </aside>}
     {proxyPreparing && <div className="preparation-status" role="status" aria-live="polite">

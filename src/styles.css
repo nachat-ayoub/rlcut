@@ -1830,3 +1830,156 @@ progress::-moz-progress-bar {
 .enhancement-note { font-size: 11px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
 
 .preview-performance { position:absolute; left:8px; bottom:8px; z-index:6; pointer-events:none; padding:3px 6px; border-radius:4px; background:#111116bb; color:#ccc; font-size:10px; font-variant-numeric:tabular-nums; }
+
+/* Contextual inspector: edit one thing at a time, keep delivery separate. */
+@media(min-width:1201px) {
+  .app-shell { grid-template-columns:215px minmax(420px,1fr) 324px }
+}
+.inspector {
+  background:#121117;
+  border-left-color:#2b2831;
+  box-shadow:-12px 0 30px #08070a24
+}
+.inspector-heading {
+  padding:15px 15px 12px;
+  border-bottom:0;
+  background:linear-gradient(180deg,#1b1921 0%,#17151c 100%)
+}
+.inspector-title-row { display:flex; align-items:center; gap:10px }
+.inspector-title-row>div { min-width:0 }
+.inspector-object-icon {
+  width:34px;
+  height:34px;
+  flex:none;
+  display:grid;
+  place-items:center;
+  border:1px solid #44384f;
+  border-radius:9px;
+  color:#c3a6ea;
+  background:linear-gradient(145deg,#2b2235,#1b1820);
+  box-shadow:inset 0 1px #ffffff0a
+}
+.inspector .eyebrow { color:#756d7e; font-size:8px; letter-spacing:1.5px }
+.inspector h2 { margin:2px 0 0; overflow:hidden; color:#eee9f2; font-size:14px; font-weight:620; letter-spacing:-.25px; text-overflow:ellipsis; white-space:nowrap }
+.inspector .save-status { margin:9px 0 0 44px; color:#817a89; font-size:8px }
+.inspector .save-status svg { color:#8dbea2 }
+.inspector-tabs {
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:4px;
+  padding:5px 14px 9px;
+  border-bottom:1px solid #292630;
+  background:#17151c
+}
+.inspector-tabs button {
+  min-height:32px;
+  gap:6px;
+  padding:0 10px;
+  border:0;
+  border-radius:6px;
+  color:#847b8d;
+  font-size:10px;
+  font-weight:550
+}
+.inspector-tabs button:hover { color:#c8bbd3; background:#201d26 }
+.inspector-tabs button.active { color:#e1d1f6; background:#2a2233; box-shadow:inset 0 0 0 1px #4a3a5c }
+.inspector-scroll { padding:10px 9px 18px; background:#121117; scrollbar-color:#4a3c55 transparent }
+.inspector-pane { display:grid; gap:9px }
+.inspector-pane>.section {
+  overflow:visible;
+  border:1px solid #2e2a35;
+  border-radius:10px;
+  background:#18161d;
+  box-shadow:0 1px 0 #ffffff05
+}
+.inspector-pane>.section>summary {
+  min-height:43px;
+  padding:0 12px;
+  border-radius:10px;
+  color:#cbc2d1;
+  font-size:10px;
+  font-weight:600
+}
+.inspector-pane>.section>summary:hover { background:#1e1b24 }
+.inspector-pane>.section>summary>span:first-child>svg { color:#a889ca }
+.inspector-pane>.section>summary>span:last-child { color:#756a80 }
+.inspector-pane>.section>summary>span:last-child>svg:last-child { transition:transform .16s ease }
+.inspector-pane>.section[open]>summary>span:last-child>svg:last-child { transform:rotate(180deg) }
+.inspector-pane>.section-body { padding:2px 12px 13px }
+.inspector-pane>.section[open]>.section-body { animation:inspector-reveal .15s ease-out }
+@keyframes inspector-reveal { from { opacity:0; transform:translateY(-3px) } to { opacity:1; transform:none } }
+.selection-empty {
+  min-height:230px;
+  padding:28px 16px 20px;
+  gap:8px;
+  border:1px solid #2e2a35;
+  border-radius:10px;
+  background:linear-gradient(145deg,#1a171f,#15131a)
+}
+.selection-empty-icon { width:38px; height:38px; display:grid; place-items:center; margin-bottom:3px; border:1px solid #493b57; border-radius:10px; color:#bd9de0; background:#251e2d }
+.selection-empty strong { color:#ddd4e3; font-size:11px }
+.selection-empty>span:not(.selection-empty-icon) { max-width:230px; color:#827989; font-size:9px; line-height:1.55 }
+.layer-quick-actions { width:100%; display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-top:10px }
+.layer-quick-actions button { min-width:0; min-height:58px; flex-direction:column; gap:5px; padding:7px 3px; border:1px solid #322d39; border-radius:7px; color:#91869c; background:#151319; font-size:8px }
+.layer-quick-actions button:hover { color:#dac6ef; border-color:#59456a; background:#241d2b }
+.layer-quick-actions button span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.inspector-pane .slider-control { margin-bottom:10px }
+.inspector-pane .control-label { color:#9d94a5; font-size:9px }
+.inspector-pane .numeric input { height:23px; border-color:#37313f; background:#121016 }
+.inspector-pane .field { gap:6px; margin-bottom:10px; color:#99909f; font-size:9px }
+.inspector-pane .dropdown-trigger { min-height:34px; background:#121016 }
+.inspector-pane .setting-toggle {
+  min-height:50px;
+  margin:4px 0 10px;
+  padding:9px 10px;
+  border-color:#312c38;
+  border-radius:8px;
+  background:#141219
+}
+.inspector-pane .setting-toggle.flush { margin-top:0 }
+.inspector-pane .setting-toggle strong { color:#c9c0cf; font-size:9px }
+.inspector-pane .setting-toggle small { color:#776f7f; font-size:8px; line-height:1.35 }
+.inspector-pane .crop-button { min-height:35px; margin:8px 0 10px; border-color:#493957; border-radius:7px; background:#241d2b }
+.inspector-pane .segmented { margin-bottom:12px; border-color:#302b36; background:#111016 }
+.inspector-pane .segmented button { min-height:28px }
+.inspector-pane .boost-intro-settings,.inspector-pane .music-fade-settings { margin-bottom:8px; padding:9px; border-color:#302b36; background:#141219 }
+.quiet-action { min-height:31px; padding:0 8px; border:1px solid #342e3c; color:#b7a2cc; background:#17141c; font-size:9px }
+.quiet-action:hover { border-color:#554365; color:#dec9f2; background:#241d2b }
+.crop-numbers { margin-top:3px; border-top:1px solid #292530 }
+.crop-numbers>summary { padding:10px 1px 7px; color:#85778f }
+.export-pane .two-controls { gap:8px }
+.export-pane .two-controls .field { margin-bottom:2px }
+.output-resolution-note { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:2px 0 10px; padding:9px 10px; border:1px solid #34303b; border-radius:7px; background:#141219 }
+.output-resolution-note strong { color:#d8c5ee; font-size:10px; font-variant-numeric:tabular-nums }
+.output-resolution-note span { color:#766e7d; font-size:8px }
+.inspector-help { margin-top:3px; padding-top:8px; border-top:1px solid #292530; color:#817688; font-size:8px }
+.inspector-help summary { cursor:pointer; color:#a394ae; font-size:9px }
+.inspector-help p { margin:7px 0 1px; line-height:1.55 }
+.inline-warning { margin-top:7px; padding:8px 9px; border:1px solid #58453d; border-radius:7px; background:#251d1a; color:#c3a58f; font-size:8px; line-height:1.45 }
+.inspector-pane .folder-picker { min-height:35px; border-color:#37313e; background:#111016 }
+.inspector-pane .text-settings-card { border-color:#2f2a35; background:#141219 }
+.inspector-pane .text-format-row { border-color:#312c38; background:#121016 }
+.inspector-pane .text-color-row { gap:5px }
+.inspector-pane .color-field { border-color:#312c38; background:#141219 }
+.export-bottom {
+  padding:10px 14px 13px;
+  border-top:1px solid #302b37;
+  background:linear-gradient(180deg,#19171e,#151319);
+  box-shadow:0 -10px 24px #08070a33
+}
+.export-summary { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:0 1px 8px }
+.export-summary>div { display:flex; flex-direction:column; gap:2px }
+.export-summary small { color:#756d7c; font-size:8px; text-transform:uppercase; letter-spacing:.08em }
+.export-summary strong { color:#b9adbf; font-size:9px; font-weight:550; font-variant-numeric:tabular-nums }
+.export-summary>button { width:28px; height:28px; padding:0; border:1px solid #35303c; color:#998aa7; background:#1c1921 }
+.export-summary>button:hover { color:#d8c3ec; border-color:#51405f; background:#292130 }
+.export-bottom .export-button { min-height:38px; border-radius:8px; box-shadow:0 5px 18px #8b64c820 }
+.export-progress { margin-bottom:9px; padding:9px; border:1px solid #342d3d; border-radius:8px; background:#141219 }
+.export-progress progress { margin:8px 0 5px }
+@media(max-width:1200px) {
+  .inspector-scroll { padding-right:7px; padding-left:7px }
+  .inspector-heading { padding-right:12px; padding-left:12px }
+  .inspector-tabs { padding-right:10px; padding-left:10px }
+}
