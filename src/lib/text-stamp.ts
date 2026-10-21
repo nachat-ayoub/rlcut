@@ -63,8 +63,10 @@ export async function stampText(text: TextOverlay, width: number, height: number
         if (end <= first) return;
         range.setStart(node, first); range.setEnd(node, end);
         const rect = range.getBoundingClientRect();
-        lines.push({ text: text.text.slice(first, end).replace(/\n/g, ''), x: rect.left - bounds.left - bounds.width / 2,
-          y: rect.top - bounds.top - bounds.height / 2 + (rect.height - ascent - descent) / 2 + ascent });
+        lines.push({
+          text: text.text.slice(first, end).replace(/\n/g, ''), x: rect.left - bounds.left - bounds.width / 2,
+          y: rect.top - bounds.top - bounds.height / 2 + (rect.height - ascent - descent) / 2 + ascent
+        });
       };
       for (const char of text.text) {
         range.setStart(node, offset); range.setEnd(node, offset + char.length);

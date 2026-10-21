@@ -144,7 +144,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   }, [playbackPath, sourceVersion, segments.length > 0, playbackAttempt]);
   useEffect(() => { player.current?.control({ segments }); }, [segments, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => {
-    player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, segments: [], fadeOut: null } });
+    player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, waveform: [], segments: [], fadeOut: null } });
   }, [music, musicFadeOut, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);

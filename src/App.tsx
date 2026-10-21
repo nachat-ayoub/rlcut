@@ -51,11 +51,13 @@ const migratePresetNames = (store: Store): Store => {
     const legacy = preset.name === 'My RL Short' || preset.name === 'Classic RL Short — custom' || /^(Classic RL Short|My RL Short) copy(?: \d+)?$/.test(preset.name);
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
-  return { ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
-    const sourceTexts = project.texts ?? [];
-    const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
-    return { ...project, markers: normalizeMarkers(project.markers as never), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
-  }) };
+  return {
+    ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
+      const sourceTexts = project.texts ?? [];
+      const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
+      return { ...project, markers: normalizeMarkers(project.markers as never), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
+    })
+  };
 };
 export default function App() {
   const [store, setStore] = useState<Store>(initialStore), [ready, setReady] = useState(false), [init, setInit] = useState<Init | null>(null);
@@ -690,120 +692,120 @@ export default function App() {
       </div>
       <div className="inspector-scroll">
         {inspectorView === 'edit' ? <div className="inspector-pane">
-        {!layer && !selectedText && !selectedVideoSegment && !selectedMusicSegment && <div className="selection-empty"><span className="selection-empty-icon"><SlidersHorizontal size={20} /></span><strong>What do you want to adjust?</strong><span>Select an element in the preview or jump directly to a canvas layer.</span><div className="layer-quick-actions"><button onClick={() => { setSelectedClip(null); setLayer('background'); }}><Layers3 size={15} /><span>Background</span></button><button onClick={() => { setSelectedClip(null); setLayer('gameplay'); }}><Film size={15} /><span>Gameplay</span></button><button onClick={() => { setSelectedClip(null); setLayer('boost'); }}><Gauge size={15} /><span>Boost HUD</span></button></div></div>}
-        {selectedText && <TextInspector value={selectedText} fonts={fonts} favoriteFonts={store.settings.favoriteFonts ?? []} onChange={editText} onAddGoogleFont={addGoogleFont} onToggleFavoriteFont={toggleFavoriteFont} onDelete={() => removeText(selectedText.id)} />}
-        {layer === 'background' && <Section title="Appearance" icon={<Layers3 size={16} />} reset={() => reset('background')}>
-          <Slider label="Gaussian blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
-          <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />
-          <div className="two-controls">
-            <Slider label="X offset" value={preset.background.x - .5} min={-.5} max={.5} defaultValue={classic.background.x - .5} onChange={x => edit('background', { x: x + .5 })} />
-            <Slider label="Y offset" value={preset.background.y - .5} min={-.5} max={.5} defaultValue={classic.background.y - .5} onChange={y => edit('background', { y: y + .5 })} />
-          </div>
-          <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
-          <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} defaultValue={classic.background.brightness} onChange={brightness => edit('background', { brightness })} />
-        </Section>}
-        {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
-          <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
-          <div className="two-controls">
-            <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />
-            <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} defaultValue={classic.gameplay.y - .5} onChange={y => edit('gameplay', { y: y + .5 })} />
-          </div>
-          <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
-          <button className="quiet-action" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}><ScanLine size={14} />Center on canvas</button>
-        </Section>}
-        {layer === 'boost' && <>
-        <Section title="Cutout" icon={<Gauge size={16} />} reset={() => reset('boost')}>
-          <div className="setting-toggle compact flush">
-            <div><strong>Show boost HUD</strong><small>Overlay the cropped meter above gameplay.</small></div>
-            <input id="boost-enabled" aria-label="Show boost cutout" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
-          </div>
-          <button className="crop-button" disabled={!preview} onClick={() => { setPlaying(false); setLayer('boost'); setModal('crop'); }}>
-            <Maximize2 size={15} />Edit source area<span>↗</span>
-          </button>
-          <div className="segmented">
-            <button className={b.shape === 'circle' ? 'active' : ''} onClick={() => edit('boost', { shape: 'circle' })}>
-              <Circle size={12} />Circle</button>
-            <button className={b.shape === 'ellipse' ? 'active' : ''} onClick={() => edit('boost', { shape: 'ellipse' })}>
-              <Circle size={12} style={{ transform: 'scaleX(1.3)' }} />Ellipse</button>
-          </div>
-          <Slider label="Boost scale" value={b.scale} min={.25} max={4} defaultValue={classic.boost.scale} onChange={scale => edit('boost', { scale })} suffix="×" />
-          <div className="two-controls">
-            <Slider label="Width" value={b.width} min={.01} max={1} step={.001} defaultValue={classic.boost.width} onChange={width => edit('boost', { width })} />
-            <Slider label="Height" value={b.height} min={.005} max={1} step={.001} defaultValue={classic.boost.height} onChange={height => edit('boost', { height })} />
-            <Slider label="X position" value={b.x - .5} min={-.5} max={.5} defaultValue={classic.boost.x - .5} onChange={x => edit('boost', { x: x + .5 })} />
-            <Slider label="Y position" value={b.y - .5} min={-.5} max={.5} defaultValue={classic.boost.y - .5} onChange={y => edit('boost', { y: y + .5 })} />
-          </div>
-          <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
-          <Slider label="Edge feather" value={b.feather} max={.25} step={.005} defaultValue={classic.boost.feather} onChange={feather => edit('boost', { feather })} />
-          <details className="crop-numbers">
-            <summary>Precise source crop</summary>
+          {!layer && !selectedText && !selectedVideoSegment && !selectedMusicSegment && <div className="selection-empty"><span className="selection-empty-icon"><SlidersHorizontal size={20} /></span><strong>What do you want to adjust?</strong><span>Select an element in the preview or jump directly to a canvas layer.</span><div className="layer-quick-actions"><button onClick={() => { setSelectedClip(null); setLayer('background'); }}><Layers3 size={15} /><span>Background</span></button><button onClick={() => { setSelectedClip(null); setLayer('gameplay'); }}><Film size={15} /><span>Gameplay</span></button><button onClick={() => { setSelectedClip(null); setLayer('boost'); }}><Gauge size={15} /><span>Boost HUD</span></button></div></div>}
+          {selectedText && <TextInspector value={selectedText} fonts={fonts} favoriteFonts={store.settings.favoriteFonts ?? []} onChange={editText} onAddGoogleFont={addGoogleFont} onToggleFavoriteFont={toggleFavoriteFont} onDelete={() => removeText(selectedText.id)} />}
+          {layer === 'background' && <Section title="Appearance" icon={<Layers3 size={16} />} reset={() => reset('background')}>
+            <Slider label="Gaussian blur" value={preset.background.blur} max={100} step={1} defaultValue={classic.background.blur} onChange={blur => edit('background', { blur })} />
+            <Slider label="Scale" value={preset.background.scale} min={1} max={2} defaultValue={classic.background.scale} onChange={scale => edit('background', { scale })} suffix="×" />
             <div className="two-controls">
-              <Slider label="Crop X" value={b.crop.x} max={1 - b.crop.width} step={.001} onChange={x => edit('boost', { crop: { ...b.crop, x } })} />
-              <Slider label="Crop Y" value={b.crop.y} max={1 - b.crop.height} step={.001} onChange={y => edit('boost', { crop: { ...b.crop, y } })} />
-              <Slider label="Crop width" value={b.crop.width} min={.001} max={1 - b.crop.x} step={.001} onChange={width => edit('boost', { crop: { ...b.crop, width } })} />
-              <Slider label="Crop height" value={b.crop.height} min={.001} max={1 - b.crop.y} step={.001} onChange={height => edit('boost', { crop: { ...b.crop, height } })} />
+              <Slider label="X offset" value={preset.background.x - .5} min={-.5} max={.5} defaultValue={classic.background.x - .5} onChange={x => edit('background', { x: x + .5 })} />
+              <Slider label="Y offset" value={preset.background.y - .5} min={-.5} max={.5} defaultValue={classic.background.y - .5} onChange={y => edit('background', { y: y + .5 })} />
             </div>
-          </details>
-        </Section>
-        <Section title="Entrance animation" icon={<ArrowRight size={16} />}>
-          <div className="setting-toggle compact">
-            <div><strong>Animate from the left</strong><small>Previewed directly on the timeline.</small></div>
-            <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
-          </div>
-          {b.intro.enabled && <div className="boost-intro-settings">
-            <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} defaultValue={classic.boost.intro.duration} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
-            <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
-          </div>}
-        </Section></>}
-        {selectedMusicSegment && music && <Section title="Ending" icon={<Music2 size={16} />}>
-          <div className="setting-toggle compact">
-            <div><strong>Fade at timeline end</strong><small>So the music does not stop abruptly.</small></div>
-            <input className="switch" type="checkbox" aria-label="Fade music at end" checked={store.settings.musicFadeOut} onChange={e => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeOut: e.target.checked } }))} />
-          </div>
-          {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
-        </Section>}
-        {selectedVideoSegment && <Section title="Color correction" icon={<Palette size={16} />}>
-          <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
-          <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .65 : 0); }} /></div>
-          {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
-        </Section>}
+            <Alignment width={0} height={0} onChange={(x, y) => edit('background', { x, y })} />
+            <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} defaultValue={classic.background.brightness} onChange={brightness => edit('background', { brightness })} />
+          </Section>}
+          {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
+            <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
+            <div className="two-controls">
+              <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />
+              <Slider label="Y position" value={preset.gameplay.y - .5} min={-.5} max={.5} defaultValue={classic.gameplay.y - .5} onChange={y => edit('gameplay', { y: y + .5 })} />
+            </div>
+            <Alignment width={preset.gameplay.scale} height={preset.gameplay.scale * (video ? video.height / video.width : 9 / 16) * (quality === 480 ? 480 / 854 : 9 / 16)} onChange={(x, y) => edit('gameplay', { x, y })} />
+            <button className="quiet-action" onClick={() => { edit('gameplay', { x: .5, y: .5 }); setLayer('gameplay'); }}><ScanLine size={14} />Center on canvas</button>
+          </Section>}
+          {layer === 'boost' && <>
+            <Section title="Cutout" icon={<Gauge size={16} />} reset={() => reset('boost')}>
+              <div className="setting-toggle compact flush">
+                <div><strong>Show boost HUD</strong><small>Overlay the cropped meter above gameplay.</small></div>
+                <input id="boost-enabled" aria-label="Show boost cutout" className="switch" type="checkbox" checked={b.enabled} onChange={e => edit('boost', { enabled: e.target.checked })} />
+              </div>
+              <button className="crop-button" disabled={!preview} onClick={() => { setPlaying(false); setLayer('boost'); setModal('crop'); }}>
+                <Maximize2 size={15} />Edit source area<span>↗</span>
+              </button>
+              <div className="segmented">
+                <button className={b.shape === 'circle' ? 'active' : ''} onClick={() => edit('boost', { shape: 'circle' })}>
+                  <Circle size={12} />Circle</button>
+                <button className={b.shape === 'ellipse' ? 'active' : ''} onClick={() => edit('boost', { shape: 'ellipse' })}>
+                  <Circle size={12} style={{ transform: 'scaleX(1.3)' }} />Ellipse</button>
+              </div>
+              <Slider label="Boost scale" value={b.scale} min={.25} max={4} defaultValue={classic.boost.scale} onChange={scale => edit('boost', { scale })} suffix="×" />
+              <div className="two-controls">
+                <Slider label="Width" value={b.width} min={.01} max={1} step={.001} defaultValue={classic.boost.width} onChange={width => edit('boost', { width })} />
+                <Slider label="Height" value={b.height} min={.005} max={1} step={.001} defaultValue={classic.boost.height} onChange={height => edit('boost', { height })} />
+                <Slider label="X position" value={b.x - .5} min={-.5} max={.5} defaultValue={classic.boost.x - .5} onChange={x => edit('boost', { x: x + .5 })} />
+                <Slider label="Y position" value={b.y - .5} min={-.5} max={.5} defaultValue={classic.boost.y - .5} onChange={y => edit('boost', { y: y + .5 })} />
+              </div>
+              <Alignment width={b.width * b.scale} height={b.height * b.scale} onChange={(x, y) => edit('boost', { x, y })} />
+              <Slider label="Edge feather" value={b.feather} max={.25} step={.005} defaultValue={classic.boost.feather} onChange={feather => edit('boost', { feather })} />
+              <details className="crop-numbers">
+                <summary>Precise source crop</summary>
+                <div className="two-controls">
+                  <Slider label="Crop X" value={b.crop.x} max={1 - b.crop.width} step={.001} onChange={x => edit('boost', { crop: { ...b.crop, x } })} />
+                  <Slider label="Crop Y" value={b.crop.y} max={1 - b.crop.height} step={.001} onChange={y => edit('boost', { crop: { ...b.crop, y } })} />
+                  <Slider label="Crop width" value={b.crop.width} min={.001} max={1 - b.crop.x} step={.001} onChange={width => edit('boost', { crop: { ...b.crop, width } })} />
+                  <Slider label="Crop height" value={b.crop.height} min={.001} max={1 - b.crop.y} step={.001} onChange={height => edit('boost', { crop: { ...b.crop, height } })} />
+                </div>
+              </details>
+            </Section>
+            <Section title="Entrance animation" icon={<ArrowRight size={16} />}>
+              <div className="setting-toggle compact">
+                <div><strong>Animate from the left</strong><small>Previewed directly on the timeline.</small></div>
+                <input className="switch" type="checkbox" aria-label="Add boost entrance animation" checked={b.intro.enabled} onChange={e => edit('boost', { intro: { ...b.intro, enabled: e.target.checked } })} />
+              </div>
+              {b.intro.enabled && <div className="boost-intro-settings">
+                <Slider label="Duration" value={b.intro.duration} min={.1} max={5} step={.05} defaultValue={classic.boost.intro.duration} onChange={value => edit('boost', { intro: { ...b.intro, duration: value } })} suffix="s" />
+                <label className="field">Easing<Dropdown label="Boost entrance easing" value={b.intro.easing} onChange={value => edit('boost', { intro: { ...b.intro, easing: value as typeof b.intro.easing } })} options={[{ value: 'linear', label: 'Linear' }, { value: 'ease', label: 'Ease' }, { value: 'easeIn', label: 'Ease in' }, { value: 'easeOut', label: 'Ease out' }, { value: 'easeInOut', label: 'Ease in-out' }]} /></label>
+              </div>}
+            </Section></>}
+          {selectedMusicSegment && music && <Section title="Ending" icon={<Music2 size={16} />}>
+            <div className="setting-toggle compact">
+              <div><strong>Fade at timeline end</strong><small>So the music does not stop abruptly.</small></div>
+              <input className="switch" type="checkbox" aria-label="Fade music at end" checked={store.settings.musicFadeOut} onChange={e => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeOut: e.target.checked } }))} />
+            </div>
+            {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
+          </Section>}
+          {selectedVideoSegment && <Section title="Color correction" icon={<Palette size={16} />}>
+            <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
+            <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .65 : 0); }} /></div>
+            {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
+          </Section>}
         </div> : <div className="inspector-pane export-pane">
-        <Section title="Video" icon={<Film size={16} />}>
-          <div className="two-controls">
-            <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
+          <Section title="Video" icon={<Film size={16} />}>
+            <div className="two-controls">
+              <label className="field">Resolution<Dropdown label="Resolution" value={quality} onChange={value => setQuality(Number(value))} options={[{ value: 480, label: '480p · 480 × 854' }, { value: 720, label: '720p · 720 × 1280' }, { value: 1080, label: '1080p · 1080 × 1920' }]} />
+              </label>
+              <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
+              </label>
+            </div>
+          </Section>
+          <Section title="AI enhancement" icon={<Gauge size={16} />}>
+            <label className="setting-toggle compact">
+              <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
+              <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
             </label>
-            <label className="field">Frame rate<Dropdown label="Frame rate" value={fps} onChange={value => setFps(Number(value))} options={aiEnhance ? [{ value: 60, label: '60 FPS · AI 30 → 60' }, { value: 120, label: '120 FPS · AI 60 → 120' }] : [{ value: 30, label: '30 FPS' }, { value: 60, label: '60 FPS' }]} />
+            <label className="setting-toggle compact">
+              <div><strong>AI upscale / enhance</strong><small>Optional · video first, text and music last</small></div>
+              <input className="switch" type="checkbox" aria-label="AI upscale or enhance output" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
             </label>
-          </div>
-        </Section>
-        <Section title="AI enhancement" icon={<Gauge size={16} />}>
-          <label className="setting-toggle compact">
-            <div><strong>AI smooth export</strong><small>Optional · RIFE frame interpolation</small></div>
-            <input className="switch" type="checkbox" aria-label="AI smooth export" disabled={exporting || exportStarting} checked={aiEnhance} onChange={event => { const enabled = event.target.checked; setAiEnhance(enabled); if (enabled) { setFps(video && video.fps >= 50 ? 120 : 60); } else if (fps === 120) setFps(60); }} />
-          </label>
-          <label className="setting-toggle compact">
-            <div><strong>AI upscale / enhance</strong><small>Optional · video first, text and music last</small></div>
-            <input className="switch" type="checkbox" aria-label="AI upscale or enhance output" disabled={exporting || exportStarting} checked={aiUpscale} onChange={event => setAiUpscale(event.target.checked)} />
-          </label>
-          {aiUpscale && <>
-            <label className="field">AI model<Dropdown label="AI model" value={aiUpscaleLite ? 'lite' : 'fast'} onChange={value => setAiUpscaleLite(value === 'lite')} options={[{ value: 'fast', label: 'Fast · compact video model' }, { value: 'lite', label: 'Upscayl Lite · general images' }]} /></label>
-            <label className="field">AI output size<Dropdown label="AI output size" value={aiKeepResolution ? 'keep' : 'double'} onChange={value => setAiKeepResolution(value === 'keep')} options={[{ value: 'keep', label: 'Keep selected size · less AI work' }, { value: 'double', label: 'Double selected size · more AI work' }]} /></label>
-            <div className="output-resolution-note"><strong>{quality * (aiKeepResolution ? 1 : 2)} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * (aiKeepResolution ? 1 : 2)}</strong><span>Final AI output</span></div>
-          </>}
-          {(aiEnhance || aiUpscale) && <details className="inspector-help"><summary>How AI processing works</summary><p>Gameplay is processed first, then boost, text, and music are applied. Completed AI frames are cached so interrupted exports can continue.</p></details>}
-          {!init?.aiAvailable && <div className="inline-warning">AI runtime is not available in this build.</div>}
-        </Section>
-        <Section title="File" icon={<FolderOpen size={16} />}>
-          <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
-          </label>
-          <label className="field">Destination folder<div className="folder-picker">
-            <input value={outputFolder} onChange={e => rememberOutputFolder(e.target.value)} placeholder="Choose a folder…" />
-            <button aria-label="Choose export folder" onClick={() => void chooseFolder()}>
-              <FolderOpen size={16} />
-            </button>
-          </div>
-          </label>
-        </Section>
+            {aiUpscale && <>
+              <label className="field">AI model<Dropdown label="AI model" value={aiUpscaleLite ? 'lite' : 'fast'} onChange={value => setAiUpscaleLite(value === 'lite')} options={[{ value: 'fast', label: 'Fast · compact video model' }, { value: 'lite', label: 'Upscayl Lite · general images' }]} /></label>
+              <label className="field">AI output size<Dropdown label="AI output size" value={aiKeepResolution ? 'keep' : 'double'} onChange={value => setAiKeepResolution(value === 'keep')} options={[{ value: 'keep', label: 'Keep selected size · less AI work' }, { value: 'double', label: 'Double selected size · more AI work' }]} /></label>
+              <div className="output-resolution-note"><strong>{quality * (aiKeepResolution ? 1 : 2)} × {(quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * (aiKeepResolution ? 1 : 2)}</strong><span>Final AI output</span></div>
+            </>}
+            {(aiEnhance || aiUpscale) && <details className="inspector-help"><summary>How AI processing works</summary><p>Gameplay is processed first, then boost, text, and music are applied. Completed AI frames are cached so interrupted exports can continue.</p></details>}
+            {!init?.aiAvailable && <div className="inline-warning">AI runtime is not available in this build.</div>}
+          </Section>
+          <Section title="File" icon={<FolderOpen size={16} />}>
+            <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
+            </label>
+            <label className="field">Destination folder<div className="folder-picker">
+              <input value={outputFolder} onChange={e => rememberOutputFolder(e.target.value)} placeholder="Choose a folder…" />
+              <button aria-label="Choose export folder" onClick={() => void chooseFolder()}>
+                <FolderOpen size={16} />
+              </button>
+            </div>
+            </label>
+          </Section>
         </div>}
       </div>
       <div className="export-bottom">
