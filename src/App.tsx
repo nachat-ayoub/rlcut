@@ -39,12 +39,10 @@ const normalizeText = (value: Partial<TextOverlay>): TextOverlay => ({
   fontFamily: value.fontFamily || 'DejaVu Sans', fontPath: value.fontPath || '', fontBoldPath: value.fontBoldPath || '', fontBlackPath: value.fontBlackPath || '', fontItalicPath: value.fontItalicPath || '', fontBoldItalicPath: value.fontBoldItalicPath || '', fontBlackItalicPath: value.fontBlackItalicPath || '', fontWeight: value.fontWeight ?? (value.bold ? 700 : 400), fontSize: value.fontSize ?? 72,
   color: value.color || '#ffffff', opacity: value.opacity ?? 1, align: value.align ?? 'center', bold: value.bold ?? false,
   italic: value.italic ?? false, underline: value.underline ?? false, letterSpacing: value.letterSpacing ?? 0,
-  lineHeight: value.lineHeight ?? 1.2, strokeColor: value.strokeColor || '#000000', strokeWidth: value.strokeWidth ?? 0, strokePosition: value.strokePosition ?? 'center',
+  lineHeight: value.lineHeight ?? 1.2, strokeColor: value.strokeColor || '#000000', strokeWidth: value.strokeWidth ?? 9, strokePosition: value.strokePosition ?? 'outside',
   backgroundColor: value.backgroundColor || '#000000', backgroundOpacity: value.backgroundOpacity ?? 0,
-  // Projects saved before the explicit shadow switch already encoded intent in
-  // their shadow values. Preserve that appearance when they are reopened.
-  shadowEnabled: value.shadowEnabled ?? Boolean((value.shadowBlur ?? 0) || (value.shadowX ?? 0) || (value.shadowY ?? 0)), shadowColor: value.shadowColor || '#000000', shadowBlur: value.shadowBlur ?? 0, shadowX: value.shadowX ?? 0,
-  shadowY: value.shadowY ?? 4, fadeIn: value.fadeIn ?? null, fadeOut: value.fadeOut ?? null,
+  shadowEnabled: value.shadowEnabled ?? true, shadowColor: value.shadowColor || '#000000', shadowBlur: value.shadowBlur ?? 8, shadowX: value.shadowX ?? 0,
+  shadowY: value.shadowY ?? 6, fadeIn: value.fadeIn ?? null, fadeOut: value.fadeOut ?? null,
 });
 type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers; texts: TextOverlay[]; textTracks: TextTrack[] };
 const migratePresetNames = (store: Store): Store => {
