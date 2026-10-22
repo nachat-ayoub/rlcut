@@ -226,7 +226,7 @@ pub async fn list_system_fonts() -> Result<Vec<FontOption>, String> {
                 })
             })
             .collect::<Vec<_>>();
-        fonts.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+        fonts.sort_by_key(|font| font.family.to_lowercase());
         fonts.dedup_by(|a, b| a.family.eq_ignore_ascii_case(&b.family));
         Ok(fonts)
     })
@@ -473,6 +473,7 @@ pub fn clear_ai_cache(state: State<AppState>) -> Result<(), String> {
     crate::video::ai_cache::clear()
 }
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command payload mirrors the export request schema.
 pub fn start_export(
     state: State<AppState>,
     paths: Vec<String>,
@@ -542,7 +543,10 @@ pub fn start_export(
         }
     }
     let out = export::destination(&videos[0], &options, overwrite)?;
-    if videos.iter().any(|video| out == PathBuf::from(&video.path)) {
+    if videos
+        .iter()
+        .any(|video| out.as_path() == std::path::Path::new(&video.path))
+    {
         return Err("Output cannot replace a source video".into());
     }
     let mut slot = state.job.lock().map_err(|_| "Export busy")?;

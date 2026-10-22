@@ -620,6 +620,7 @@ impl Upscale {
         Ok(result)
     }
 }
+#[allow(clippy::too_many_arguments)] // Per-frame AI state is explicit to keep checkpointing deterministic.
 fn write_timed_frame(
     w: &mut impl Write,
     bytes: &[u8],
@@ -667,6 +668,7 @@ fn wait(process: &mut Process, job: &Job) -> Result<(), String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // AI worker entry point owns all resumable-export context.
 pub fn run(
     b: &Binaries,
     input: &Path,

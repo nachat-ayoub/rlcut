@@ -29,6 +29,7 @@ pub fn export_args_segments(
 ) -> Result<Vec<String>, String> {
     export_args_timeline(v, p, segments, o, out, None, None, &[])
 }
+#[allow(clippy::too_many_arguments)] // Export graph inputs intentionally stay explicit at this boundary.
 pub fn export_args_timeline(
     v: &Video,
     p: &Preset,
@@ -50,6 +51,7 @@ pub fn export_args_timeline(
         texts,
     )
 }
+#[allow(clippy::too_many_arguments)] // Export graph inputs intentionally stay explicit at this boundary.
 pub fn export_args_timeline_sources(
     videos: &[Video],
     p: &Preset,
@@ -72,6 +74,7 @@ pub fn export_args_timeline_sources(
         None,
     )
 }
+#[allow(clippy::too_many_arguments)] // AI finishing uses the same explicit export graph inputs.
 pub fn finish_ai_args(
     videos: &[Video],
     p: &Preset,
@@ -95,6 +98,7 @@ pub fn finish_ai_args(
         Some(enhanced),
     )
 }
+#[allow(clippy::too_many_arguments)] // Central graph builder receives the complete immutable export context.
 fn export_args_impl(
     videos: &[Video],
     p: &Preset,
@@ -156,7 +160,7 @@ fn export_args_impl(
     let needs_source_video = enhanced.is_none() || p.boost.enabled;
     let mut graph = String::new();
     if needs_source_video {
-        for source in 0..videos.len() {
+        for (source, video) in videos.iter().enumerate() {
             let indices = resolved
                 .iter()
                 .enumerate()
@@ -174,7 +178,7 @@ fn export_args_impl(
             }
             graph.push_str(&format!(
                 "[{source}:v:0]{},split={}{outputs}",
-                color_filter(&videos[source]),
+                color_filter(video),
                 indices.len()
             ));
         }
@@ -419,8 +423,8 @@ fn export_args_impl(
         video_output = next;
     }
     if v.has_audio {
-        for source in 0..videos.len() {
-            if !videos[source].has_audio {
+        for (source, video) in videos.iter().enumerate() {
+            if !video.has_audio {
                 continue;
             }
             let indices = resolved

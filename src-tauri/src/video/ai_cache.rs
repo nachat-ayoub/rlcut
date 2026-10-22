@@ -195,6 +195,7 @@ impl Drop for Temporary {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Cache identity and final composition inputs are intentionally separate.
 pub fn run(
     b: &Binaries,
     videos: &[Video],

@@ -234,21 +234,21 @@ impl Player {
         } else {
             unsafe { rl_player_position(self.handle) }
         };
-        if self.playing && self.seeking.is_none() {
-            if self
+        if self.playing
+            && self.seeking.is_none()
+            && self
                 .segments
                 .get(self.segment_index)
                 .is_some_and(|segment| time >= segment.end - 0.001)
-            {
-                if let Some(next) = self.segments.get(self.segment_index + 1) {
-                    let index = self.segment_index + 1;
-                    let next_time = next.start;
-                    self.seek_segment(index, next_time)?;
-                    time = next_time;
-                } else {
-                    self.play(false)?;
-                    self.ended = true;
-                }
+        {
+            if let Some(next) = self.segments.get(self.segment_index + 1) {
+                let index = self.segment_index + 1;
+                let next_time = next.start;
+                self.seek_segment(index, next_time)?;
+                time = next_time;
+            } else {
+                self.play(false)?;
+                self.ended = true;
             }
         }
         self.update_volume();
@@ -265,16 +265,15 @@ impl Player {
                 self.rgba.len(),
             )
         };
-        if received != 0 {
-            if self
+        if received != 0
+            && self
                 .seeking
                 .is_none_or(|target| (pts - target).abs() < 0.15)
-            {
-                self.sequence = self.sequence.wrapping_add(1);
-                self.frame_time = pts;
-                time = pts;
-                self.seeking = None;
-            }
+        {
+            self.sequence = self.sequence.wrapping_add(1);
+            self.frame_time = pts;
+            time = pts;
+            self.seeking = None;
         }
         self.position = time;
         self.sync_music(false)?;
@@ -393,10 +392,10 @@ impl MusicPlayer {
                 rl_player_volume(self.handle, volume * fade_gain);
             }
             let current = unsafe { rl_player_position(self.handle) };
-            if force || self.segment != Some(index) || (current - time).abs() > 0.15 {
-                if unsafe { rl_player_seek(self.handle, time) } == 0 {
-                    return Err("Could not seek music".into());
-                }
+            if (force || self.segment != Some(index) || (current - time).abs() > 0.15)
+                && unsafe { rl_player_seek(self.handle, time) } == 0
+            {
+                return Err("Could not seek music".into());
             }
         }
         self.segment = target.map(|(index, _, _)| index);

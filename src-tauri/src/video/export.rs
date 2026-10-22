@@ -123,6 +123,7 @@ pub fn run_segments(
 ) {
     run_timeline(b, v, p, segments, o, job, None, None, Vec::new())
 }
+#[allow(clippy::too_many_arguments)] // Worker entry point carries the complete export snapshot.
 pub fn run_timeline(
     b: Binaries,
     v: Video,
@@ -146,6 +147,7 @@ pub fn run_timeline(
         texts,
     )
 }
+#[allow(clippy::too_many_arguments)] // Worker entry point carries the complete export snapshot.
 pub fn run_timeline_sources(
     b: Binaries,
     videos: Vec<Video>,
@@ -296,6 +298,7 @@ pub fn run_timeline_sources(
     }
 }
 /// Run an existing FFmpeg pipeline with cancellation, a live clock and stage ranges.
+#[allow(clippy::too_many_arguments)] // Process supervision needs explicit progress-stage parameters.
 pub fn execute(
     b: &Binaries,
     args: Vec<String>,
