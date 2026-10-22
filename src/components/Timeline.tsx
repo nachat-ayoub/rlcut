@@ -325,7 +325,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   const moveText = (event: PointerEvent<HTMLElement>) => {
     const state = textGesture.current; if (!state || state.pointer !== event.pointerId) return;
     const delta = (event.clientX - state.x) / pixelsPerSecond, total = editedDuration;
-    let next = { ...state.value };
+    const next = { ...state.value };
     if (state.edge === 'move') { const length = next.end - next.start; next.start = Math.max(0, Math.min(total - length, next.start + delta)); next.end = next.start + length; }
     else if (state.edge === 'start') next.start = Math.max(0, Math.min(next.end - MIN_CLIP, next.start + delta));
     else next.end = Math.max(next.start + MIN_CLIP, Math.min(total, next.end + delta));
