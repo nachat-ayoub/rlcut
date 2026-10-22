@@ -107,9 +107,9 @@ test('deselected composition has no labels or resize boxes', () => {
   assert.doesNotMatch(html, /GAMEPLAY|BOOST/);
 });
 const { CropEditor } = await import('../src/components/CropEditor.tsx');
-test('boost dialog includes cutout preview and complete boost controls', () => {
+test('boost dialog keeps the focused cutout workflow visible without scrolling', () => {
   const html = renderToStaticMarkup(createElement(CropEditor, {source:'x',preset:classic,aspect:16/9,onApply:()=>{},onCancel:()=>{}}));
-  for (const label of ['Source zoom','Boost cutout result','Edge feather','X position','Y position','Crop width','Crop height','Apply boost settings']) assert.ok(html.includes(label), label);
+  for (const label of ['Source zoom','Boost cutout result','Visible','Shape','Soft edge','New selection','Apply cutout']) assert.ok(html.includes(label), label);
   assert.equal((html.match(/Resize boost crop/g) || []).length, 4);
 });
 
