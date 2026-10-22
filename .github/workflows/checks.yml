@@ -22,6 +22,17 @@ jobs:
       - name: Linux native dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libgstreamer1.0-dev gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+      - name: Stage Windows resource placeholders
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Tauri validates bundle resource paths during cargo check/clippy even
+          # though these jobs never package or execute the application. The real
+          # installer replaces these placeholders with verified FFmpeg binaries.
+          $tools = '.runtime/windows/tools'
+          New-Item -ItemType Directory -Force -Path "$tools/notices" | Out-Null
+          New-Item -ItemType File -Force -Path "$tools/ffmpeg.exe", "$tools/ffprobe.exe" | Out-Null
+          Copy-Item THIRD_PARTY_NOTICES.md "$tools/notices/THIRD_PARTY_NOTICES.md"
       - run: npm ci
       - run: npm run format:check
       - run: npm run lint
