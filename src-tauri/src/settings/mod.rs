@@ -100,6 +100,7 @@ impl Store {
             ai_upscale: false,
             ai_upscale_lite: false,
             ai_keep_resolution: false,
+            effects: Vec::new(),
             quality: self.settings.quality,
             fps: self.settings.fps,
             folder: String::new(),

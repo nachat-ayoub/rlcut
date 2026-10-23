@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent, type RefObject } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
-import type { Layer, Preset, Preview, Video, Segment, MusicTrack, TextOverlay } from '../types';
+import type { FlashEffect, Layer, Preset, Preview, Video, Segment, MusicTrack, TextOverlay } from '../types';
 import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
 import { Compositor, type CompositionCanvas } from '../lib/compositor';
@@ -31,7 +31,7 @@ function PreviewPerformance({ canvas, playing }: { canvas: RefObject<HTMLCanvasE
   }, [canvas, playing]);
   return <small className="preview-performance">{playing && sample ? `${sample.fps} FPS · ${sample.backend} preview` : 'Preview'}</small>;
 }
-export function Composition({ video, sourceVersion = 0, softwareRendering = false, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+export function Composition({ video, sourceVersion = 0, softwareRendering = false, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, effects = [], texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   softwareRendering?: boolean;
@@ -41,6 +41,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   segments?: Segment[];
   music?: MusicTrack | null;
   musicFadeOut?: number | null;
+  effects?: FlashEffect[];
   texts?: TextOverlay[];
   selectedTextId?: string | null;
   onTextSelect: (id: string) => void;
@@ -74,8 +75,8 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   const [visualTime, setVisualTime] = useState(() => sourceToEdited(segments, timestamp));
   const [snaps, setSnaps] = useState<(number | null)[]>([null, null]);
   const ratio = quality === 480 ? 480 / 854 : 9 / 16;
-  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, texts });
-  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, texts }; });
+  const callbacks = useRef({ onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, effects, texts });
+  useEffect(() => { callbacks.current = { onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame, timestamp, preset, quality, before, colorPreviewBefore, video, playing, segments, effects, texts }; });
   const [waiting, setWaiting] = useState(false);
   const draw = useRef<() => void>(() => { });
   const snapshot = useRef<() => void>(() => { });
@@ -127,7 +128,8 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         const active = current.texts.filter(text => edited >= text.start && edited <= text.end);
         const signature = active.map(text => text.id).join(',');
         const fading = active.some(text => (text.fadeIn && edited < text.start + text.fadeIn) || (text.fadeOut && edited > text.end - text.fadeOut));
-        if (!current.playing || signature !== textSignature.current || (fading && Math.abs(edited - textFrame.current) >= 1 / 30)) {
+        const flashing = current.effects.some(effect => edited >= effect.time && edited <= effect.time + effect.duration);
+        if (!current.playing || signature !== textSignature.current || ((fading || flashing) && Math.abs(edited - textFrame.current) >= 1 / 30)) {
           textFrame.current = edited; textSignature.current = signature; setVisualTime(edited);
         }
         setMediaReady(true); draw.current(); snapshot.current();
@@ -148,7 +150,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   }, [music, musicFadeOut, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);
-  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments]);
+  useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments, effects]);
   const updateZoom = (next: number) => {
     const bounded = Math.max(1, Math.min(4, next));
     const snapped = Math.abs(bounded - 1) < .08 ? 1 : bounded;
@@ -249,11 +251,14 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         </div>
       </div>
     </div>;
+  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime <= effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'darkGray' ? effect.intensity : effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) }));
+  const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} ${effect.kind === 'darkGray' ? 'dark-gray' : 'flash'}`} aria-hidden="true" style={effect.kind === 'flash' ? { backgroundColor: effect.color, opacity: amount } : { opacity: 1, backdropFilter: `grayscale(${amount}) brightness(${1 - amount * .32}) contrast(${1 + amount * .08})`, WebkitBackdropFilter: `grayscale(${amount}) brightness(${1 - amount * .32}) contrast(${1 + amount * .08})` }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
         <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} />
+        {renderEffects('video')}
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
           const current = visualTime, local = current - text.start, remaining = text.end - current;
           const fade = Math.min(1, text.fadeIn ? local / text.fadeIn : 1, text.fadeOut ? remaining / text.fadeOut : 1);
@@ -263,6 +268,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
             <span className="composition-text-fill">{text.text}</span>
           </div>;
         })}
+        {renderEffects('all')}
         {!mediaReady && !proxyPreparing && <div className="preview-loading">{playbackFailed ? <><span>Playback unavailable. Check the error message.</span><button onClick={() => setPlaybackAttempt(value => value + 1)}>Retry playback</button></> : <><LoaderCircle className="spin" />Opening native decoder…</>}</div>}
         {!before && guides && (mediaReady || preview) && (['gameplay', 'boost'] as const).filter(l => l !== 'boost' || preset.boost.enabled).map(target => <div key={target} className={`layer-guide ${layer === target ? 'selected' : 'unselected'} ${target}`} style={rect(target)} onPointerDown={e => begin(e, target)}>
           {layer === target && <span>

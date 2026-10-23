@@ -1,6 +1,69 @@
 use super::geometry::{color_filter, filter_graph_normalized};
-use crate::model::{BoostEasing, ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
+use crate::model::{
+    BoostEasing, EffectKind, EffectScope, ExportOptions, FlashEffect, MusicTrack, Preset, Segment,
+    TextOverlay, Video,
+};
 use std::path::Path;
+
+fn append_effect_filters(
+    graph: &mut String,
+    video_output: &mut String,
+    effects: &[FlashEffect],
+    scope: EffectScope,
+    width: u32,
+    height: u32,
+    timeline_duration: f64,
+) {
+    for (index, effect) in effects
+        .iter()
+        .enumerate()
+        .filter(|(_, effect)| effect.scope == scope)
+    {
+        let prefix = match scope {
+            EffectScope::Video => "video_effect",
+            EffectScope::All => "all_effect",
+        };
+        let styled = format!("{prefix}_styled{index}");
+        let input = format!("{prefix}_input{index}");
+        let next = format!("{prefix}{index}");
+        let alpha = if effect.kind == EffectKind::DarkGray {
+            format!(
+                "if(between(T,{:.6},{:.6}),{:.6},0)",
+                effect.time,
+                effect.time + effect.duration,
+                effect.intensity
+            )
+        } else {
+            let u = format!("((T-{:.6})/{:.6})", effect.time, effect.duration);
+            let fade = match &effect.easing {
+                BoostEasing::Linear => format!("1-{u}"),
+                BoostEasing::Ease => format!("1-(pow({u},2)*(3-2*{u}))"),
+                BoostEasing::EaseIn => format!("1-pow({u},3)"),
+                BoostEasing::EaseOut => format!("pow(1-{u},3)"),
+                BoostEasing::EaseInOut => {
+                    format!("if(lt({u},0.5),1-4*pow({u},3),pow(-2*{u}+2,3)/2)")
+                }
+            };
+            format!(
+                "if(between(T,{:.6},{:.6}),{:.6}*({fade}),0)",
+                effect.time,
+                effect.time + effect.duration,
+                effect.intensity
+            )
+        }
+        .replace(',', "\\,");
+        match effect.kind {
+            EffectKind::Flash => graph.push_str(&format!(
+                ";color=c=0x{}:s={width}x{height}:d={timeline_duration:.6},format=yuv444p[{styled}];[{video_output}]format=yuv444p[{input}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]",
+                effect.color.trim_start_matches('#')
+            )),
+            EffectKind::DarkGray => graph.push_str(&format!(
+                ";[{video_output}]split=2[{input}][{prefix}_gray_in{index}];[{prefix}_gray_in{index}]hue=s=0,eq=brightness=-0.12:contrast=1.08,format=yuv444p[{styled}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]"
+            )),
+        }
+        *video_output = next;
+    }
+}
 pub fn export_args(
     v: &Video,
     p: &Preset,
@@ -126,6 +189,7 @@ fn export_args_impl(
     Segment::validate_all(segments, total_duration)?;
     let edited_duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
     TextOverlay::validate_all(texts, edited_duration)?;
+    FlashEffect::validate_all(&o.effects, edited_duration)?;
     let mut offsets = Vec::with_capacity(videos.len());
     let mut offset = 0.;
     for video in videos {
@@ -275,6 +339,15 @@ fn export_args_impl(
     }
     graph.push_str(&composition);
     let mut video_output = "out_edit".to_string();
+    append_effect_filters(
+        &mut graph,
+        &mut video_output,
+        &o.effects,
+        EffectScope::Video,
+        w,
+        h,
+        edited_duration,
+    );
     for (index, text) in texts.iter().enumerate() {
         let next = format!("text{index}");
         if text.rendered_path.is_some() {
@@ -422,6 +495,15 @@ fn export_args_impl(
         }
         video_output = next;
     }
+    append_effect_filters(
+        &mut graph,
+        &mut video_output,
+        &o.effects,
+        EffectScope::All,
+        w,
+        h,
+        edited_duration,
+    );
     if v.has_audio {
         for (source, video) in videos.iter().enumerate() {
             if !video.has_audio {
@@ -680,7 +762,7 @@ mod tests {
             fade_out: None,
         }
     }
-    fn text_graph(shadow_enabled: bool) -> String {
+    fn text_graph(shadow_enabled: bool, effects: Vec<FlashEffect>) -> String {
         let video = Video {
             path: "/tmp/input.mp4".into(),
             width: 1920,
@@ -695,6 +777,7 @@ mod tests {
             ai_upscale: false,
             ai_upscale_lite: false,
             ai_keep_resolution: false,
+            effects,
             quality: 1080,
             fps: 60,
             folder: "/tmp".into(),
@@ -723,14 +806,50 @@ mod tests {
     }
     #[test]
     fn text_shadow_is_explicit_and_preview_scaled() {
-        let disabled = text_graph(false);
+        let disabled = text_graph(false, Vec::new());
         assert!(!disabled.contains("text_shadow_layer"));
         assert!(!disabled.contains("shadowx="));
         assert!(disabled.contains("borderw=6.500"));
-        let enabled = text_graph(true);
+        let enabled = text_graph(true, Vec::new());
         assert!(enabled.contains("text_shadow_layer0"));
         assert!(enabled.contains("gblur=sigma=4.000:steps=2:planes=8"));
         assert!(enabled.contains("-17.000"));
+    }
+    #[test]
+    fn timeline_effects_respect_video_and_all_layer_order() {
+        let graph = text_graph(
+            false,
+            vec![
+                FlashEffect {
+                    id: "flash".into(),
+                    kind: EffectKind::Flash,
+                    timing: crate::model::EffectTiming::Duration,
+                    scope: EffectScope::Video,
+                    time: 0.1,
+                    duration: 0.4,
+                    intensity: 0.8,
+                    color: "#ffffff".into(),
+                    easing: BoostEasing::EaseOut,
+                },
+                FlashEffect {
+                    id: "gray".into(),
+                    kind: EffectKind::DarkGray,
+                    timing: crate::model::EffectTiming::Clip,
+                    scope: EffectScope::All,
+                    time: 0.2,
+                    duration: 0.4,
+                    intensity: 0.7,
+                    color: "#ffffff".into(),
+                    easing: BoostEasing::Ease,
+                },
+            ],
+        );
+        let video_effect = graph.find("[video_effect0]").unwrap();
+        let text = graph.find("drawtext=").unwrap();
+        let all_effect = graph.find("[all_effect1]").unwrap();
+        assert!(video_effect < text && text < all_effect);
+        assert!(graph.contains("hue=s=0,eq=brightness=-0.12:contrast=1.08"));
+        assert!(graph.contains("if(between(T\\,0.200000\\,0.600000)\\,0.700000\\,0)"));
     }
     #[test]
     fn structured_args_cfr_optional_audio() {
@@ -748,6 +867,7 @@ mod tests {
             ai_upscale: false,
             ai_upscale_lite: false,
             ai_keep_resolution: false,
+            effects: Vec::new(),
             quality: 480,
             fps: 60,
             folder: "/tmp".into(),
@@ -779,6 +899,7 @@ mod tests {
                 ai_upscale: false,
                 ai_upscale_lite: false,
                 ai_keep_resolution: false,
+                effects: Vec::new(),
                 quality: q,
                 fps: 30,
                 folder: "".into(),
@@ -791,6 +912,7 @@ mod tests {
             ai_upscale: false,
             ai_upscale_lite: false,
             ai_keep_resolution: false,
+            effects: Vec::new(),
             quality: 720,
             fps: 24,
             folder: "".into(),

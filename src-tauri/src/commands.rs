@@ -514,6 +514,7 @@ pub fn start_export(
         .map(|segment| segment.end - segment.start)
         .sum();
     crate::model::TextOverlay::validate_all(&texts, edited_duration)?;
+    crate::model::FlashEffect::validate_all(&options.effects, edited_duration)?;
     let stamp_root = state.cache.join("text-stamps");
     let dimensions = options.output_resolution()?;
     let mut stamp_paths = Vec::new();

@@ -6,6 +6,7 @@ const { renderToStaticMarkup } = await import('react-dom/server');
 const { createElement } = await import('react');
 const { Composition } = await import('../src/components/Composition.tsx');
 const { Timeline } = await import('../src/components/Timeline.tsx');
+const { FlashInspector } = await import('../src/components/FlashInspector.tsx');
 
 test('duplicating presets preserves all values and isolates nested edits', () => {
   const original = structuredClone(classic), copy = copyPreset(classic);
@@ -43,6 +44,12 @@ test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () 
     canUndo:false, canRedo:false, onSeek:()=>{}, onPlay:()=>{}, onEdit:()=>{}, onTextEdit:()=>{}, onTextSplit:()=>{}, onTextDelete:()=>{}, onTextSelect:()=>{}, onAddText:()=>{}, onAddTextTrack:()=>{}, onDeleteTextTrack:()=>{}, onMarker:()=>{}, onSelectionChange:()=>{}, onUndo:()=>{}, onRedo:()=>{}, onImportVideo:()=>{}, onImportMusic:()=>{},
   }));
   for (const label of ['Append video','Add music','Timeline zoom','Show selected clip volume','Trim or extend video clip from left','Trim or extend video clip from right']) assert.match(html, new RegExp(label));
+});
+
+test('timeline effects expose fast placement and contextual controls', () => {
+  const effect = { id:'fx', kind:'darkGray', timing:'clip', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
+  const inspector = renderToStaticMarkup(createElement(FlashInspector, { value:effect, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
+  for (const label of ['Black &amp; white','Impact flash','Custom duration','Whole clip','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
 });
 
 test('native drag/drop uses the Tauri 2 webview API and only imports dropped paths', async () => {

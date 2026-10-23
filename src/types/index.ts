@@ -101,6 +101,17 @@ export type TrackMarkers = {
   video: number[];
   music: number[];
 };
+export type FlashEffect = {
+  id: string;
+  kind: 'flash' | 'darkGray';
+  timing: 'duration' | 'clip';
+  scope: 'video' | 'all';
+  time: number;
+  duration: number;
+  intensity: number;
+  color: string;
+  easing: BoostEasing;
+};
 export type TextTrack = { id: string; name: string };
 export type TextOverlay = {
   id: string;
@@ -157,6 +168,7 @@ export type Project = {
   segments: Segment[];
   music: MusicTrack | null;
   markers: TrackMarkers;
+  effects?: FlashEffect[];
   texts?: TextOverlay[];
   textTracks?: TextTrack[];
   preset: Preset;

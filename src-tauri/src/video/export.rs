@@ -406,6 +406,7 @@ mod tests {
             ai_upscale: false,
             ai_upscale_lite: false,
             ai_keep_resolution: false,
+            effects: Vec::new(),
             quality: 480,
             fps: 30,
             folder: dir.to_string_lossy().into(),

@@ -293,6 +293,9 @@ pub fn run(
         let mut base_options = o.clone();
         base_options.ai_enhance = false;
         base_options.ai_upscale = false;
+        // Timeline effects are cheap finishing operations and must not invalidate
+        // reusable AI frames when their position or styling changes.
+        base_options.effects.clear();
         if o.ai_enhance {
             base_options.fps = o.fps / 2;
         }

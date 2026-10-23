@@ -74,6 +74,7 @@ fn real_import_preview_and_export_worker() {
         ai_upscale: false,
         ai_upscale_lite: false,
         ai_keep_resolution: false,
+        effects: Vec::new(),
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),

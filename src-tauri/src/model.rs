@@ -244,6 +244,79 @@ impl MusicTrack {
         Ok(())
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]
+pub enum EffectKind {
+    Flash,
+    DarkGray,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]
+pub enum EffectTiming {
+    Duration,
+    Clip,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]
+pub enum EffectScope {
+    Video,
+    All,
+}
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct FlashEffect {
+    pub id: String,
+    pub kind: EffectKind,
+    pub timing: EffectTiming,
+    pub scope: EffectScope,
+    pub time: f64,
+    pub duration: f64,
+    pub intensity: f64,
+    pub color: String,
+    pub easing: BoostEasing,
+}
+impl FlashEffect {
+    pub fn validate_all(effects: &[Self], timeline_duration: f64) -> Result<(), String> {
+        if effects.len() > 200 {
+            return Err("A project cannot contain more than 200 timeline effects".into());
+        }
+        for effect in effects {
+            let valid_color = effect.color.len() == 7
+                && effect.color.starts_with('#')
+                && effect.color[1..]
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit());
+            if effect.id.is_empty()
+                || effect.id.len() > 128
+                || !effect.time.is_finite()
+                || effect.time < 0.
+                || !effect.duration.is_finite()
+                || effect.duration < 0.08
+                || (effect.timing == EffectTiming::Duration
+                    && effect.duration
+                        > if effect.kind == EffectKind::Flash {
+                            1.5
+                        } else {
+                            10.
+                        })
+                || effect.time + effect.duration > timeline_duration + 0.001
+                || !effect.intensity.is_finite()
+                || !(0.05..=1.).contains(&effect.intensity)
+                || !valid_color
+            {
+                return Err("Timeline effect settings are invalid or outside the timeline".into());
+            }
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[cfg_attr(
@@ -259,6 +332,8 @@ pub struct ExportOptions {
     pub ai_upscale_lite: bool,
     #[cfg_attr(feature = "serialization", serde(default))]
     pub ai_keep_resolution: bool,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub effects: Vec<FlashEffect>,
     pub quality: u32,
     pub fps: u32,
     pub folder: String,
