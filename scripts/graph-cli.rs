@@ -28,9 +28,10 @@ fn main() {
     }
     let o = model::ExportOptions {
         ai_enhance: false,
-            ai_upscale: false,
-            ai_upscale_lite: false,
-            ai_keep_resolution: false,
+        ai_upscale: false,
+        ai_upscale_lite: false,
+        ai_keep_resolution: false,
+        effects: Vec::new(),
         quality,
         fps,
         folder: String::new(),
