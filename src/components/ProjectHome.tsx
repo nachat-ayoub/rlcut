@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Clock3, Download, Film, FolderOpen, Pencil, Plus, Settings2, Trash2 } from 'lucide-react';
+import { Clock3, Copy, Download, Film, FolderOpen, Pencil, Plus, Settings2, Trash2 } from 'lucide-react';
 import type { Project } from '../types';
 import { filename } from '../lib/presets';
 import { invoke, isDesktop } from '../lib/native';
@@ -17,7 +17,7 @@ function projectDate(timestamp: number, now: number): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(timestamp);
 }
 
-export function ProjectHome({ projects, busy, alert, onDismissAlert, onNew, onOpen, onDelete, onImport, onExport, onRename, onSettings }: {
+export function ProjectHome({ projects, busy, alert, onDismissAlert, onNew, onOpen, onDelete, onDuplicate, onImport, onExport, onRename, onSettings }: {
   projects: Project[];
   busy: boolean;
   alert?: string | null;
@@ -25,6 +25,7 @@ export function ProjectHome({ projects, busy, alert, onDismissAlert, onNew, onOp
   onNew: () => void;
   onOpen: (project: Project) => void;
   onDelete: (project: Project) => void;
+  onDuplicate: (project: Project) => void;
   onImport: () => void;
   onExport: (project: Project) => void;
   onRename: (project: Project, name: string) => void;
@@ -88,6 +89,7 @@ export function ProjectHome({ projects, busy, alert, onDismissAlert, onNew, onOp
           <span>{project.videoPaths[0] ? filename(project.videoPaths[0]) : 'No media'}</span>
         </div>
         <div className="project-card-actions">
+          <button title="Duplicate project" aria-label={`Duplicate ${project.name}`} onClick={() => onDuplicate(project)}><Copy size={14} /></button>
           <button title="Rename project" aria-label={`Rename ${project.name}`} onClick={() => beginRename(project)}><Pencil size={14} /></button>
           <button title="Export project file" aria-label={`Export ${project.name}`} onClick={() => onExport(project)}><Download size={15} /></button>
           <button title="Delete project" aria-label={`Delete ${project.name}`} onClick={() => onDelete(project)}><Trash2 size={15} /></button>

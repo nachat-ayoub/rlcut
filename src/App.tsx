@@ -523,6 +523,17 @@ export default function App() {
     } catch (error) { report(error); }
   }
   async function exportProjectFile(project: Project) { try { if (await invoke<boolean>('export_project', { project })) setNotice('Project file exported'); } catch (error) { report(error); } }
+  function duplicateProject(project: Project) {
+    setStore(current => {
+      const names = new Set(current.projects.map(item => item.name));
+      let name = `${project.name} Copy`, suffix = 2;
+      while (names.has(name)) name = `${project.name} Copy ${suffix++}`;
+      const now = Date.now();
+      const duplicate: Project = { ...structuredClone(project), id: crypto.randomUUID(), name, createdAt: now, updatedAt: now };
+      return { ...current, projects: [...current.projects, duplicate] };
+    });
+    setNotice('Project duplicated');
+  }
   const b = preset.boost;
   const textTrackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
   const stackedTexts = [...texts].sort((a, b) => (textTrackOrder.get(b.trackId) ?? -1) - (textTrackOrder.get(a.trackId) ?? -1));
@@ -618,7 +629,7 @@ export default function App() {
     if (!window.confirm(`Delete “${project.name}”? The source videos will not be deleted.`)) return;
     setStore(current => ({ ...current, projects: current.projects.filter(item => item.id !== project.id) }));
     if (currentProjectId === project.id) resetProject();
-  }} onSettings={() => { setHome(false); setModal('settings'); }} />;
+  }} onDuplicate={duplicateProject} onSettings={() => { setHome(false); setModal('settings'); }} />;
   return <div className={`app-shell ${video ? '' : 'no-video'} ${previewExpanded ? 'preview-expanded' : ''}`} onPointerDownCapture={e => { const target = e.target as HTMLElement; if (target.closest('.preview-stage') && !target.closest('.composition')) setLayer(null); }}>
     <aside className="sidebar">
       <div className="brand">

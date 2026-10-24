@@ -1,5 +1,7 @@
 use rlcut_lib::{
-    model::{ExportOptions, Preset},
+    model::{
+        BoostEasing, EffectKind, EffectScope, EffectTiming, ExportOptions, FlashEffect, Preset,
+    },
     video::{binaries::Binaries, export, metadata, preview},
 };
 use std::{
@@ -39,7 +41,7 @@ fn real_import_preview_and_export_worker() {
             "-f",
             "lavfi",
             "-i",
-            "testsrc2=size=640x360:rate=24:duration=0.5",
+            "color=c=red:size=640x360:rate=24:duration=0.5",
             "-f",
             "lavfi",
             "-i",
@@ -74,7 +76,17 @@ fn real_import_preview_and_export_worker() {
         ai_upscale: false,
         ai_upscale_lite: false,
         ai_keep_resolution: false,
-        effects: Vec::new(),
+        effects: vec![FlashEffect {
+            id: "black-and-white".into(),
+            kind: EffectKind::DarkGray,
+            timing: EffectTiming::Duration,
+            scope: EffectScope::All,
+            time: 0.,
+            duration: 0.5,
+            intensity: 1.,
+            color: "#ffffff".into(),
+            easing: BoostEasing::Ease,
+        }],
         quality: 480,
         fps: 30,
         folder: scratch.0.to_string_lossy().into_owned(),
@@ -95,6 +107,31 @@ fn real_import_preview_and_export_worker() {
     assert_eq!(result.fps, 30.);
     assert!(result.has_audio);
     assert!((result.duration - 0.5).abs() < 0.15);
+    let pixel = Command::new(binaries.ffmpeg().unwrap())
+        .args(["-v", "error", "-ss", "0.25", "-i"])
+        .arg(&destination)
+        .args([
+            "-vf",
+            "scale=1:1,format=rgb24",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        pixel.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pixel.stderr)
+    );
+    assert!(pixel.stdout.len() >= 3);
+    let channels = &pixel.stdout[..3];
+    assert!(
+        channels.iter().max().unwrap() - channels.iter().min().unwrap() <= 8,
+        "black-and-white export produced RGB channels {channels:?}"
+    );
     assert!(source.exists());
     assert!(!scratch.0.join(".rlcut-integration.partial.mp4").exists());
 }

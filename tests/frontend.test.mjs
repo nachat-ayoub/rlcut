@@ -7,6 +7,7 @@ const { createElement } = await import('react');
 const { Composition } = await import('../src/components/Composition.tsx');
 const { Timeline } = await import('../src/components/Timeline.tsx');
 const { FlashInspector } = await import('../src/components/FlashInspector.tsx');
+const { ProjectHome } = await import('../src/components/ProjectHome.tsx');
 
 test('duplicating presets preserves all values and isolates nested edits', () => {
   const original = structuredClone(classic), copy = copyPreset(classic);
@@ -50,6 +51,20 @@ test('timeline effects expose fast placement and contextual controls', () => {
   const effect = { id:'fx', kind:'darkGray', timing:'clip', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
   const inspector = renderToStaticMarkup(createElement(FlashInspector, { value:effect, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
   for (const label of ['Black &amp; white','Impact flash','Custom duration','Whole clip','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
+});
+
+test('black-and-white preview filters rendered video without backdrop filters', () => {
+  const html = renderToStaticMarkup(createElement(Composition, {
+    video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[{id:'gray',kind:'darkGray',timing:'duration',scope:'all',time:0,duration:1,intensity:1,color:'#fff',easing:'ease'}], texts:[], preview:null, preset:classic, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
+  }));
+  assert.match(html, /filter:grayscale\(1\) brightness\(0\.88\) contrast\(1\.08\)/);
+  assert.doesNotMatch(html, /backdrop-filter/);
+});
+
+test('project cards expose a duplicate action', () => {
+  const project = {version:1,id:'p',name:'Edit',createdAt:1,updatedAt:1,videoPaths:[],segments:[],music:null,markers:{video:[],music:[]},preset:classic,quality:1080,fps:60,outputFolder:'',outputName:'edit.mp4'};
+  const html = renderToStaticMarkup(createElement(ProjectHome, {projects:[project],busy:false,onDismissAlert:()=>{},onNew:()=>{},onOpen:()=>{},onDelete:()=>{},onDuplicate:()=>{},onImport:()=>{},onExport:()=>{},onRename:()=>{},onSettings:()=>{}}));
+  assert.match(html, /aria-label="Duplicate Edit"/);
 });
 
 test('native drag/drop uses the Tauri 2 webview API and only imports dropped paths', async () => {

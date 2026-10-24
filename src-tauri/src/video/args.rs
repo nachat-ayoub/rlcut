@@ -23,17 +23,8 @@ fn append_effect_filters(
             EffectScope::Video => "video_effect",
             EffectScope::All => "all_effect",
         };
-        let styled = format!("{prefix}_styled{index}");
-        let input = format!("{prefix}_input{index}");
         let next = format!("{prefix}{index}");
-        let alpha = if effect.kind == EffectKind::DarkGray {
-            format!(
-                "if(between(T,{:.6},{:.6}),{:.6},0)",
-                effect.time,
-                effect.time + effect.duration,
-                effect.intensity
-            )
-        } else {
+        let alpha = if effect.kind == EffectKind::Flash {
             let u = format!("((T-{:.6})/{:.6})", effect.time, effect.duration);
             let fade = match &effect.easing {
                 BoostEasing::Linear => format!("1-{u}"),
@@ -50,16 +41,32 @@ fn append_effect_filters(
                 effect.time + effect.duration,
                 effect.intensity
             )
+        } else {
+            String::new()
         }
         .replace(',', "\\,");
         match effect.kind {
-            EffectKind::Flash => graph.push_str(&format!(
-                ";color=c=0x{}:s={width}x{height}:d={timeline_duration:.6},format=yuv444p[{styled}];[{video_output}]format=yuv444p[{input}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]",
-                effect.color.trim_start_matches('#')
-            )),
-            EffectKind::DarkGray => graph.push_str(&format!(
-                ";[{video_output}]split=2[{input}][{prefix}_gray_in{index}];[{prefix}_gray_in{index}]hue=s=0,eq=brightness=-0.12:contrast=1.08,format=yuv444p[{styled}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]"
-            )),
+            EffectKind::Flash => {
+                let styled = format!("{prefix}_styled{index}");
+                let input = format!("{prefix}_input{index}");
+                graph.push_str(&format!(
+                    ";color=c=0x{}:s={width}x{height}:d={timeline_duration:.6},format=yuv444p[{styled}];[{video_output}]format=yuv444p[{input}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]",
+                    effect.color.trim_start_matches('#')
+                ));
+            }
+            EffectKind::DarkGray => {
+                let enabled = format!(
+                    "between(t\\,{:.6}\\,{:.6})",
+                    effect.time,
+                    effect.time + effect.duration
+                );
+                let saturation = 1. - effect.intensity;
+                let brightness = -0.12 * effect.intensity;
+                let contrast = 1. + 0.08 * effect.intensity;
+                graph.push_str(&format!(
+                    ";[{video_output}]hue=s={saturation:.6}:enable='{enabled}',eq=brightness={brightness:.6}:contrast={contrast:.6}:enable='{enabled}'[{next}]"
+                ));
+            }
         }
         *video_output = next;
     }
@@ -848,8 +855,10 @@ mod tests {
         let text = graph.find("drawtext=").unwrap();
         let all_effect = graph.find("[all_effect1]").unwrap();
         assert!(video_effect < text && text < all_effect);
-        assert!(graph.contains("hue=s=0,eq=brightness=-0.12:contrast=1.08"));
-        assert!(graph.contains("if(between(T\\,0.200000\\,0.600000)\\,0.700000\\,0)"));
+        assert!(graph.contains("hue=s=0.300000:enable='between(t\\,0.200000\\,0.600000)'"));
+        assert!(graph.contains(
+            "eq=brightness=-0.084000:contrast=1.056000:enable='between(t\\,0.200000\\,0.600000)'"
+        ));
     }
     #[test]
     fn structured_args_cfr_optional_audio() {
