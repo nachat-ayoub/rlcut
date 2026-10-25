@@ -56,7 +56,7 @@ test('timeline effects expose fast placement and contextual controls', () => {
 
 test('music library exposes native YouTube search and saved views', () => {
   const html = renderToStaticMarkup(createElement(MusicLibrary, {favorites:[],installed:[],onFavoritesChange:()=>{},onInstalledChange:()=>{},onClose:()=>{},onChooseLocal:async()=>null,onUseInstalled:async()=>false}));
-  for (const label of ['Find your soundtrack','Search songs, edits, phonk, creators','Choose local audio','Favorites','Downloaded','rusty_ytdl']) assert.match(html, new RegExp(label));
+  for (const label of ['Find your soundtrack','Search songs, edits, phonk, creators','Choose local audio','Favorites','Downloaded','Search YouTube']) assert.match(html, new RegExp(label));
   assert.doesNotMatch(html, /API key/);
 });
 
