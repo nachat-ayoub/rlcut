@@ -75,7 +75,7 @@ const migratePresetNames = (store: Store): Store => {
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
   return {
-    ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [], youtubeApiKey: store.settings.youtubeApiKey ?? '', favoriteSongs: store.settings.favoriteSongs ?? [], installedSongs: store.settings.installedSongs ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
+    ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [], favoriteSongs: store.settings.favoriteSongs ?? [], installedSongs: store.settings.installedSongs ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
       const sourceTexts = project.texts ?? [];
       const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
       return { ...project, markers: normalizeMarkers(project.markers as never), effects: (project.effects ?? []).map(normalizeFlash), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
@@ -943,7 +943,7 @@ export default function App() {
       </div>
     </div>}
     {modal === 'crop' && preview && <CropEditor aspect={(video?.width ?? 16) / (video?.height ?? 9)} source={preview.source} preset={preset} onCancel={() => setModal(null)} onApply={boost => { edit('boost', boost); setBefore(false); setModal(null); }} />}
-    {modal === 'music' && <MusicLibrary apiKey={store.settings.youtubeApiKey} favorites={store.settings.favoriteSongs} installed={store.settings.installedSongs} onApiKeyChange={youtubeApiKey => setStore(current => ({ ...current, settings: { ...current.settings, youtubeApiKey } }))} onFavoritesChange={(favoriteSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, favoriteSongs } }))} onInstalledChange={(installedSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, installedSongs } }))} onChooseLocal={importMusic} onUseInstalled={useInstalledMusic} onClose={() => setModal(null)} />}
+    {modal === 'music' && <MusicLibrary favorites={store.settings.favoriteSongs} installed={store.settings.installedSongs} onFavoritesChange={(favoriteSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, favoriteSongs } }))} onInstalledChange={(installedSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, installedSongs } }))} onChooseLocal={importMusic} onUseInstalled={useInstalledMusic} onClose={() => setModal(null)} />}
     {(modal === 'presets' || modal === 'settings' || modal === 'shortcuts') && <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-heading">

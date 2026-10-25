@@ -22,7 +22,8 @@ pub struct Settings {
     pub music_fade_duration: f64,
     #[serde(default)]
     pub favorite_fonts: Vec<String>,
-    #[serde(default)]
+    // Read and discard API keys from older settings files. New saves omit it.
+    #[serde(default, skip_serializing)]
     pub youtube_api_key: String,
     #[serde(default)]
     pub favorite_songs: Vec<LibrarySong>,
@@ -143,9 +144,6 @@ impl Store {
                 .any(|font| font.len() > 200)
         {
             return Err("Too many favorite fonts".into());
-        }
-        if self.settings.youtube_api_key.len() > 256 {
-            return Err("YouTube API key is too long".into());
         }
         let songs_valid = |songs: &[LibrarySong], installed: bool| {
             songs.len() <= 500

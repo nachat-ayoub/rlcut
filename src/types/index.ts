@@ -57,7 +57,6 @@ export type Settings = {
   musicFadeOut: boolean;
   musicFadeDuration: number;
   favoriteFonts: string[];
-  youtubeApiKey: string;
   favoriteSongs: MusicLibrarySong[];
   installedSongs: MusicLibrarySong[];
 };

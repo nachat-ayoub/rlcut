@@ -82,9 +82,9 @@ not execute or trust filenames supplied by the service.
 
 ### YouTube discovery boundary
 
-The desktop library may use the official YouTube Data API for search metadata
-and the official embedded player for auditioning a result. It must not download,
-extract, cache, or separate audio from YouTube. A YouTube result can instead be
+The desktop library uses `rusty_ytdl` for metadata-only YouTube search and the
+official embedded player for auditioning a result. It does not download, extract,
+cache, or separate audio from YouTube. A YouTube result can instead be
 matched to a local audio file the user owns or is licensed to use. rlcut remembers
 that association as an installed item, supports favorites, and can reuse the
 local file offline. The future catalog backend can replace that manual match only

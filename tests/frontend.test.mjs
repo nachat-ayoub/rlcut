@@ -54,9 +54,10 @@ test('timeline effects expose fast placement and contextual controls', () => {
   for (const label of ['Black &amp; white','Impact flash','Timeline range','Whole clip','Resize the effect directly on the timeline','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
 });
 
-test('music library explains YouTube setup and keeps local audio available', () => {
-  const html = renderToStaticMarkup(createElement(MusicLibrary, {apiKey:'',favorites:[],installed:[],onApiKeyChange:()=>{},onFavoritesChange:()=>{},onInstalledChange:()=>{},onClose:()=>{},onChooseLocal:async()=>null,onUseInstalled:async()=>false}));
-  for (const label of ['Find your soundtrack','Search songs, edits, phonk, creators','YouTube API key','Connect YouTube search','Choose local audio','Favorites','0 installed locally']) assert.match(html, new RegExp(label));
+test('music library exposes native YouTube search and saved views', () => {
+  const html = renderToStaticMarkup(createElement(MusicLibrary, {favorites:[],installed:[],onFavoritesChange:()=>{},onInstalledChange:()=>{},onClose:()=>{},onChooseLocal:async()=>null,onUseInstalled:async()=>false}));
+  for (const label of ['Find your soundtrack','Search songs, edits, phonk, creators','Choose local audio','Favorites','Downloaded','rusty_ytdl']) assert.match(html, new RegExp(label));
+  assert.doesNotMatch(html, /API key/);
 });
 
 test('black-and-white preview filters rendered video without backdrop filters', () => {

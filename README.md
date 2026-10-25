@@ -26,9 +26,9 @@ auto-saved custom presets; import/export validated JSON. Export full clips as
 H.264 MP4 with edited source audio and music mixed to AAC, progress/ETA, cancellation
 and output opening.
 
-The music-lane add button opens a library with official YouTube metadata search,
-embedded auditioning, view counts, favorites, and installed-state badges. YouTube
-results are matched to local audio the user is authorized to use; rlcut remembers
+The music-lane add button opens a library with local `rusty_ytdl` YouTube search,
+official embedded auditioning, view counts, favorites, and downloaded-state filters.
+No API key is required. Search results can be matched to local audio; rlcut remembers
 that association for one-click offline reuse. Curated beat-drop markers and the
 separate licensed catalog backend remain specified in the
 [edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md).

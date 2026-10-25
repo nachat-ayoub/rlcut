@@ -1,7 +1,7 @@
 use crate::{
     model::{ExportOptions, MusicFile, MusicTrack, Preset, Segment, Video},
     presets,
-    settings::{self, Store},
+    settings::{self, LibrarySong, Store},
     video::{
         binaries::Binaries,
         export::{self, Job, Progress},
@@ -176,6 +176,62 @@ pub async fn import_music_path(
 ) -> Result<MusicFile, String> {
     let binaries = state.binaries.clone();
     blocking(move || metadata::probe_music(&binaries, &PathBuf::from(path))).await
+}
+
+fn limited(value: String, max: usize) -> String {
+    value.chars().take(max).collect()
+}
+
+#[tauri::command]
+pub async fn search_youtube(query: String) -> Result<Vec<LibrarySong>, String> {
+    use rusty_ytdl::search::{SearchOptions, SearchResult, SearchType, YouTube};
+
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("Enter something to search for".into());
+    }
+    if query.chars().count() > 200 || query.chars().any(char::is_control) {
+        return Err("Search must be 200 characters or fewer".into());
+    }
+
+    let youtube =
+        YouTube::new().map_err(|error| format!("Could not start YouTube search: {error}"))?;
+    let options = SearchOptions {
+        limit: 18,
+        search_type: SearchType::Video,
+        safe_search: false,
+    };
+    let results = youtube
+        .search(query, Some(&options))
+        .await
+        .map_err(|error| format!("YouTube search failed: {error}"))?;
+
+    Ok(results
+        .into_iter()
+        .filter_map(|result| match result {
+            SearchResult::Video(video) if !video.id.is_empty() => {
+                let thumbnail = video
+                    .thumbnails
+                    .iter()
+                    .max_by_key(|thumbnail| thumbnail.width.saturating_mul(thumbnail.height))
+                    .map(|thumbnail| thumbnail.url.clone())
+                    .unwrap_or_else(|| {
+                        format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", video.id)
+                    });
+                Some(LibrarySong {
+                    id: limited(video.id, 32),
+                    title: limited(video.title, 500),
+                    channel: limited(video.channel.name, 300),
+                    thumbnail: limited(thumbnail, 2_000),
+                    views: video.views,
+                    duration: video.duration as f64 / 1_000.,
+                    local_path: None,
+                    local_name: None,
+                })
+            }
+            _ => None,
+        })
+        .collect())
 }
 #[tauri::command]
 pub async fn music_waveform(state: State<'_, AppState>, path: String) -> Result<Vec<f32>, String> {
