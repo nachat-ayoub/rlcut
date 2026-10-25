@@ -8,6 +8,7 @@ const { Composition } = await import('../src/components/Composition.tsx');
 const { Timeline } = await import('../src/components/Timeline.tsx');
 const { FlashInspector } = await import('../src/components/FlashInspector.tsx');
 const { ProjectHome } = await import('../src/components/ProjectHome.tsx');
+const { MusicLibrary } = await import('../src/components/MusicLibrary.tsx');
 
 test('duplicating presets preserves all values and isolates nested edits', () => {
   const original = structuredClone(classic), copy = copyPreset(classic);
@@ -48,9 +49,14 @@ test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () 
 });
 
 test('timeline effects expose fast placement and contextual controls', () => {
-  const effect = { id:'fx', kind:'darkGray', timing:'clip', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
+  const effect = { id:'fx', kind:'darkGray', timing:'duration', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
   const inspector = renderToStaticMarkup(createElement(FlashInspector, { value:effect, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
-  for (const label of ['Black &amp; white','Impact flash','Custom duration','Whole clip','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
+  for (const label of ['Black &amp; white','Impact flash','Timeline range','Whole clip','Resize the effect directly on the timeline','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
+});
+
+test('music library explains YouTube setup and keeps local audio available', () => {
+  const html = renderToStaticMarkup(createElement(MusicLibrary, {apiKey:'',favorites:[],installed:[],onApiKeyChange:()=>{},onFavoritesChange:()=>{},onInstalledChange:()=>{},onClose:()=>{},onChooseLocal:async()=>null,onUseInstalled:async()=>false}));
+  for (const label of ['Find your soundtrack','Search songs, edits, phonk, creators','YouTube API key','Connect YouTube search','Choose local audio','Favorites','0 installed locally']) assert.match(html, new RegExp(label));
 });
 
 test('black-and-white preview filters rendered video without backdrop filters', () => {

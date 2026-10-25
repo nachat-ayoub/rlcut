@@ -299,13 +299,7 @@ impl FlashEffect {
                 || effect.time < 0.
                 || !effect.duration.is_finite()
                 || effect.duration < 0.08
-                || (effect.timing == EffectTiming::Duration
-                    && effect.duration
-                        > if effect.kind == EffectKind::Flash {
-                            1.5
-                        } else {
-                            10.
-                        })
+                || (effect.kind == EffectKind::Flash && effect.duration > 1.5)
                 || effect.time + effect.duration > timeline_duration + 0.001
                 || !effect.intensity.is_finite()
                 || !(0.05..=1.).contains(&effect.intensity)
@@ -565,6 +559,23 @@ mod tests {
         assert!(Segment::validate_all(&segments, 1.).is_err());
         segments[0].volume = 2.01;
         assert!(Segment::validate_all(&segments, 1.).is_err());
+    }
+    #[test]
+    fn black_and_white_can_span_the_full_timeline() {
+        let mut effect = FlashEffect {
+            id: "effect".into(),
+            kind: EffectKind::DarkGray,
+            timing: EffectTiming::Duration,
+            scope: EffectScope::Video,
+            time: 0.,
+            duration: 60.,
+            intensity: 1.,
+            color: "#ffffff".into(),
+            easing: BoostEasing::Ease,
+        };
+        FlashEffect::validate_all(std::slice::from_ref(&effect), 60.).unwrap();
+        effect.kind = EffectKind::Flash;
+        assert!(FlashEffect::validate_all(&[effect], 60.).is_err());
     }
     #[cfg(feature = "serialization")]
     #[test]

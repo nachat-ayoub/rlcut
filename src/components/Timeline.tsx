@@ -290,7 +290,10 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       setEffectPreview(next); return;
     }
     if (state.mode === 'move') next.time = Math.max(0, Math.min(editedDuration - next.duration, state.value.time + delta));
-    else next.duration = Math.max(.08, Math.min(state.value.kind === 'flash' ? 1.5 : 10, editedDuration - next.time, state.value.duration + delta));
+    else {
+      const maximum = state.value.kind === 'flash' ? Math.min(1.5, editedDuration - next.time) : editedDuration - next.time;
+      next.duration = Math.max(.08, Math.min(maximum, state.value.duration + delta));
+    }
     if (!event.altKey) {
       const edge = state.mode === 'move' ? next.time : next.time + next.duration;
       const candidates = unique([
@@ -301,7 +304,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       const snapped = nearest(edge, candidates);
       if (snapped != null) {
         if (state.mode === 'move') next.time = Math.max(0, Math.min(editedDuration - next.duration, snapped));
-        else next.duration = Math.max(.08, Math.min(1.5, snapped - next.time));
+        else next.duration = Math.max(.08, Math.min(next.kind === 'flash' ? 1.5 : editedDuration - next.time, snapped - next.time));
       }
     }
     setEffectPreview(next);

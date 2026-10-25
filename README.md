@@ -26,10 +26,12 @@ auto-saved custom presets; import/export validated JSON. Export full clips as
 H.264 MP4 with edited source audio and music mixed to AAC, progress/ETA, cancellation
 and output opening.
 
-Future music search, curated beat-drop/hit markers, marker-to-highlight snapping,
-offline caching and audio mixing are specified in the
-[edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md). The catalog backend
-will remain separate from the desktop application.
+The music-lane add button opens a library with official YouTube metadata search,
+embedded auditioning, view counts, favorites, and installed-state badges. YouTube
+results are matched to local audio the user is authorized to use; rlcut remembers
+that association for one-click offline reuse. Curated beat-drop markers and the
+separate licensed catalog backend remain specified in the
+[edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md).
 
 The reference informed the lower-left circular HUD and blurred framing. Default Preset preserves the complete gameplay frame at 1× as required by the brief; increase gameplay scale (approximately 2.5× for 16:9 input) to approach the enlarged look in the reference. Screenshot captions and player controls are not added. The default boost crop is an initial guess and should be corrected for your HUD.
 
@@ -79,7 +81,7 @@ Browser mode explicitly reports that native video actions require the desktop ru
    set selected video-clip volume to 0% when music should replace gameplay audio.
    The diamond marker control targets whichever video or music clip is selected.
    Clip-body trims preview their ripple layout live so peak-to-peak snapping is visible before release. Timeline editing tools use compact icon controls with accessible labels and tooltips.
-6. Add **Impact flash** or **Black & white** effects from the effects lane at the playhead. Impact Flash fades over its chosen duration; Black & White can use a custom duration or cover the entire video clip containing it. Either effect can target only the video composition or every layer. Drag an effect to retime it, resize duration effects, select one to tune it, or press Delete to remove it. The live preview and export use the same timing and layer order. Configure the boost entrance in **Boost HUD** and music fade in **Music**. Both effects are part of normal timeline playback, so play or seek through the edited beginning/end to judge them before exporting. The HUD starts with its right edge 5 output pixels left of the frame while Y stays fixed. Entrance settings are part of the selected preset, including preset JSON import/export; music fade defaults to 0.5 seconds. Set resolution, FPS, folder and an `.mp4` filename, then export. The last export folder is remembered and new imports default to the `-edit.mp4` suffix. Existing videos are never overwritten.
+6. Add **Impact flash** or **Black & white** effects from the effects lane at the playhead. Impact Flash fades over its chosen duration; Black & White can use a freely resizable timeline range with no artificial maximum or cover the entire video clip containing it. Either effect can target only the video composition or every layer. Drag an effect to retime it, resize duration effects, select one to tune it, or press Delete to remove it. The live preview and export use the same timing and layer order. Configure the boost entrance in **Boost HUD** and music fade in **Music**. Both effects are part of normal timeline playback, so play or seek through the edited beginning/end to judge them before exporting. The HUD starts with its right edge 5 output pixels left of the frame while Y stays fixed. Entrance settings are part of the selected preset, including preset JSON import/export; music fade defaults to 0.5 seconds. Set resolution, FPS, folder and an `.mp4` filename, then export. The last export folder is remembered and new imports default to the `-edit.mp4` suffix. Existing videos are never overwritten.
 
 Ctrl/⌘ O imports; Ctrl/⌘ E exports; ←/→ steps one nominal frame; Shift ←/→ jumps one second; Escape closes a dialog. VFR stepping uses nominal timestamps rather than indexed decoder frames.
 

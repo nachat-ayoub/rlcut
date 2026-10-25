@@ -22,6 +22,26 @@ pub struct Settings {
     pub music_fade_duration: f64,
     #[serde(default)]
     pub favorite_fonts: Vec<String>,
+    #[serde(default)]
+    pub youtube_api_key: String,
+    #[serde(default)]
+    pub favorite_songs: Vec<LibrarySong>,
+    #[serde(default)]
+    pub installed_songs: Vec<LibrarySong>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LibrarySong {
+    pub id: String,
+    pub title: String,
+    pub channel: String,
+    pub thumbnail: String,
+    pub views: u64,
+    pub duration: f64,
+    #[serde(default)]
+    pub local_path: Option<String>,
+    #[serde(default)]
+    pub local_name: Option<String>,
 }
 fn default_wait_for_preview() -> bool {
     true
@@ -41,6 +61,9 @@ impl Default for Settings {
             music_fade_out: false,
             music_fade_duration: default_music_fade_duration(),
             favorite_fonts: Vec::new(),
+            youtube_api_key: String::new(),
+            favorite_songs: Vec::new(),
+            installed_songs: Vec::new(),
         }
     }
 }
@@ -120,6 +143,34 @@ impl Store {
                 .any(|font| font.len() > 200)
         {
             return Err("Too many favorite fonts".into());
+        }
+        if self.settings.youtube_api_key.len() > 256 {
+            return Err("YouTube API key is too long".into());
+        }
+        let songs_valid = |songs: &[LibrarySong], installed: bool| {
+            songs.len() <= 500
+                && songs.iter().all(|song| {
+                    !song.id.is_empty()
+                        && song.id.len() <= 32
+                        && song.title.len() <= 500
+                        && song.channel.len() <= 300
+                        && song.thumbnail.len() <= 2_000
+                        && song.duration.is_finite()
+                        && song.duration >= 0.
+                        && song
+                            .local_path
+                            .as_ref()
+                            .map_or(!installed, |path| path.len() <= 4_096)
+                        && song
+                            .local_name
+                            .as_ref()
+                            .is_none_or(|name| name.len() <= 500)
+                })
+        };
+        if !songs_valid(&self.settings.favorite_songs, false)
+            || !songs_valid(&self.settings.installed_songs, true)
+        {
+            return Err("Music library settings are invalid".into());
         }
         Ok(())
     }

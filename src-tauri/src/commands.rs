@@ -170,6 +170,14 @@ pub async fn pick_music(state: State<'_, AppState>) -> Result<Option<MusicFile>,
     .await
 }
 #[tauri::command]
+pub async fn import_music_path(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<MusicFile, String> {
+    let binaries = state.binaries.clone();
+    blocking(move || metadata::probe_music(&binaries, &PathBuf::from(path))).await
+}
+#[tauri::command]
 pub async fn music_waveform(state: State<'_, AppState>, path: String) -> Result<Vec<f32>, String> {
     let binaries = state.binaries.clone();
     blocking(move || metadata::audio_waveform(&binaries, &PathBuf::from(path))).await

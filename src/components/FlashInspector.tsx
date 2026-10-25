@@ -28,15 +28,16 @@ export function FlashInspector({ value, onChange, onDelete, onPreview }: {
         <button className={value.kind === 'flash' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'flash', timing: 'duration', duration: Math.min(1.5, value.duration) })}>Impact flash</button>
         <button className={value.kind === 'darkGray' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'darkGray' })}>Black & white</button>
       </div>
-      <div className="flash-presets" role="group" aria-label="Effect style">
+      {value.kind === 'flash' && <div className="flash-presets" role="group" aria-label="Effect style">
         {styles.map(style => <button key={style.label} className={Math.abs(value.intensity - style.intensity) < .01 && Math.abs(value.duration - style.duration) < .01 ? 'active' : ''} onClick={() => onChange({ ...value, intensity: style.intensity, duration: style.duration, easing: style.easing })}>{style.label}</button>)}
-      </div>
+      </div>}
       <Slider label={value.kind === 'flash' ? 'Intensity' : 'Strength'} value={value.intensity} min={.05} max={1} step={.01} defaultValue={.82} onChange={intensity => onChange({ ...value, intensity })} suffix="×" />
       {value.kind === 'darkGray' && <div className="flash-kind" role="group" aria-label="Black and white duration">
-        <button className={value.timing === 'duration' ? 'active' : ''} onClick={() => onChange({ ...value, timing: 'duration', duration: Math.min(10, value.duration) })}>Custom duration</button>
+        <button className={value.timing === 'duration' ? 'active' : ''} onClick={() => onChange({ ...value, timing: 'duration' })}>Timeline range</button>
         <button className={value.timing === 'clip' ? 'active' : ''} onClick={() => onChange({ ...value, timing: 'clip' })}>Whole clip</button>
       </div>}
-      {value.timing === 'duration' && <Slider label="Duration" value={value.duration} min={.08} max={value.kind === 'flash' ? 1.5 : 10} step={.01} defaultValue={.45} onChange={duration => onChange({ ...value, duration })} suffix="s" />}
+      {value.kind === 'flash' && value.timing === 'duration' && <Slider label="Duration" value={value.duration} min={.08} max={1.5} step={.01} defaultValue={.45} onChange={duration => onChange({ ...value, duration })} suffix="s" />}
+      {value.kind === 'darkGray' && value.timing === 'duration' && <p className="help-text">Resize the effect directly on the timeline. It can span the full edit.</p>}
       {value.kind === 'flash' && <label className="field">Fade curve<Dropdown label="Effect fade curve" value={value.easing} onChange={easing => onChange({ ...value, easing: easing as FlashEffect['easing'] })} options={[
         { value: 'easeOut', label: 'Quick hit · recommended' },
         { value: 'ease', label: 'Smooth' },

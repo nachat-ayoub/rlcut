@@ -57,6 +57,9 @@ export type Settings = {
   musicFadeOut: boolean;
   musicFadeDuration: number;
   favoriteFonts: string[];
+  youtubeApiKey: string;
+  favoriteSongs: MusicLibrarySong[];
+  installedSongs: MusicLibrarySong[];
 };
 export type Store = {
   version: number;
@@ -95,6 +98,16 @@ export type MusicFile = {
   name: string;
   duration: number;
   waveform: number[];
+};
+export type MusicLibrarySong = {
+  id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  views: number;
+  duration: number;
+  localPath?: string;
+  localName?: string;
 };
 export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | null };
 export type TrackMarkers = {
