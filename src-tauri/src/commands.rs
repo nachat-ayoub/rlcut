@@ -233,6 +233,62 @@ pub async fn search_youtube(query: String) -> Result<Vec<LibrarySong>, String> {
         })
         .collect())
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YouTubeAudioPreview {
+    url: String,
+    mime: String,
+}
+
+#[tauri::command]
+pub async fn youtube_audio_preview(id: String) -> Result<YouTubeAudioPreview, String> {
+    use rusty_ytdl::{
+        choose_format, Video as YouTubeVideo, VideoOptions, VideoQuality, VideoSearchOptions,
+    };
+
+    if id.len() != 11
+        || !id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("Invalid YouTube video ID".into());
+    }
+
+    let mp4_options = VideoOptions {
+        quality: VideoQuality::Highest,
+        filter: VideoSearchOptions::Custom(Arc::new(|format| {
+            format.has_audio && !format.has_video && format.mime_type.container == "mp4"
+        })),
+        ..Default::default()
+    };
+    let video = YouTubeVideo::new_with_options(&id, mp4_options.clone())
+        .map_err(|error| format!("Could not prepare audio preview: {error}"))?;
+    let info = video
+        .get_info()
+        .await
+        .map_err(|error| format!("Could not load audio preview: {error}"))?;
+    let format = choose_format(&info.formats, &mp4_options)
+        .or_else(|_| {
+            choose_format(
+                &info.formats,
+                &VideoOptions {
+                    quality: VideoQuality::HighestAudio,
+                    filter: VideoSearchOptions::Audio,
+                    ..Default::default()
+                },
+            )
+        })
+        .map_err(|error| format!("No playable audio preview is available: {error}"))?;
+
+    if format.url.is_empty() || !format.url.starts_with("https://") {
+        return Err("YouTube returned an invalid audio preview URL".into());
+    }
+    Ok(YouTubeAudioPreview {
+        url: format.url,
+        mime: format.mime_type.mime.essence_str().to_string(),
+    })
+}
 #[tauri::command]
 pub async fn music_waveform(state: State<'_, AppState>, path: String) -> Result<Vec<f32>, String> {
     let binaries = state.binaries.clone();

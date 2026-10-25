@@ -27,8 +27,8 @@ H.264 MP4 with edited source audio and music mixed to AAC, progress/ETA, cancell
 and output opening.
 
 The music-lane add button opens a library with local `rusty_ytdl` YouTube search,
-official embedded auditioning, view counts, favorites, and downloaded-state filters.
-No API key is required. Search results can be matched to local audio; rlcut remembers
+audio-only streaming previews, view counts, favorites, and downloaded-state filters.
+No API key is required. Preview URLs remain temporary and in memory. Search results can be matched to local audio; rlcut remembers
 that association for one-click offline reuse. Curated beat-drop markers and the
 separate licensed catalog backend remain specified in the
 [edit music library roadmap](docs/MUSIC_LIBRARY_ROADMAP.md).

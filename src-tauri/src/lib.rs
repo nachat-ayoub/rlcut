@@ -28,6 +28,7 @@ pub fn run() {
             commands::pick_music,
             commands::import_music_path,
             commands::search_youtube,
+            commands::youtube_audio_preview,
             commands::music_waveform,
             commands::pick_folder,
             commands::project_thumbnails,
