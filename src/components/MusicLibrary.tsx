@@ -6,6 +6,10 @@ function clock(value: number) {
   const hours = Math.floor(value / 3600), minutes = Math.floor(value / 60) % 60, seconds = Math.floor(value) % 60;
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
+function youtubeEmbed(id: string) {
+  const origin = typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol) ? window.location.origin : 'http://tauri.localhost';
+  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&playsinline=1&rel=0&origin=${encodeURIComponent(origin)}`;
+}
 
 export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstalledChange, onClose, onChooseLocal, onUseInstalled }: {
   favorites: MusicLibrarySong[];
@@ -85,7 +89,7 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
         </section>
         <aside className="music-audition">
           {selected ? <>
-            <div className="youtube-player">{playingId === selected.id ? <iframe key={`${selected.id}-${playerVersion}`} src={`https://www.youtube-nocookie.com/embed/${selected.id}?autoplay=1&playsinline=1&rel=0`} title={`Preview ${selected.title}`} allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : <button className="youtube-player-poster" aria-label={`Play ${selected.title}`} onClick={() => play(selected)}><img src={selected.thumbnail} alt="" /><span><Play size={22} fill="currentColor" /></span><small>Play preview</small></button>}</div>
+            <div className="youtube-player">{playingId === selected.id ? <iframe key={`${selected.id}-${playerVersion}`} src={youtubeEmbed(selected.id)} title={`Preview ${selected.title}`} referrerPolicy="origin" allow="accelerometer; autoplay; encrypted-media; picture-in-picture" allowFullScreen /> : <button className="youtube-player-poster" aria-label={`Play ${selected.title}`} onClick={() => play(selected)}><img src={selected.thumbnail} alt="" /><span><Play size={22} fill="currentColor" /></span><small>Play preview</small></button>}</div>
             <div className="music-audition-copy"><small>SELECTED TRACK</small><strong>{selected.title}</strong><span>{selected.channel}</span></div>
             <button className="primary" onClick={() => void installSelected()}>{selected.localPath ? <CheckCircle2 size={16} /> : <FolderOpen size={16} />}{selected.localPath ? 'Use downloaded audio' : 'Match local audio file'}</button>
             <p>{selected.localPath ? `${selected.localName || 'Local audio'} is available for this edit.` : 'Search and preview happen in rlcut. Match a local audio file you can use and rlcut will remember it for one-click reuse.'}</p>
