@@ -42,6 +42,8 @@ pub struct LibrarySong {
     pub views: u64,
     pub duration: f64,
     #[serde(default)]
+    pub is_short: bool,
+    #[serde(default)]
     pub local_path: Option<String>,
     #[serde(default)]
     pub local_name: Option<String>,

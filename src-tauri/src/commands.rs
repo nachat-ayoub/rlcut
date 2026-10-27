@@ -10,7 +10,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -190,7 +190,7 @@ fn limited(value: String, max: usize) -> String {
 }
 
 #[tauri::command]
-pub async fn search_youtube(query: String) -> Result<Vec<LibrarySong>, String> {
+pub async fn search_youtube(query: String, shorts_only: bool) -> Result<Vec<LibrarySong>, String> {
     use rusty_ytdl::search::{SearchOptions, SearchResult, SearchType, YouTube};
 
     let query = query.trim();
@@ -204,40 +204,70 @@ pub async fn search_youtube(query: String) -> Result<Vec<LibrarySong>, String> {
     let youtube =
         YouTube::new().map_err(|error| format!("Could not start YouTube search: {error}"))?;
     let options = SearchOptions {
-        limit: 18,
+        limit: if shorts_only { 18 } else { 12 },
         search_type: SearchType::Video,
         safe_search: false,
     };
-    let results = youtube
-        .search(query, Some(&options))
-        .await
-        .map_err(|error| format!("YouTube search failed: {error}"))?;
+    let mut batches = Vec::new();
+    if !shorts_only {
+        batches.push((
+            youtube
+                .search(query, Some(&options))
+                .await
+                .map_err(|error| format!("YouTube search failed: {error}"))?,
+            false,
+        ));
+    }
+    // rusty_ytdl parses standard video renderers but not YouTube's dedicated
+    // Shorts shelf. A second #shorts search makes those videos part of the
+    // default result set and powers the explicit Shorts-only scope.
+    let shorts_query = format!("{query} #shorts");
+    let shorts_options = SearchOptions {
+        limit: if shorts_only { 24 } else { 10 },
+        search_type: SearchType::Video,
+        safe_search: false,
+    };
+    match youtube.search(&shorts_query, Some(&shorts_options)).await {
+        Ok(results) => batches.push((results, true)),
+        Err(error) if shorts_only => return Err(format!("YouTube Shorts search failed: {error}")),
+        Err(_) => {}
+    }
 
-    Ok(results
+    let mut seen = HashSet::new();
+    Ok(batches
         .into_iter()
-        .filter_map(|result| match result {
-            SearchResult::Video(video) if !video.id.is_empty() => {
-                let thumbnail = video
-                    .thumbnails
-                    .iter()
-                    .max_by_key(|thumbnail| thumbnail.width.saturating_mul(thumbnail.height))
-                    .map(|thumbnail| thumbnail.url.clone())
-                    .unwrap_or_else(|| {
-                        format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", video.id)
-                    });
-                Some(LibrarySong {
-                    id: limited(video.id, 32),
-                    title: limited(video.title, 500),
-                    channel: limited(video.channel.name, 300),
-                    thumbnail: limited(thumbnail, 2_000),
-                    views: video.views,
-                    duration: video.duration as f64 / 1_000.,
-                    local_path: None,
-                    local_name: None,
-                })
-            }
-            _ => None,
+        .flat_map(|(results, shorts_search)| {
+            results.into_iter().filter_map(move |result| match result {
+                SearchResult::Video(video) if !video.id.is_empty() => {
+                    let is_short = shorts_search && video.duration <= 180_000;
+                    if shorts_only && !is_short {
+                        return None;
+                    }
+                    let thumbnail = video
+                        .thumbnails
+                        .iter()
+                        .max_by_key(|thumbnail| thumbnail.width.saturating_mul(thumbnail.height))
+                        .map(|thumbnail| thumbnail.url.clone())
+                        .unwrap_or_else(|| {
+                            format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", video.id)
+                        });
+                    Some(LibrarySong {
+                        id: limited(video.id, 32),
+                        title: limited(video.title, 500),
+                        channel: limited(video.channel.name, 300),
+                        thumbnail: limited(thumbnail, 2_000),
+                        views: video.views,
+                        duration: video.duration as f64 / 1_000.,
+                        is_short,
+                        local_path: None,
+                        local_name: None,
+                    })
+                }
+                _ => None,
+            })
         })
+        .filter(|song| seen.insert(song.id.clone()))
+        .take(18)
         .collect())
 }
 
@@ -259,6 +289,7 @@ fn cached_audio(cache: &Path, id: &str) -> Option<(PathBuf, String)> {
     [
         ("m4a", "audio/mp4"),
         ("webm", "audio/webm"),
+        ("mp3", "audio/mpeg"),
         ("ogg", "audio/ogg"),
         ("opus", "audio/ogg"),
     ]
@@ -269,6 +300,79 @@ fn cached_audio(cache: &Path, id: &str) -> Option<(PathBuf, String)> {
             .is_ok_and(|metadata| metadata.len() > 0)
             .then(|| (path, mime.into()))
     })
+}
+
+fn yt_dlp_path() -> Option<PathBuf> {
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    let mut candidates = Vec::new();
+    if let Some(path) = std::env::var_os("RLCUT_YT_DLP") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(folder) = executable.parent() {
+            candidates.push(folder.join(format!("yt-dlp{suffix}")));
+        }
+    }
+    candidates.push(
+        PathBuf::from(option_env!("CARGO_MANIFEST_DIR").unwrap_or("src-tauri"))
+            .join("../.runtime/yt-dlp")
+            .join(format!("yt-dlp{suffix}")),
+    );
+    if let Some(paths) = std::env::var_os("PATH") {
+        candidates.extend(
+            std::env::split_paths(&paths).map(|folder| folder.join(format!("yt-dlp{suffix}"))),
+        );
+    }
+    candidates.into_iter().find(|path| {
+        path.is_file()
+            && crate::video::binaries::command(path)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+    })
+}
+
+async fn download_youtube_audio_with_ytdlp(
+    cache: PathBuf,
+    id: String,
+    executable: PathBuf,
+) -> Result<(PathBuf, String), String> {
+    blocking(move || {
+        fs::create_dir_all(&cache)
+            .map_err(|error| format!("Could not prepare the audio preview cache: {error}"))?;
+        let template = cache.join(format!("{id}.%(ext)s"));
+        let url = format!("https://www.youtube.com/watch?v={id}");
+        let result = crate::video::binaries::command(&executable)
+            .args([
+                "--no-config",
+                "--no-playlist",
+                "--no-part",
+                "--no-cache-dir",
+                "--quiet",
+                "--no-warnings",
+                "--format",
+                "bestaudio[ext=m4a]/bestaudio",
+                "--output",
+            ])
+            .arg(&template)
+            .arg(url)
+            .output()
+            .map_err(|error| format!("Could not start yt-dlp: {error}"))?;
+        if !result.status.success() {
+            let details = String::from_utf8_lossy(&result.stderr).trim().to_string();
+            return Err(if details.is_empty() {
+                "yt-dlp could not download this video's audio".into()
+            } else {
+                format!("yt-dlp could not download this video's audio: {details}")
+            });
+        }
+        cached_audio(&cache, &id)
+            .ok_or_else(|| "yt-dlp finished without creating a playable audio file".into())
+    })
+    .await
 }
 
 async fn download_youtube_audio(cache: PathBuf, id: String) -> Result<(PathBuf, String), String> {
@@ -282,13 +386,22 @@ async fn download_youtube_audio(cache: PathBuf, id: String) -> Result<(PathBuf, 
     if let Some(cached) = cached_audio(&cache, &id) {
         return Ok(cached);
     }
+    let yt_dlp_error = if let Some(executable) = yt_dlp_path() {
+        match download_youtube_audio_with_ytdlp(cache.clone(), id.clone(), executable).await {
+            Ok(downloaded) => return Ok(downloaded),
+            Err(error) => Some(error),
+        }
+    } else {
+        None
+    };
     fs::create_dir_all(&cache)
         .map_err(|error| format!("Could not prepare the audio preview cache: {error}"))?;
     let options = VideoOptions {
         quality: VideoQuality::HighestAudio,
-        filter: VideoSearchOptions::Custom(Arc::new(|format| {
-            format.has_audio && !format.has_video && !format.url.is_empty()
-        })),
+        // `rusty_ytdl` may leave the signed URL empty until its deciphering
+        // pass. Filtering on `format.url` here incorrectly removed every
+        // otherwise valid audio stream and caused `Format not found`.
+        filter: VideoSearchOptions::Audio,
         ..Default::default()
     };
     let video = YouTubeVideo::new_with_options(&id, options.clone())
@@ -314,7 +427,13 @@ async fn download_youtube_audio(cache: PathBuf, id: String) -> Result<(PathBuf, 
     let partial = cache.join(format!(".{id}-{nonce}.partial"));
     if let Err(error) = video.download(&partial).await {
         let _ = fs::remove_file(&partial);
-        return Err(format!("Could not prepare this audio preview: {error}"));
+        let fallback = yt_dlp_error.map_or_else(
+            || "Install a current yt-dlp build or restart rlcut through scripts/run.sh.".into(),
+            |details| format!("yt-dlp fallback also failed: {details}"),
+        );
+        return Err(format!(
+            "Could not prepare this audio preview: {error}. {fallback}"
+        ));
     }
     if output.exists() {
         let _ = fs::remove_file(&partial);
@@ -1172,4 +1291,54 @@ pub async fn playback_close(state: State<'_, AppState>, session: u64) -> Result<
 #[tauri::command]
 pub fn cancel_preparation(state: State<AppState>) {
     state.decoder_epoch.fetch_add(1, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+mod youtube_audio_tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires live YouTube network access"]
+    fn downloads_playable_audio_by_video_id() {
+        let root = std::env::temp_dir().join(format!(
+            "rlcut-youtube-audio-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        let id =
+            std::env::var("RLCUT_YOUTUBE_TEST_ID").unwrap_or_else(|_| "jNQXAC9IVRw".to_string());
+        let result = tauri::async_runtime::block_on(download_youtube_audio(root.clone(), id));
+        let (path, mime) = result.expect("YouTube audio should download");
+        let size = path.metadata().expect("downloaded file metadata").len();
+        assert!(
+            size > 16_384,
+            "downloaded audio is unexpectedly small: {size}"
+        );
+        assert!(mime.starts_with("audio/"), "unexpected MIME type: {mime}");
+        assert!(path.starts_with(&root), "download escaped its cache folder");
+        let ffprobe = std::env::var_os("RLCUT_FFPROBE").unwrap_or_else(|| "ffprobe".into());
+        let probe = std::process::Command::new(ffprobe)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(&path)
+            .output()
+            .expect("ffprobe should inspect downloaded audio");
+        assert!(probe.status.success(), "ffprobe rejected downloaded audio");
+        assert!(
+            !String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
+            "downloaded file has no decodable audio stream"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
 }

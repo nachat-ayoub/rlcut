@@ -2214,6 +2214,10 @@ progress::-moz-progress-bar {
 .music-library-search-row form:focus-within { border-color:#75578a; box-shadow:0 0 0 3px #9f72bd12 }
 .music-library-search-row input { min-width:0; flex:1; height:100%; padding:0; border:0; outline:0; background:transparent; box-shadow:none; color:#eee8f1; font-size:10px }
 .music-library-search-row form>button { height:30px; padding:0 16px; border-radius:7px }
+.music-search-scope { flex:none; display:flex; align-items:center; gap:2px; padding:2px; border:1px solid #302a35; border-radius:7px; background:#17141b }
+.music-search-scope button { height:25px; padding:0 9px; border:0; border-radius:5px; color:#79717f; background:transparent; font-size:8px }
+.music-search-scope button:hover { color:#c8bdce; background:#211c26 }
+.music-search-scope button.active { color:#eadcf2; background:#392944; box-shadow:inset 0 0 0 1px #5c446a }
 .music-library-tabs { min-height:42px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 18px 9px; border-bottom:1px solid #29252e; background:#151319 }
 .music-library-tabs>div { display:flex; align-items:center; gap:4px }
 .music-library-tabs button { min-height:29px; gap:6px; padding:0 10px; border:1px solid transparent; border-radius:7px; color:#827a88; background:transparent }
@@ -2236,6 +2240,7 @@ progress::-moz-progress-bar {
 .music-result-copy>span { width:100%; overflow:hidden; color:#847c89; font-size:8px; text-overflow:ellipsis; white-space:nowrap }
 .music-result-meta { display:flex!important; align-items:center; gap:11px }
 .music-result-copy small { display:flex; align-items:center; gap:4px; color:#716977; font-size:7px }
+.music-result-copy .music-short-badge { width:auto; padding:2px 5px; border:1px solid #5c4369; border-radius:5px; color:#cfa8e7; background:#2c2034; font-weight:700; letter-spacing:.3px; text-transform:uppercase }
 .music-result-copy em { display:flex; align-items:center; gap:4px; color:#756e7b; font-size:7px; font-style:normal }
 .music-result-copy em.installed { color:#79b99b }
 .music-result-favorite { position:absolute; z-index:2; top:9px; right:9px; width:27px; height:27px; display:grid; place-items:center; border:1px solid #403747; border-radius:7px; color:#9c8ba7; background:#131116df; opacity:0; transition:opacity .15s,color .15s,background .15s }
@@ -2277,6 +2282,7 @@ progress::-moz-progress-bar {
 .music-library-error { grid-column:1/-1; padding:10px 12px; border:1px solid #72434c; border-radius:7px; color:#d9a9b0; background:#2b181d; font-size:9px; line-height:1.5 }
 @media(max-width:800px) {
   .music-library-search-row { grid-template-columns:1fr }
+  .music-search-scope { display:none }
   .music-library-content { grid-template-columns:1fr }
   .music-audition { display:none }
   .music-results { border-right:0 }

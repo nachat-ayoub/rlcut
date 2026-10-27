@@ -106,6 +106,7 @@ export type MusicLibrarySong = {
   thumbnail: string;
   views: number;
   duration: number;
+  isShort?: boolean;
   localPath?: string;
   localName?: string;
 };

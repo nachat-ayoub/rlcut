@@ -27,18 +27,17 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [view, setView] = useState<'search' | 'favorites' | 'downloaded'>('search');
+  const [shortsOnly, setShortsOnly] = useState(false);
   const [loading, setLoading] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState<string | null>(null);
   const request = useRef(0);
   const previewRequest = useRef(0);
   const clearPreview = () => { previewRequest.current += 1; setPlayingId(null); setAudioPreview(null); setPreviewLoading(false); setPreviewError(null); };
-  const search = async (event: FormEvent) => {
-    event.preventDefault();
-    const term = query.trim();
+  const runSearch = async (term: string, onlyShorts: boolean) => {
     if (!term) return;
     const id = ++request.current;
     setLoading(true); setError(null);
     try {
-      const next = await invoke<MusicLibrarySong[]>('search_youtube', { query: term });
+      const next = await invoke<MusicLibrarySong[]>('search_youtube', { query: term, shortsOnly: onlyShorts });
       if (request.current !== id) return;
       const installedById = new Map(installed.map(item => [item.id, item]));
       const merged = next.map(item => ({ ...item, localPath: installedById.get(item.id)?.localPath, localName: installedById.get(item.id)?.localName }));
@@ -48,6 +47,12 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
     } finally {
       if (request.current === id) setLoading(false);
     }
+  };
+  const search = (event: FormEvent) => { event.preventDefault(); void runSearch(query.trim(), shortsOnly); };
+  const changeSearchScope = (onlyShorts: boolean) => {
+    setShortsOnly(onlyShorts);
+    const term = query.trim();
+    if (term) void runSearch(term, onlyShorts);
   };
   const importLocal = async () => { if (await onChooseLocal()) onClose(); };
   const installSelected = async () => {
@@ -99,8 +104,8 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
         <div><button className="music-local-button" onClick={() => void importLocal()}><FolderOpen size={15} />Choose local audio</button><button aria-label="Close music library" onClick={onClose}><X size={19} /></button></div>
       </header>
       <div className="music-library-search-row">
-        <form onSubmit={event => void search(event)}>
-          <Search size={16} /><input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder="Search songs, edits, phonk, creators…" aria-label="Search YouTube" /><button className="primary" disabled={loading || !query.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : 'Search'}</button>
+        <form onSubmit={search}>
+          <Search size={16} /><input value={query} maxLength={200} onChange={event => setQuery(event.target.value)} placeholder="Search songs, edits, phonk, creators…" aria-label="Search YouTube" /><div className="music-search-scope" aria-label="YouTube search scope"><button type="button" className={!shortsOnly ? 'active' : ''} onClick={() => changeSearchScope(false)}>Videos + Shorts</button><button type="button" className={shortsOnly ? 'active' : ''} onClick={() => changeSearchScope(true)}>Shorts only</button></div><button className="primary" disabled={loading || !query.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : 'Search'}</button>
         </form>
       </div>
       <div className="music-library-tabs"><div><button className={view === 'search' ? 'active' : ''} onClick={() => show('search')}><Search size={13} />Search</button><button className={view === 'favorites' ? 'active' : ''} onClick={() => show('favorites')}><Star size={13} fill={view === 'favorites' ? 'currentColor' : 'none'} />Favorites <span>{favorites.length}</span></button><button className={view === 'downloaded' ? 'active' : ''} onClick={() => show('downloaded')}><Download size={13} />Downloaded <span>{installed.length}</span></button></div><small>{visible.length} {visible.length === 1 ? 'result' : 'results'}</small></div>
@@ -110,7 +115,7 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
           {!loading && !error && !visible.length && <div className="music-results-empty">{view === 'favorites' ? <Star size={24} /> : view === 'downloaded' ? <Download size={24} /> : <Search size={24} />}<strong>{view === 'favorites' ? 'No favorite songs yet' : view === 'downloaded' ? 'No downloaded songs yet' : 'Search YouTube'}</strong><span>{view === 'favorites' ? 'Use the star on any result to keep it here.' : view === 'downloaded' ? 'Match a search result with a local audio file to reuse it here.' : 'Preview a result, favorite it, or match it with audio you can use.'}</span></div>}
           {visible.map(item => <article key={item.id} className={`music-result ${selected?.id === item.id ? 'selected' : ''}`}>
             <div className="music-result-cover"><img src={item.thumbnail} alt="" /><button aria-label={`Play ${item.title}`} onClick={() => void play(item)}>{previewLoading && playingId === item.id ? <LoaderCircle className="spin" size={15} /> : <Play size={15} fill="currentColor" />}</button>{item.duration > 0 && <small>{clock(item.duration)}</small>}</div>
-            <button className="music-result-copy" onClick={() => select(item)}><strong>{item.title}</strong><span>{item.channel}</span><span className="music-result-meta"><small><Eye size={11} />{Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(item.views)} views</small><em className={item.localPath ? 'installed' : ''}>{item.localPath ? <CheckCircle2 size={10} /> : <FolderOpen size={10} />}{item.localPath ? 'Downloaded' : 'Local file needed'}</em></span></button>
+            <button className="music-result-copy" onClick={() => select(item)}><strong>{item.title}</strong><span>{item.channel}</span><span className="music-result-meta"><small><Eye size={11} />{Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(item.views)} views</small>{item.isShort && <small className="music-short-badge">Short</small>}<em className={item.localPath ? 'installed' : ''}>{item.localPath ? <CheckCircle2 size={10} /> : <FolderOpen size={10} />}{item.localPath ? 'Downloaded' : 'Local file needed'}</em></span></button>
             <button className={`music-result-favorite ${favorites.some(song => song.id === item.id) ? 'active' : ''}`} title={favorites.some(song => song.id === item.id) ? 'Remove from favorites' : 'Add to favorites'} aria-label={favorites.some(song => song.id === item.id) ? `Remove ${item.title} from favorites` : `Favorite ${item.title}`} onClick={() => toggleFavorite(item)}><Star size={13} fill={favorites.some(song => song.id === item.id) ? 'currentColor' : 'none'} /></button>
           </article>)}
         </section>

@@ -70,8 +70,17 @@ prepare_dev_ai() {
     echo 'rlcut: AI preparation failed; starting without AI export. Retry by restarting dev mode.' >&2
   fi
 }
+prepare_dev_ytdlp() {
+  [[ "${RLCUT_SKIP_YTDLP_SETUP:-0}" != 1 ]] || return 0
+  if bash scripts/prepare-ytdlp.sh; then
+    export RLCUT_YT_DLP="$PWD/.runtime/yt-dlp/yt-dlp"
+  else
+    echo 'rlcut: YouTube helper preparation failed; local music files remain available.' >&2
+  fi
+}
 case "$action" in
   dev)
+    prepare_dev_ytdlp
     prepare_dev_ai
     if [[ "${RLCUT_CONTAINER:-}" == 1 ]]; then
       # A private bus supports GTK dialogs without mounting the host session bus.
