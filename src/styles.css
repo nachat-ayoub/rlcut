@@ -823,8 +823,8 @@ h1 {
 }
 .track-labels { z-index:6; min-width:0; display:grid; grid-template-rows:22px 42px 39px 39px 15px; overflow:hidden; background:#151219; border-right:1px solid #352d3d }
 .ruler-corner { min-width:0 }
-.ruler-corner { display:grid; place-items:center }
-.ruler-corner button { display:flex; align-items:center; justify-content:center; gap:1px; width:34px; height:18px; padding:0; border:1px dashed #4d3d58; border-radius:4px; color:#ad8bc4; background:#1c1721 }
+.ruler-corner { display:flex; align-items:center; justify-content:center; gap:2px }
+.ruler-corner button { display:flex; align-items:center; justify-content:center; gap:0; width:21px; height:18px; padding:0; border:1px dashed #4d3d58; border-radius:4px; color:#ad8bc4; background:#1c1721 }
 .ruler-corner button:hover { color:#e1c9f5; border-color:#8666a0; background:#2a2032 }
 .track-label { min-width:0; overflow:hidden; display:flex; align-items:center; justify-content:center; padding:0; border-top:1px solid #29232f; color:#b8a6c7 }
 .track-label svg { color:#9d77bf; flex:none }
@@ -2164,8 +2164,11 @@ progress::-moz-progress-bar {
 .timeline-effect.selected { z-index:4; border-color:#e0a9e2; box-shadow:inset 0 0 0 1px #e0a9e244,0 0 8px #bc77bd33 }
 .timeline-effect>span { position:absolute; inset:0 7px; display:flex; align-items:center; gap:5px; overflow:hidden; white-space:nowrap; pointer-events:none }
 .timeline-effect b { overflow:hidden; font-size:8px; font-weight:600; text-overflow:ellipsis }
-.effect-duration-handle { position:absolute; z-index:2; top:-1px; right:-1px; bottom:-1px; width:8px; min-width:8px; padding:0; border:1px solid #e0a9e2; border-radius:3px; background:#946998; cursor:ew-resize; opacity:0 }
+.effect-duration-handle { position:absolute; z-index:2; top:-1px; bottom:-1px; width:8px; min-width:8px; padding:0; border:1px solid #e0a9e2; border-radius:3px; background:#946998; cursor:ew-resize; opacity:0 }
+.effect-duration-handle.start { left:-1px }
+.effect-duration-handle.end { right:-1px }
 .timeline-effect:hover .effect-duration-handle,.timeline-effect.selected .effect-duration-handle { opacity:1 }
+.effects-track.drop-target { box-shadow:inset 0 0 0 1px #b982c5; background:#241a28 }
 .track-add.effect { top:4px; height:27px; border-color:#59425c; color:#bf91c1; background:#261c29 }
 .flash-action.active { color:#f0c6f1!important; background:#4a304c!important }
 .flash-inspector { display:grid; gap:10px }
@@ -2256,6 +2259,8 @@ progress::-moz-progress-bar {
 .music-audition-copy strong { overflow:hidden; color:#f2edf4; font-size:13px; text-overflow:ellipsis; white-space:nowrap }
 .music-audition-copy span { color:#817988; font-size:9px }
 .music-audition>.primary { min-height:38px; gap:7px }
+.music-match-local { min-height:31px; margin-top:7px; justify-content:center; gap:6px; border-color:#3c3442; color:#9e93a5; background:#19161d }
+.music-match-local:hover { border-color:#5b4966; color:#d7cadc; background:#211b26 }
 .music-audition>p { margin:10px 4px 0; color:#6f6875; font-size:8px; line-height:1.55 }
 .music-results-empty,.music-audition-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:9px; color:#6f6877; text-align:center }
 .music-results-empty { grid-column:1/-1; min-height:310px }

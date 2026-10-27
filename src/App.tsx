@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import type { FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TextOverlay, TextTrack, TrackMarkers, Video } from './types';
+import type { EffectTrack, FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TextOverlay, TextTrack, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { fileUrl, invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -36,7 +36,7 @@ const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | n
   music: Array.isArray(value?.music) ? value.music.filter(Number.isFinite) : Number.isFinite(value?.music) ? [value!.music as number] : [],
 });
 const normalizeFlash = (value: Partial<FlashEffect>): FlashEffect => ({
-  id: value.id || crypto.randomUUID(), kind: value.kind === 'darkGray' ? 'darkGray' : 'flash', timing: value.timing === 'clip' ? 'clip' : 'duration', scope: value.scope === 'video' ? 'video' : 'all', time: Number.isFinite(value.time) ? Math.max(0, value.time!) : 0,
+  id: value.id || crypto.randomUUID(), trackId: value.trackId || '', kind: value.kind === 'darkGray' ? 'darkGray' : 'flash', timing: value.timing === 'clip' ? 'clip' : 'duration', scope: value.scope === 'video' ? 'video' : 'all', time: Number.isFinite(value.time) ? Math.max(0, value.time!) : 0,
   duration: Number.isFinite(value.duration) ? Math.max(.08, value.duration!) : .45,
   intensity: Number.isFinite(value.intensity) ? Math.max(.05, Math.min(1, value.intensity!)) : .82,
   color: /^#[0-9a-f]{6}$/i.test(value.color ?? '') ? value.color! : '#ffffff', easing: value.easing ?? 'easeOut',
@@ -67,7 +67,7 @@ const normalizeText = (value: Partial<TextOverlay>): TextOverlay => ({
   shadowEnabled: value.shadowEnabled ?? true, shadowColor: value.shadowColor || '#000000', shadowBlur: value.shadowBlur ?? 8, shadowX: value.shadowX ?? 0,
   shadowY: value.shadowY ?? 6, fadeIn: value.fadeIn ?? null, fadeOut: value.fadeOut ?? null,
 });
-type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers; effects: FlashEffect[]; texts: TextOverlay[]; textTracks: TextTrack[] };
+type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers; effects: FlashEffect[]; effectTracks: EffectTrack[]; texts: TextOverlay[]; textTracks: TextTrack[] };
 const migratePresetNames = (store: Store): Store => {
   const renamed: Preset[] = [];
   for (const preset of store.presets) {
@@ -76,9 +76,10 @@ const migratePresetNames = (store: Store): Store => {
   }
   return {
     ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [], favoriteSongs: store.settings.favoriteSongs ?? [], installedSongs: store.settings.installedSongs ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
-      const sourceTexts = project.texts ?? [];
+      const sourceTexts = project.texts ?? [], sourceEffects = project.effects ?? [];
       const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
-      return { ...project, markers: normalizeMarkers(project.markers as never), effects: (project.effects ?? []).map(normalizeFlash), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
+      const effectTracks = project.effectTracks?.length ? project.effectTracks : sourceEffects.length ? [{ id: crypto.randomUUID(), name: 'Effects 1' }] : [];
+      return { ...project, markers: normalizeMarkers(project.markers as never), effectTracks, effects: sourceEffects.map(effect => normalizeFlash({ ...effect, trackId: effect.trackId || effectTracks[0]?.id })), textTracks, texts: sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || textTracks[0]?.id })), segments: project.segments.map(segment => ({ ...segment, volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 })) };
     })
   };
 };
@@ -104,7 +105,7 @@ export default function App() {
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
-  const [effects, setEffects] = useState<FlashEffect[]>([]), [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
+  const [effects, setEffects] = useState<FlashEffect[]>([]), [effectTracks, setEffectTracks] = useState<EffectTrack[]>([]), [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
   const [texts, setTexts] = useState<TextOverlay[]>([]), [textTracks, setTextTracks] = useState<TextTrack[]>([]), [selectedTextId, setSelectedTextId] = useState<string | null>(null), [fonts, setFonts] = useState<FontOption[]>([]);
   const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
@@ -118,7 +119,7 @@ export default function App() {
   const preset = store.activePreset === 'classic' ? classic : store.presets.find(p => p.id === store.activePreset) ?? classic;
   const allPresets = [classic, ...store.presets];
   const exporting = progress?.phase === 'running';
-  const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), texts: structuredClone(texts), textTracks: structuredClone(textTracks) }), [preset, segments, music, markers, effects, texts, textTracks]);
+  const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks) }), [preset, segments, music, markers, effects, effectTracks, texts, textTracks]);
   const report = useCallback((e: unknown) => setError(message(e)), []);
   useEffect(() => {
     if (initialized.current)
@@ -182,6 +183,7 @@ export default function App() {
     setMusic(structuredClone(snapshot.music));
     setMarkers(structuredClone(snapshot.markers));
     setEffects(structuredClone(snapshot.effects));
+    setEffectTracks(structuredClone(snapshot.effectTracks));
     setTexts(structuredClone(snapshot.texts));
     setTextTracks(structuredClone(snapshot.textTracks));
     const value = editedToSource(snapshot.segments, sourceToEdited(snapshot.segments, playhead.current));
@@ -249,7 +251,7 @@ export default function App() {
           return segment;
         });
         setSegments(initial); setSelectedClip({ track: 'video', id: initial[0].id });
-        setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null);
+        setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null);
         undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
         playhead.current = 0; setTimestamp(0); setBefore(false);
         setOutputName(`${filename(imported[0].path).replace(/\.[^.]+$/, '')}-edit.mp4`);
@@ -299,6 +301,13 @@ export default function App() {
   const useInstalledMusic = useCallback(async (path: string): Promise<boolean> => {
     try { const selected = await invoke<MusicFile>('import_music_path', { path }); applyMusic(selected); return true; }
     catch (error) { report(error); return false; }
+  }, [applyMusic, report]);
+  const saveOnlineMusic = useCallback(async (song: MusicLibrarySong): Promise<MusicFile | null> => {
+    try {
+      const selected = await invoke<MusicFile | null>('save_youtube_audio', { id: song.id, title: song.title });
+      if (selected) { applyMusic(selected); setNotice('Audio saved for offline use'); }
+      return selected;
+    } catch (error) { report(error); return null; }
   }, [applyMusic, report]);
   useEffect(() => {
     let disposed = false; let off: (() => void) | undefined; onDrop(paths => void importPaths(paths)).then(fn => {
@@ -398,7 +407,11 @@ export default function App() {
         exportTexts.push({ ...text, ...rendered });
       }
       if (aiEnhance || aiUpscale) setPlaying(false);
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, effects, folder, filename: outputName } };
+      const effectOrder = new Map(effectTracks.map((track, index) => [track.id, index]));
+      const exportEffects = [...effects]
+        .sort((a, b) => (effectOrder.get(b.trackId) ?? -1) - (effectOrder.get(a.trackId) ?? -1) || a.time - b.time)
+        .map(({ trackId, ...effect }) => { void trackId; return effect; });
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, effects: exportEffects, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -415,7 +428,7 @@ export default function App() {
     finally {
       setExportStarting(false);
     }
-  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, effects, texts, textTracks, quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, init?.aiAvailable, report, rememberOutputFolder]);
+  }, [video, videoSources, exporting, exportStarting, outputFolder, preset, segments, effects, effectTracks, texts, textTracks, quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, outputName, music, store.settings.musicFadeOut, store.settings.musicFadeDuration, init?.aiAvailable, report, rememberOutputFolder]);
   useEffect(() => {
     function keyboard(e: KeyboardEvent) {
       const input = (e.target as HTMLElement).closest('input,textarea,select,[role=combobox],[contenteditable]'); if (e.key === 'Escape') {
@@ -481,10 +494,10 @@ export default function App() {
   }
   function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
   function resetProject() {
-    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
+    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); playhead.current = 0; undoStack.current = []; redoStack.current = [];
   }
   function projectSnapshot(id: string, name: string, createdAt: number): Project {
-    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps: fps === 120 ? 60 : fps, outputFolder, outputName };
+    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps: fps === 120 ? 60 : fps, outputFolder, outputName };
   }
   function saveCurrentProject(showNotice = true) {
     if (!video || !videoSources.length) return;
@@ -502,7 +515,7 @@ export default function App() {
     const timer = setTimeout(() => saveCurrentProject(false), 650);
     return () => clearTimeout(timer);
     // Project edits are saved after a short idle period.
-  }, [currentProjectId, video, videoSources, segments, music, markers, effects, texts, textTracks, preset, quality, fps, outputFolder, outputName, proxyPreparing]);
+  }, [currentProjectId, video, videoSources, segments, music, markers, effects, effectTracks, texts, textTracks, preset, quality, fps, outputFolder, outputName, proxyPreparing]);
   async function openProject(project: Project) {
     if (!project.videoPaths.length) { setError('This project has no video files.'); return; }
     const ticket = ++importRevision.current; setProjectLoading(true); setError(null); setPlaying(false);
@@ -517,7 +530,8 @@ export default function App() {
       const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
       setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
       const sourceTexts = project.texts ?? [], restoredTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
-      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, waveform: project.music.waveform ?? [], segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setEffects((project.effects ?? []).map(effect => fitFlash(fitEffectToClip(normalizeFlash(effect), restoredSegments), editedDuration(restoredSegments)))); setSelectedEffectId(null); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
+      const sourceEffects = project.effects ?? [], restoredEffectTracks = project.effectTracks?.length ? project.effectTracks : sourceEffects.length ? [{ id: crypto.randomUUID(), name: 'Effects 1' }] : [];
+      setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, waveform: project.music.waveform ?? [], segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setEffectTracks(restoredEffectTracks); setEffects(sourceEffects.map(effect => fitFlash(fitEffectToClip(normalizeFlash({ ...effect, trackId: effect.trackId || restoredEffectTracks[0]?.id }), restoredSegments), editedDuration(restoredSegments)))); setSelectedEffectId(null); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
   }
@@ -544,6 +558,8 @@ export default function App() {
   const b = preset.boost;
   const textTrackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
   const stackedTexts = [...texts].sort((a, b) => (textTrackOrder.get(b.trackId) ?? -1) - (textTrackOrder.get(a.trackId) ?? -1));
+  const effectTrackOrder = new Map(effectTracks.map((track, index) => [track.id, index]));
+  const stackedEffects = [...effects].sort((a, b) => (effectTrackOrder.get(b.trackId) ?? -1) - (effectTrackOrder.get(a.trackId) ?? -1) || a.time - b.time);
   const selectedText = texts.find(text => text.id === selectedTextId) ?? null;
   const editText = useCallback((next: TextOverlay) => {
     const now = performance.now();
@@ -563,12 +579,25 @@ export default function App() {
   }, [segments, fonts, snapshot]);
   const removeText = useCallback((id: string) => { undoStack.current.push(snapshot()); redoStack.current = []; setTexts(current => current.filter(text => text.id !== id)); setSelectedTextId(null); }, [snapshot]);
   const splitText = useCallback((id: string, at: number) => { undoStack.current.push(snapshot()); redoStack.current = []; setTexts(current => current.flatMap(text => text.id !== id ? [text] : [{ ...text, end: at }, { ...text, id: crypto.randomUUID(), start: at }])); }, [snapshot]);
-  const addEffect = useCallback((at: number) => {
+  const addEffectTrack = useCallback(() => {
+    undoStack.current.push(snapshot()); redoStack.current = [];
+    const number = effectTracks.reduce((max, track) => Math.max(max, Number(track.name.match(/\d+$/)?.[0] ?? 0)), 0) + 1;
+    setEffectTracks(current => [{ id: crypto.randomUUID(), name: `Effects ${number}` }, ...current]);
+  }, [snapshot, effectTracks]);
+  const removeEffectTrack = useCallback((id: string) => {
+    undoStack.current.push(snapshot()); redoStack.current = [];
+    setEffectTracks(current => current.filter(track => track.id !== id));
+    setEffects(current => current.filter(effect => effect.trackId !== id));
+    if (effects.some(effect => effect.id === selectedEffectId && effect.trackId === id)) setSelectedEffectId(null);
+  }, [snapshot, effects, selectedEffectId]);
+  const addEffect = useCallback((at: number, requestedTrackId?: string) => {
     const total = editedDuration(segments); if (total < .08) return;
     undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
-    const next = fitFlash(normalizeFlash({ id: crypto.randomUUID(), time: at }), total);
+    const trackId = requestedTrackId || effects.find(effect => effect.id === selectedEffectId)?.trackId || effectTracks[0]?.id || crypto.randomUUID();
+    if (!effectTracks.some(track => track.id === trackId)) setEffectTracks(current => [{ id: trackId, name: 'Effects 1' }, ...current]);
+    const next = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId, time: at }), total);
     setEffects(current => [...current, next].sort((a, b) => a.time - b.time)); setSelectedEffectId(next.id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); setPlaying(false);
-  }, [segments, snapshot]);
+  }, [segments, snapshot, effects, selectedEffectId, effectTracks]);
   const editEffect = useCallback((next: FlashEffect) => {
     const now = performance.now();
     if (!lastEffectEdit.current || now - lastEffectEdit.current > 350) { undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); }
@@ -704,8 +733,8 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} effects={effects} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) { setSelectedTextId(null); setSelectedEffectId(null); setSelectedClip(null); } }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} markers={markers} effects={effects} selectedEffectId={selectedEffectId} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} onEffectAdd={addEffect} onEffectEdit={editEffect} onEffectDelete={removeEffect} onEffectSelect={id => { lastEffectEdit.current = 0; setSelectedEffectId(id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); }} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => { setPlaying(false); setModal('music'); }} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedEffectId(null); setLayer(null); setSelectedClip({ track, id }); }}
+      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} effects={stackedEffects} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) { setSelectedTextId(null); setSelectedEffectId(null); setSelectedClip(null); } }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} markers={markers} effects={effects} effectTracks={effectTracks} selectedEffectId={selectedEffectId} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} onEffectAdd={addEffect} onEffectEdit={editEffect} onEffectDelete={removeEffect} onAddEffectTrack={addEffectTrack} onDeleteEffectTrack={removeEffectTrack} onEffectSelect={id => { lastEffectEdit.current = 0; setSelectedEffectId(id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); }} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => { setPlaying(false); setModal('music'); }} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedEffectId(null); setLayer(null); setSelectedClip({ track, id }); }}
         onMarker={(track, values) => {
           if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
           undoStack.current.push(snapshot());
@@ -943,7 +972,7 @@ export default function App() {
       </div>
     </div>}
     {modal === 'crop' && preview && <CropEditor aspect={(video?.width ?? 16) / (video?.height ?? 9)} source={preview.source} preset={preset} onCancel={() => setModal(null)} onApply={boost => { edit('boost', boost); setBefore(false); setModal(null); }} />}
-    {modal === 'music' && <MusicLibrary favorites={store.settings.favoriteSongs} installed={store.settings.installedSongs} onFavoritesChange={(favoriteSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, favoriteSongs } }))} onInstalledChange={(installedSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, installedSongs } }))} onChooseLocal={importMusic} onUseInstalled={useInstalledMusic} onClose={() => setModal(null)} />}
+    {modal === 'music' && <MusicLibrary favorites={store.settings.favoriteSongs} installed={store.settings.installedSongs} onFavoritesChange={(favoriteSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, favoriteSongs } }))} onInstalledChange={(installedSongs: MusicLibrarySong[]) => setStore(current => ({ ...current, settings: { ...current.settings, installedSongs } }))} onChooseLocal={importMusic} onUseInstalled={useInstalledMusic} onSaveOnline={saveOnlineMusic} onClose={() => setModal(null)} />}
     {(modal === 'presets' || modal === 'settings' || modal === 'shortcuts') && <div className="modal-backdrop">
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
         <div className="modal-heading">

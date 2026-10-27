@@ -115,6 +115,7 @@ export type TrackMarkers = {
 };
 export type FlashEffect = {
   id: string;
+  trackId: string;
   kind: 'flash' | 'darkGray';
   timing: 'duration' | 'clip';
   scope: 'video' | 'all';
@@ -124,6 +125,7 @@ export type FlashEffect = {
   color: string;
   easing: BoostEasing;
 };
+export type EffectTrack = { id: string; name: string };
 export type TextTrack = { id: string; name: string };
 export type TextOverlay = {
   id: string;
@@ -181,6 +183,7 @@ export type Project = {
   music: MusicTrack | null;
   markers: TrackMarkers;
   effects?: FlashEffect[];
+  effectTracks?: EffectTrack[];
   texts?: TextOverlay[];
   textTracks?: TextTrack[];
   preset: Preset;

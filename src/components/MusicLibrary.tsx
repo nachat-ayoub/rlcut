@@ -8,7 +8,7 @@ function clock(value: number) {
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstalledChange, onClose, onChooseLocal, onUseInstalled }: {
+export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstalledChange, onClose, onChooseLocal, onUseInstalled, onSaveOnline }: {
   favorites: MusicLibrarySong[];
   installed: MusicLibrarySong[];
   onFavoritesChange: (value: MusicLibrarySong[]) => void;
@@ -16,6 +16,7 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
   onClose: () => void;
   onChooseLocal: () => Promise<MusicFile | null>;
   onUseInstalled: (path: string) => Promise<boolean>;
+  onSaveOnline: (song: MusicLibrarySong) => Promise<MusicFile | null>;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicLibrarySong[]>([]);
@@ -26,7 +27,7 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [view, setView] = useState<'search' | 'favorites' | 'downloaded'>('search');
-  const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false), [saving, setSaving] = useState(false), [error, setError] = useState<string | null>(null);
   const request = useRef(0);
   const previewRequest = useRef(0);
   const clearPreview = () => { previewRequest.current += 1; setPlayingId(null); setAudioPreview(null); setPreviewLoading(false); setPreviewError(null); };
@@ -52,6 +53,17 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
   const installSelected = async () => {
     if (!selected) return;
     if (selected.localPath) { if (await onUseInstalled(selected.localPath)) onClose(); return; }
+    setSaving(true); setError(null);
+    try {
+      const file = await onSaveOnline(selected);
+      if (!file) return;
+      const linked = { ...selected, localPath: file.path, localName: file.name };
+      onInstalledChange([...installed.filter(item => item.id !== linked.id), linked]);
+      onClose();
+    } finally { setSaving(false); }
+  };
+  const matchSelected = async () => {
+    if (!selected) return;
     const file = await onChooseLocal();
     if (!file) return;
     const linked = { ...selected, localPath: file.path, localName: file.name };
@@ -106,8 +118,9 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
             <div className="youtube-player">{previewLoading && playingId === selected.id ? <div className="youtube-player-poster loading"><img src={selected.thumbnail} alt="" /><span><LoaderCircle className="spin" size={22} /></span><small>Preparing audio preview…</small></div> : audioPreview?.id === selected.id ? <div className="youtube-audio-preview"><img src={selected.thumbnail} alt="" /><div><small>AUDIO PREVIEW</small><strong>{selected.title}</strong><audio key={`${selected.id}-${playerVersion}`} controls autoPlay preload="auto"><source src={audioPreview.url} type={audioPreview.mime} /></audio></div></div> : <button className="youtube-player-poster" aria-label={`Play ${selected.title}`} onClick={() => void play(selected)}><img src={selected.thumbnail} alt="" /><span><Play size={22} fill="currentColor" /></span><small>Play audio preview</small></button>}</div>
             {previewError && <div className="music-preview-error"><span>{previewError}</span><button onClick={() => void play(selected)}>Try again</button></div>}
             <div className="music-audition-copy"><small>SELECTED TRACK</small><strong>{selected.title}</strong><span>{selected.channel}</span></div>
-            <button className="primary" onClick={() => void installSelected()}>{selected.localPath ? <CheckCircle2 size={16} /> : <FolderOpen size={16} />}{selected.localPath ? 'Use downloaded audio' : 'Match local audio file'}</button>
-            <p>{selected.localPath ? `${selected.localName || 'Local audio'} is available for this edit.` : 'Search and preview happen in rlcut. Match a local audio file you can use and rlcut will remember it for one-click reuse.'}</p>
+            <button className="primary" disabled={saving} onClick={() => void installSelected()}>{saving ? <LoaderCircle className="spin" size={16} /> : selected.localPath ? <CheckCircle2 size={16} /> : <Download size={16} />}{saving ? 'Saving audio…' : selected.localPath ? 'Use downloaded audio' : 'Save offline & use'}</button>
+            {!selected.localPath && <button className="music-match-local" disabled={saving} onClick={() => void matchSelected()}><FolderOpen size={14} />Match an existing audio file</button>}
+            <p>{selected.localPath ? `${selected.localName || 'Local audio'} is available without Wi-Fi.` : 'Choose where to save an M4A copy. rlcut downloads it only after you explicitly confirm the location, then remembers it for offline reuse.'}</p>
           </> : <div className="music-audition-empty"><Play size={24} /><span>Select a result to preview it.</span></div>}
         </aside>
       </div>
