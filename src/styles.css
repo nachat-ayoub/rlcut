@@ -815,7 +815,7 @@ h1 {
   margin-top:6px;
   height:157px;
   display:grid;
-  grid-template-columns:48px minmax(0,1fr);
+  grid-template-columns:76px minmax(0,1fr);
   border:1px solid #302939;
   border-radius:6px;
   overflow:hidden;
@@ -823,9 +823,11 @@ h1 {
 }
 .track-labels { z-index:6; min-width:0; display:grid; grid-template-rows:22px 42px 39px 39px 15px; overflow:hidden; background:#151219; border-right:1px solid #352d3d }
 .ruler-corner { min-width:0 }
-.ruler-corner { display:flex; align-items:center; justify-content:center; gap:2px }
-.ruler-corner button { display:flex; align-items:center; justify-content:center; gap:0; width:21px; height:18px; padding:0; border:1px dashed #4d3d58; border-radius:4px; color:#ad8bc4; background:#1c1721 }
-.ruler-corner button:hover { color:#e1c9f5; border-color:#8666a0; background:#2a2032 }
+.ruler-corner { display:flex; align-items:center; justify-content:center; gap:4px; padding:2px 4px }
+.ruler-corner .add-layer { display:flex; align-items:center; justify-content:center; gap:1px; width:31px; height:18px; padding:0; border:1px solid #44374e; border-radius:5px; color:#b99acb; background:#1c1721 }
+.ruler-corner .add-layer.text { border-color:#31545a; color:#75bdc4; background:#132024 }
+.ruler-corner .add-layer:hover { color:#f1d9ff; border-color:#765b88; background:#30243a }
+.ruler-corner .add-layer.text:hover { color:#d8fbff; border-color:#4d858c; background:#1b3438 }
 .track-label { min-width:0; overflow:hidden; display:flex; align-items:center; justify-content:center; padding:0; border-top:1px solid #29232f; color:#b8a6c7 }
 .track-label svg { color:#9d77bf; flex:none }
 .track-label span { font-size:9px }
@@ -875,10 +877,16 @@ h1 {
 .timeline-segment.text-segment .trim-handle { background:#4b9299; border-color:#94d2d6 }
 .timeline-segment.text-segment .trim-handle::after { border-left-color:#e0ffff }
 .track-label.text svg { color:#67aeb5 }
-.track-label.text { gap:1px; padding:0 2px }
+.track-label.text { padding:0 5px }
 .track-label.text>small { min-width:7px; color:#8d7b98; font-size:7px; text-align:center }
-.track-label.text>button { width:14px; min-width:14px; height:18px; padding:0; display:grid; place-items:center; border:0; color:#8e789c; background:transparent }
-.track-label.text>button:hover { color:#dfc5ef; background:#302439 }
+.layer-track-label { justify-content:space-between; gap:4px; padding:0 5px }
+.layer-kind { min-width:0; display:flex; align-items:center; gap:3px; color:#a890b6 }
+.layer-kind small { color:#776c7e; font-size:6px; font-weight:700; letter-spacing:.3px }
+.track-label.text .layer-kind small { color:#60949a }
+.layer-actions { display:flex; align-items:center; gap:2px; padding:2px; border:1px solid #302938; border-radius:5px; background:#100e14 }
+.layer-actions button { width:20px; min-width:20px; height:20px; padding:0; display:grid; place-items:center; border:0; border-radius:3px; color:#91829b; background:transparent }
+.layer-actions button:first-child:hover { color:#eedcff; background:#3b2b48 }
+.layer-actions button:last-child:hover { color:#c7bacd; background:#29232e }
 .composition-text { position:absolute; z-index:5; min-width:max-content; max-width:90%; display:grid; padding:.08em .18em; white-space:pre-wrap; overflow-wrap:anywhere; cursor:move; user-select:none; touch-action:none; transform-origin:center; border:1px solid transparent; border-radius:3px }
 .composition-text>span { grid-area:1/1; white-space:inherit; overflow-wrap:inherit }
 .composition-text-fill { position:relative; z-index:1 }
@@ -1063,7 +1071,8 @@ h1 {
 .track-marker.music { color:#72d2c2 }
 .track-marker.snapped { color:#6fe2df; filter:drop-shadow(0 0 4px #6fe2df) }
 @media(max-width:900px) {
-  .timeline-editor { grid-template-columns:44px minmax(0,1fr) }
+  .timeline-editor { grid-template-columns:68px minmax(0,1fr) }
+  .layer-kind small { display:none }
   .timecode { display:none }
 }
 .section {
@@ -2155,10 +2164,8 @@ progress::-moz-progress-bar {
 .composition-effect.all-layers { z-index:6 }
 .composition-effect.dark-gray { background:#0000 }
 .effects-track { position:relative; border-bottom:1px solid #2b2432; background:repeating-linear-gradient(90deg,#121017 0 31px,#17121b 32px) }
-.track-label.effects { gap:3px; color:#d4a8d5 }
-.track-label.effects>svg { color:#c48ec6 }
-.track-label.effects>button { width:18px; min-width:18px; height:20px; padding:0; display:grid; place-items:center; border:0; color:#9d799f; background:transparent }
-.track-label.effects>button:hover { color:#f0c7f0; background:#302238 }
+.track-label.effects { color:#d4a8d5 }
+.track-label.effects .layer-kind svg { color:#c48ec6 }
 .timeline-effect { position:absolute; z-index:3; top:3px; height:29px; min-width:13px; overflow:hidden; border:1px solid #855f87; border-radius:4px; background:linear-gradient(90deg,#593d5d,#3d2d43); color:#f1d9f1; cursor:grab; touch-action:none }
 .timeline-effect.dark-gray { border-color:#6f6b78; background:linear-gradient(90deg,#494751,#302f36); color:#e0dde5 }
 .timeline-effect.selected { z-index:4; border-color:#e0a9e2; box-shadow:inset 0 0 0 1px #e0a9e244,0 0 8px #bc77bd33 }

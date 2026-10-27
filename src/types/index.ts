@@ -59,6 +59,7 @@ export type Settings = {
   favoriteFonts: string[];
   favoriteSongs: MusicLibrarySong[];
   installedSongs: MusicLibrarySong[];
+  musicLibraryFolder: string;
 };
 export type Store = {
   version: number;

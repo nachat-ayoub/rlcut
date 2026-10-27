@@ -53,31 +53,38 @@ export async function stampText(text: TextOverlay, width: number, height: number
     const metrics = ctx.measureText('Mg');
     const ascent = metrics.fontBoundingBoxAscent ?? metrics.actualBoundingBoxAscent;
     const descent = metrics.fontBoundingBoxDescent ?? metrics.actualBoundingBoxDescent;
-    const bounds = box.getBoundingClientRect();
-    const node = span.firstChild;
-    const range = document.createRange();
-    const lines: Array<{ text: string; x: number; y: number }> = [];
-    if (node) {
-      let offset = 0, first = 0, top: number | undefined;
-      const add = (end: number) => {
-        if (end <= first) return;
-        range.setStart(node, first); range.setEnd(node, end);
-        const rect = range.getBoundingClientRect();
-        lines.push({
-          text: text.text.slice(first, end).replace(/\n/g, ''), x: rect.left - bounds.left - bounds.width / 2,
-          y: rect.top - bounds.top - bounds.height / 2 + (rect.height - ascent - descent) / 2 + ascent
-        });
-      };
-      for (const char of text.text) {
-        range.setStart(node, offset); range.setEnd(node, offset + char.length);
-        const rect = range.getBoundingClientRect();
-        if (char === '\n') { add(offset); first = offset + 1; top = undefined; }
-        else if (top !== undefined && Math.abs(rect.top - top) > 1) { add(offset); first = offset; top = rect.top; }
-        else top = rect.top;
-        offset += char.length;
+    const letterSpacing = text.letterSpacing * factor;
+    const nativeSpacing = Reflect.has(ctx, 'letterSpacing');
+    const measure = (value: string) => ctx.measureText(value).width + Math.max(0, Array.from(value).length - 1) * letterSpacing;
+    const paddingX = size * .18, paddingY = size * .08;
+    const bounds = { width: text.boxWidth * width, height: 0 };
+    const maxLineWidth = Math.max(size * .5, bounds.width - paddingX * 2);
+    const wrap = (paragraph: string) => {
+      if (!paragraph) return [''];
+      const output: string[] = [];
+      let line = '';
+      for (const character of paragraph) {
+        if (!line || measure(line + character) <= maxLineWidth) { line += character; continue; }
+        const breakAt = line.lastIndexOf(' ');
+        if (breakAt > 0) {
+          output.push(line.slice(0, breakAt));
+          line = `${line.slice(breakAt + 1)}${character}`;
+        } else {
+          output.push(line); line = character;
+        }
       }
-      add(offset);
-    }
+      output.push(line);
+      return output;
+    };
+    const values = text.text.replace(/\r\n?/g, '\n').split('\n').flatMap(wrap);
+    const lineStep = size * text.lineHeight;
+    const textHeight = ascent + descent + Math.max(0, values.length - 1) * lineStep;
+    bounds.height = textHeight + paddingY * 2;
+    const lines = values.map((value, index) => {
+      const valueWidth = measure(value);
+      const x = text.align === 'left' ? -bounds.width / 2 + paddingX : text.align === 'right' ? bounds.width / 2 - paddingX - valueWidth : -valueWidth / 2;
+      return { text: value, x, y: -textHeight / 2 + ascent + index * lineStep };
+    });
     ctx.translate(width * text.x, height * text.y);
     ctx.rotate(text.rotation * Math.PI / 180); ctx.scale(text.scale, text.scale);
     ctx.globalAlpha = 1;
@@ -87,8 +94,6 @@ export async function stampText(text: TextOverlay, width: number, height: number
     }
     ctx.lineJoin = 'round';
     ctx.lineWidth = text.strokeWidth * factor * (text.strokePosition === 'outside' ? 2 : text.strokePosition === 'inside' ? .5 : 1);
-    const letterSpacing = text.letterSpacing * factor;
-    const nativeSpacing = Reflect.has(ctx, 'letterSpacing');
     if (nativeSpacing) (ctx as CanvasRenderingContext2D & { letterSpacing: string }).letterSpacing = `${letterSpacing}px`;
     const draw = (value: string, x: number, y: number, stroke: boolean, target = ctx) => {
       if (nativeSpacing || letterSpacing === 0) {

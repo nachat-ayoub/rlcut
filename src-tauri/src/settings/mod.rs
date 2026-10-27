@@ -29,6 +29,8 @@ pub struct Settings {
     pub favorite_songs: Vec<LibrarySong>,
     #[serde(default)]
     pub installed_songs: Vec<LibrarySong>,
+    #[serde(default)]
+    pub music_library_folder: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -65,6 +67,7 @@ impl Default for Settings {
             youtube_api_key: String::new(),
             favorite_songs: Vec::new(),
             installed_songs: Vec::new(),
+            music_library_folder: String::new(),
         }
     }
 }
@@ -167,6 +170,7 @@ impl Store {
         };
         if !songs_valid(&self.settings.favorite_songs, false)
             || !songs_valid(&self.settings.installed_songs, true)
+            || self.settings.music_library_folder.len() > 4_096
         {
             return Err("Music library settings are invalid".into());
         }

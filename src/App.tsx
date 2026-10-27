@@ -75,7 +75,7 @@ const migratePresetNames = (store: Store): Store => {
     renamed.push(legacy ? { ...preset, name: customPresetName(renamed) } : preset);
   }
   return {
-    ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [], favoriteSongs: store.settings.favoriteSongs ?? [], installedSongs: store.settings.installedSongs ?? [] }, presets: renamed, projects: (store.projects ?? []).map(project => {
+    ...store, settings: { ...store.settings, favoriteFonts: store.settings.favoriteFonts ?? [], favoriteSongs: store.settings.favoriteSongs ?? [], installedSongs: store.settings.installedSongs ?? [], musicLibraryFolder: store.settings.musicLibraryFolder ?? '' }, presets: renamed, projects: (store.projects ?? []).map(project => {
       const sourceTexts = project.texts ?? [], sourceEffects = project.effects ?? [];
       const textTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
       const effectTracks = project.effectTracks?.length ? project.effectTracks : sourceEffects.length ? [{ id: crypto.randomUUID(), name: 'Effects 1' }] : [];
@@ -304,7 +304,13 @@ export default function App() {
   }, [applyMusic, report]);
   const saveOnlineMusic = useCallback(async (song: MusicLibrarySong): Promise<MusicFile | null> => {
     try {
-      const selected = await invoke<MusicFile | null>('save_youtube_audio', { id: song.id, title: song.title });
+      let folder = storeRef.current.settings.musicLibraryFolder;
+      if (!folder) {
+        folder = await invoke<string | null>('pick_folder') ?? '';
+        if (!folder) return null;
+        setStore(current => ({ ...current, settings: { ...current.settings, musicLibraryFolder: folder } }));
+      }
+      const selected = await invoke<MusicFile>('save_youtube_audio', { id: song.id, title: song.title, folder });
       if (selected) { applyMusic(selected); setNotice('Audio saved for offline use'); }
       return selected;
     } catch (error) { report(error); return null; }
@@ -1034,6 +1040,12 @@ export default function App() {
             </button>
           </div>
           </label>
+          <label className="field">Music library folder<div className="folder-picker">
+            <input value={store.settings.musicLibraryFolder} readOnly placeholder="Asked when you save your first song" />
+            <button aria-label="Choose music library folder" onClick={() => void invoke<string | null>('pick_folder').then(folder => {
+              if (folder) setStore(s => ({ ...s, settings: { ...s.settings, musicLibraryFolder: folder } }));
+            }).catch(report)}><FolderOpen size={16} /></button>
+          </div><span className="help-text">Downloaded songs stay here for offline reuse. Change this folder whenever you want.</span></label>
           <div className="modal-actions">
             <button onClick={() => setModal('shortcuts')}><Keyboard size={15} />View shortcuts</button>
             <button onClick={() => {

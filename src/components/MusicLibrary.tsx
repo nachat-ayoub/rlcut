@@ -1,8 +1,8 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { CheckCircle2, Download, Eye, FolderOpen, LoaderCircle, Music2, Play, Search, Star, X } from 'lucide-react';
 import type { MusicFile, MusicLibrarySong } from '../types';
-import { invoke, message } from '../lib/native';
-type AudioPreview = { url: string; mime: string };
+import { fileUrl, invoke, message } from '../lib/native';
+type AudioPreview = { path: string; mime: string };
 function clock(value: number) {
   const hours = Math.floor(value / 3600), minutes = Math.floor(value / 60) % 60, seconds = Math.floor(value) % 60;
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}` : `${minutes}:${String(seconds).padStart(2, '0')}`;
@@ -76,7 +76,8 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
     const token = ++previewRequest.current;
     setSelected(item); setPlayingId(item.id); setAudioPreview(null); setPreviewLoading(true); setPreviewError(null);
     try {
-      const preview = await invoke<AudioPreview>('youtube_audio_preview', { id: item.id });
+      const extension = item.localPath?.split('.').pop()?.toLowerCase();
+      const preview = item.localPath ? { path: item.localPath, mime: extension === 'mp3' ? 'audio/mpeg' : extension === 'ogg' || extension === 'opus' ? 'audio/ogg' : extension === 'wav' ? 'audio/wav' : 'audio/mp4' } : await invoke<AudioPreview>('youtube_audio_preview', { id: item.id });
       if (previewRequest.current !== token) return;
       setAudioPreview({ ...preview, id: item.id }); setPlayerVersion(version => version + 1);
     } catch (reason) {
@@ -115,12 +116,12 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
         </section>
         <aside className="music-audition">
           {selected ? <>
-            <div className="youtube-player">{previewLoading && playingId === selected.id ? <div className="youtube-player-poster loading"><img src={selected.thumbnail} alt="" /><span><LoaderCircle className="spin" size={22} /></span><small>Preparing audio preview…</small></div> : audioPreview?.id === selected.id ? <div className="youtube-audio-preview"><img src={selected.thumbnail} alt="" /><div><small>AUDIO PREVIEW</small><strong>{selected.title}</strong><audio key={`${selected.id}-${playerVersion}`} controls autoPlay preload="auto"><source src={audioPreview.url} type={audioPreview.mime} /></audio></div></div> : <button className="youtube-player-poster" aria-label={`Play ${selected.title}`} onClick={() => void play(selected)}><img src={selected.thumbnail} alt="" /><span><Play size={22} fill="currentColor" /></span><small>Play audio preview</small></button>}</div>
+            <div className="youtube-player">{previewLoading && playingId === selected.id ? <div className="youtube-player-poster loading"><img src={selected.thumbnail} alt="" /><span><LoaderCircle className="spin" size={22} /></span><small>Downloading a temporary preview…</small></div> : audioPreview?.id === selected.id ? <div className="youtube-audio-preview"><img src={selected.thumbnail} alt="" /><div><small>TEMPORARY PREVIEW</small><strong>{selected.title}</strong><audio key={`${selected.id}-${playerVersion}`} controls autoPlay preload="auto"><source src={fileUrl(audioPreview.path)} type={audioPreview.mime} /></audio></div></div> : <button className="youtube-player-poster" aria-label={`Play ${selected.title}`} onClick={() => void play(selected)}><img src={selected.thumbnail} alt="" /><span><Play size={22} fill="currentColor" /></span><small>Play audio preview</small></button>}</div>
             {previewError && <div className="music-preview-error"><span>{previewError}</span><button onClick={() => void play(selected)}>Try again</button></div>}
             <div className="music-audition-copy"><small>SELECTED TRACK</small><strong>{selected.title}</strong><span>{selected.channel}</span></div>
             <button className="primary" disabled={saving} onClick={() => void installSelected()}>{saving ? <LoaderCircle className="spin" size={16} /> : selected.localPath ? <CheckCircle2 size={16} /> : <Download size={16} />}{saving ? 'Saving audio…' : selected.localPath ? 'Use downloaded audio' : 'Save offline & use'}</button>
             {!selected.localPath && <button className="music-match-local" disabled={saving} onClick={() => void matchSelected()}><FolderOpen size={14} />Match an existing audio file</button>}
-            <p>{selected.localPath ? `${selected.localName || 'Local audio'} is available without Wi-Fi.` : 'Choose where to save an M4A copy. rlcut downloads it only after you explicitly confirm the location, then remembers it for offline reuse.'}</p>
+            <p>{selected.localPath ? `${selected.localName || 'Local audio'} is available without Wi-Fi.` : 'Preview files are temporary and removed when rlcut closes. Save the track to your Music Library folder for offline reuse.'}</p>
           </> : <div className="music-audition-empty"><Play size={24} /><span>Select a result to preview it.</span></div>}
         </aside>
       </div>

@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::{
     collections::HashMap,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -22,6 +22,7 @@ use tauri::State;
 pub struct AppState {
     file: PathBuf,
     cache: PathBuf,
+    audio_cache: PathBuf,
     binaries: Binaries,
     videos: Mutex<HashMap<String, Video>>,
     store_lock: Mutex<()>,
@@ -36,6 +37,9 @@ pub struct AppState {
 }
 impl AppState {
     pub fn new(file: PathBuf, cache: PathBuf, binaries: Binaries) -> Self {
+        let audio_cache = cache.join("music-previews");
+        let _ = fs::remove_dir_all(&audio_cache);
+        let _ = fs::create_dir_all(&audio_cache);
         let player = Arc::new(Mutex::new(PlayerSlot {
             session: 0,
             player: None,
@@ -56,6 +60,7 @@ impl AppState {
         Self {
             file,
             cache,
+            audio_cache,
             binaries,
             videos: Mutex::new(HashMap::new()),
             store_lock: Mutex::new(()),
@@ -91,6 +96,7 @@ impl AppState {
                 let _ = handle.join();
             }
         };
+        let _ = fs::remove_dir_all(&self.audio_cache);
     }
     fn video(&self, path: &str) -> Result<Video, String> {
         self.videos
@@ -238,56 +244,98 @@ pub async fn search_youtube(query: String) -> Result<Vec<LibrarySong>, String> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct YouTubeAudioPreview {
-    url: String,
+    path: String,
     mime: String,
 }
 
-#[tauri::command]
-pub async fn youtube_audio_preview(id: String) -> Result<YouTubeAudioPreview, String> {
+fn valid_youtube_id(id: &str) -> bool {
+    id.len() == 11
+        && id
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
+fn cached_audio(cache: &Path, id: &str) -> Option<(PathBuf, String)> {
+    [
+        ("m4a", "audio/mp4"),
+        ("webm", "audio/webm"),
+        ("ogg", "audio/ogg"),
+        ("opus", "audio/ogg"),
+    ]
+    .into_iter()
+    .find_map(|(extension, mime)| {
+        let path = cache.join(format!("{id}.{extension}"));
+        path.metadata()
+            .is_ok_and(|metadata| metadata.len() > 0)
+            .then(|| (path, mime.into()))
+    })
+}
+
+async fn download_youtube_audio(cache: PathBuf, id: String) -> Result<(PathBuf, String), String> {
     use rusty_ytdl::{
         choose_format, Video as YouTubeVideo, VideoOptions, VideoQuality, VideoSearchOptions,
     };
 
-    if id.len() != 11
-        || !id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
+    if !valid_youtube_id(&id) {
         return Err("Invalid YouTube video ID".into());
     }
-
-    let mp4_options = VideoOptions {
-        quality: VideoQuality::Highest,
+    if let Some(cached) = cached_audio(&cache, &id) {
+        return Ok(cached);
+    }
+    fs::create_dir_all(&cache)
+        .map_err(|error| format!("Could not prepare the audio preview cache: {error}"))?;
+    let options = VideoOptions {
+        quality: VideoQuality::HighestAudio,
         filter: VideoSearchOptions::Custom(Arc::new(|format| {
-            format.has_audio && !format.has_video && format.mime_type.container == "mp4"
+            format.has_audio && !format.has_video && !format.url.is_empty()
         })),
         ..Default::default()
     };
-    let video = YouTubeVideo::new_with_options(&id, mp4_options.clone())
+    let video = YouTubeVideo::new_with_options(&id, options.clone())
         .map_err(|error| format!("Could not prepare audio preview: {error}"))?;
     let info = video
         .get_info()
         .await
         .map_err(|error| format!("Could not load audio preview: {error}"))?;
-    let format = choose_format(&info.formats, &mp4_options)
-        .or_else(|_| {
-            choose_format(
-                &info.formats,
-                &VideoOptions {
-                    quality: VideoQuality::HighestAudio,
-                    filter: VideoSearchOptions::Audio,
-                    ..Default::default()
-                },
-            )
-        })
+    let format = choose_format(&info.formats, &options)
         .map_err(|error| format!("No playable audio preview is available: {error}"))?;
-
-    if format.url.is_empty() || !format.url.starts_with("https://") {
-        return Err("YouTube returned an invalid audio preview URL".into());
+    let container = format.mime_type.container.to_ascii_lowercase();
+    let extension = match container.as_str() {
+        "mp4" => "m4a",
+        "ogg" => "ogg",
+        "opus" => "opus",
+        _ => "webm",
+    };
+    let mime = format.mime_type.mime.essence_str().to_string();
+    let output = cache.join(format!("{id}.{extension}"));
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let partial = cache.join(format!(".{id}-{nonce}.partial"));
+    if let Err(error) = video.download(&partial).await {
+        let _ = fs::remove_file(&partial);
+        return Err(format!("Could not prepare this audio preview: {error}"));
     }
+    if output.exists() {
+        let _ = fs::remove_file(&partial);
+    } else {
+        fs::rename(&partial, &output).map_err(|error| {
+            let _ = fs::remove_file(&partial);
+            format!("Could not finish the audio preview: {error}")
+        })?;
+    }
+    Ok((output, mime))
+}
+
+#[tauri::command]
+pub async fn youtube_audio_preview(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<YouTubeAudioPreview, String> {
+    let (path, mime) = download_youtube_audio(state.audio_cache.clone(), id).await?;
     Ok(YouTubeAudioPreview {
-        url: format.url,
-        mime: format.mime_type.mime.essence_str().to_string(),
+        path: path.to_string_lossy().into_owned(),
+        mime,
     })
 }
 
@@ -296,14 +344,9 @@ pub async fn save_youtube_audio(
     state: State<'_, AppState>,
     id: String,
     title: String,
-) -> Result<Option<MusicFile>, String> {
-    use rusty_ytdl::{Video as YouTubeVideo, VideoOptions, VideoQuality, VideoSearchOptions};
-
-    if id.len() != 11
-        || !id
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
+    folder: String,
+) -> Result<MusicFile, String> {
+    if !valid_youtube_id(&id) {
         return Err("Invalid YouTube video ID".into());
     }
     let safe_name = title
@@ -311,61 +354,66 @@ pub async fn save_youtube_audio(
         .filter(|character| character.is_alphanumeric() || matches!(character, ' ' | '-' | '_'))
         .take(120)
         .collect::<String>();
-    let suggested = format!(
-        "{}.m4a",
-        safe_name
-            .trim()
-            .trim_matches(|character| matches!(character, '.' | '-'))
-            .trim()
-    );
-    let suggested = if suggested == ".m4a" {
-        format!("youtube-{id}.m4a")
+    let stem = safe_name
+        .trim()
+        .trim_matches(|character| matches!(character, '.' | '-'))
+        .trim();
+    let stem = if stem.is_empty() {
+        "YouTube audio"
     } else {
-        suggested
-    };
-    let output = blocking(move || {
-        Ok(rfd::FileDialog::new()
-            .add_filter("M4A audio", &["m4a"])
-            .set_file_name(suggested)
-            .save_file())
-    })
-    .await?;
-    let Some(mut output) = output else {
-        return Ok(None);
-    };
-    if output.extension().and_then(|value| value.to_str()) != Some("m4a") {
-        output.set_extension("m4a");
+        stem
     }
-    let file_name = output
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("audio.m4a");
-    let partial = output.with_file_name(format!(".{file_name}.rlcut-partial"));
-    let options = VideoOptions {
-        quality: VideoQuality::Highest,
-        filter: VideoSearchOptions::Custom(Arc::new(|format| {
-            format.has_audio && !format.has_video && format.mime_type.container == "mp4"
-        })),
-        ..Default::default()
-    };
-    let video = YouTubeVideo::new_with_options(&id, options)
-        .map_err(|error| format!("Could not prepare the audio download: {error}"))?;
-    if let Err(error) = video.download(&partial).await {
-        let _ = fs::remove_file(&partial);
-        return Err(format!("Could not save this audio: {error}"));
+    .to_string();
+    let folder = PathBuf::from(folder);
+    if !folder.is_dir() {
+        return Err("Choose an existing Music Library folder in Settings".into());
     }
-    if output.exists() {
-        fs::remove_file(&output).map_err(|error| {
-            let _ = fs::remove_file(&partial);
-            format!("Could not replace the selected audio file: {error}")
-        })?;
-    }
-    fs::rename(&partial, &output).map_err(|error| {
-        let _ = fs::remove_file(&partial);
-        format!("Could not finish saving the audio file: {error}")
-    })?;
+    let output = folder.join(format!("{stem} [{id}].m4a"));
     let binaries = state.binaries.clone();
-    blocking(move || metadata::probe_music(&binaries, &output).map(Some)).await
+    if output.is_file() {
+        return blocking(move || metadata::probe_music(&binaries, &output)).await;
+    }
+    let (source, mime) = download_youtube_audio(state.audio_cache.clone(), id).await?;
+    blocking(move || {
+        let partial = output.with_file_name(format!(".{stem}.rlcut-partial.m4a"));
+        if mime.contains("mp4") {
+            fs::copy(&source, &partial)
+                .map_err(|error| format!("Could not copy the downloaded audio: {error}"))?;
+        } else {
+            let result = crate::video::binaries::command(binaries.ffmpeg()?)
+                .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
+                .arg(&source)
+                .args([
+                    "-vn",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-movflags",
+                    "+faststart",
+                ])
+                .arg(&partial)
+                .output()
+                .map_err(|error| format!("Could not convert the downloaded audio: {error}"))?;
+            if !result.status.success() {
+                let _ = fs::remove_file(&partial);
+                return Err(format!(
+                    "Could not convert the downloaded audio: {}",
+                    String::from_utf8_lossy(&result.stderr)
+                ));
+            }
+        }
+        if output.exists() {
+            fs::remove_file(&output)
+                .map_err(|error| format!("Could not replace the saved audio: {error}"))?;
+        }
+        fs::rename(&partial, &output).map_err(|error| {
+            let _ = fs::remove_file(&partial);
+            format!("Could not finish saving the audio file: {error}")
+        })?;
+        metadata::probe_music(&binaries, &output)
+    })
+    .await
 }
 #[tauri::command]
 pub async fn music_waveform(state: State<'_, AppState>, path: String) -> Result<Vec<f32>, String> {
