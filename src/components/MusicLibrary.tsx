@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CheckCircle2, Download, Eye, FolderOpen, Headphones, LoaderCircle, Music2, Pause, Play, Search, Star, X } from 'lucide-react';
 import type { MusicFile, MusicLibrarySong } from '../types';
 import { invoke, message } from '../lib/native';
-type AudioSource = { path: string; mime: string };
+type AudioSource = { path: string };
 type AudioPreview = AudioSource & { url: string };
 function clock(value: number) {
   const hours = Math.floor(value / 3600), minutes = Math.floor(value / 60) % 60, seconds = Math.floor(value) % 60;
@@ -92,11 +92,10 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
     player.current?.pause(); releasePreviewUrl(); autoStarted.current = null;
     setSelected(item); setPlayingId(item.id); setAudioPreview(null); setPreviewLoading(true); setPreviewError(null); setPlayback({ current: 0, duration: 0, playing: false });
     try {
-      const extension = item.localPath?.split('.').pop()?.toLowerCase();
-      const preview: AudioSource = item.localPath ? { path: item.localPath, mime: extension === 'mp3' ? 'audio/mpeg' : extension === 'ogg' || extension === 'opus' ? 'audio/ogg' : extension === 'wav' ? 'audio/wav' : 'audio/mp4' } : await invoke<AudioSource>('youtube_audio_preview', { id: item.id });
+      const preview: AudioSource = item.localPath ? { path: item.localPath } : await invoke<AudioSource>('youtube_audio_preview', { id: item.id });
       const response = await invoke<ArrayBuffer | number[]>('audio_preview_bytes', { path: preview.path });
       const buffer = response instanceof ArrayBuffer ? response : Uint8Array.from(response).buffer as ArrayBuffer;
-      const url = URL.createObjectURL(new Blob([buffer], { type: preview.mime }));
+      const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
       if (previewRequest.current !== token) { URL.revokeObjectURL(url); return; }
       previewUrl.current = url; setAudioPreview({ ...preview, url, id: item.id }); setPlayerVersion(version => version + 1);
     } catch (reason) {

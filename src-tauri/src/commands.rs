@@ -400,7 +400,6 @@ pub async fn search_youtube(query: String, shorts_only: bool) -> Result<Vec<Libr
 #[serde(rename_all = "camelCase")]
 pub struct YouTubeAudioPreview {
     path: String,
-    mime: String,
 }
 
 fn valid_youtube_id(id: &str) -> bool {
@@ -576,39 +575,88 @@ pub async fn youtube_audio_preview(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<YouTubeAudioPreview, String> {
-    let (path, mime) = download_youtube_audio(state.audio_cache.clone(), id).await?;
+    let (path, _) = download_youtube_audio(state.audio_cache.clone(), id).await?;
     Ok(YouTubeAudioPreview {
         path: path.to_string_lossy().into_owned(),
-        mime,
     })
 }
 
+fn convert_audio_preview(
+    binaries: &Binaries,
+    cache: &Path,
+    path: &Path,
+) -> Result<Vec<u8>, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase)
+        .ok_or("Audio preview file has no extension")?;
+    if !matches!(
+        extension.as_str(),
+        "m4a" | "mp3" | "webm" | "ogg" | "opus" | "wav" | "aac" | "flac"
+    ) {
+        return Err("Unsupported audio preview format".into());
+    }
+    let metadata = path
+        .metadata()
+        .map_err(|error| format!("Could not open the audio preview: {error}"))?;
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 1024 * 1024 * 1024 {
+        return Err("Audio preview must be a non-empty file smaller than 1 GB".into());
+    }
+    fs::create_dir_all(cache)
+        .map_err(|error| format!("Could not prepare the audio preview cache: {error}"))?;
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let output = cache.join(format!(".browser-preview-{nonce}.wav"));
+    let result = crate::video::binaries::command(binaries.ffmpeg()?)
+        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+        .arg(path)
+        .args([
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-t",
+            "90",
+            "-ac",
+            "1",
+            "-ar",
+            "32000",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(&output)
+        .output()
+        .map_err(|error| format!("Could not start the safe audio preview converter: {error}"))?;
+    if !result.status.success() {
+        let _ = fs::remove_file(&output);
+        let details = String::from_utf8_lossy(&result.stderr).trim().to_string();
+        return Err(if details.is_empty() {
+            "Could not convert this audio into a safe preview".into()
+        } else {
+            format!("Could not convert this audio into a safe preview: {details}")
+        });
+    }
+    let bytes = fs::read(&output)
+        .map_err(|error| format!("Could not read the safe audio preview: {error}"));
+    let _ = fs::remove_file(&output);
+    let bytes = bytes?;
+    if bytes.len() <= 44 || bytes.len() > 8 * 1024 * 1024 {
+        return Err("The converted audio preview has an invalid size".into());
+    }
+    Ok(bytes)
+}
+
 #[tauri::command]
-pub async fn audio_preview_bytes(path: String) -> Result<tauri::ipc::Response, String> {
-    blocking(move || {
-        let path = PathBuf::from(path);
-        let extension = path
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(str::to_ascii_lowercase)
-            .ok_or("Audio preview file has no extension")?;
-        if !matches!(
-            extension.as_str(),
-            "m4a" | "mp3" | "webm" | "ogg" | "opus" | "wav" | "aac" | "flac"
-        ) {
-            return Err("Unsupported audio preview format".into());
-        }
-        let metadata = path
-            .metadata()
-            .map_err(|error| format!("Could not open the audio preview: {error}"))?;
-        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 64 * 1024 * 1024 {
-            return Err("Audio preview must be a non-empty file smaller than 64 MB".into());
-        }
-        fs::read(path)
-            .map(tauri::ipc::Response::new)
-            .map_err(|error| format!("Could not read the audio preview: {error}"))
-    })
-    .await
+pub async fn audio_preview_bytes(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    let binaries = state.binaries.clone();
+    let cache = state.audio_cache.clone();
+    let bytes =
+        blocking(move || convert_audio_preview(&binaries, &cache, Path::new(&path))).await?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
@@ -1523,6 +1571,15 @@ mod youtube_audio_tests {
         assert!(
             !String::from_utf8_lossy(&probe.stdout).trim().is_empty(),
             "downloaded file has no decodable audio stream"
+        );
+        let binaries = Binaries::detect(Path::new(""));
+        let preview = convert_audio_preview(&binaries, &root, &path)
+            .expect("downloaded audio should convert into a safe browser preview");
+        assert!(preview.starts_with(b"RIFF"), "preview is not a WAV file");
+        assert_eq!(&preview[8..12], b"WAVE", "preview has no WAVE header");
+        assert!(
+            preview.len() <= 8 * 1024 * 1024,
+            "preview exceeds its bounded IPC size"
         );
         let _ = fs::remove_dir_all(root);
     }
