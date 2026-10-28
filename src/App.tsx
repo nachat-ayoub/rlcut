@@ -17,9 +17,10 @@ import { stampText } from './lib/text-stamp';
 import { editedDuration, editedToSource, sourceToEdited } from './lib/timeline';
 type Modal = 'settings' | 'presets' | 'shortcuts' | 'crop' | 'music' | null;
 type InspectorView = 'edit' | 'export';
+type EditorClipboard = { type: 'video' | 'music'; clip: Segment } | { type: 'text'; clip: TextOverlay } | { type: 'effect'; clip: FlashEffect };
 const shortcuts = [
   ['Playback', [['Space', 'Play or pause'], ['← / →', 'Move one frame'], ['Shift + ← / →', 'Move one second'], ['Home / End', 'Jump to timeline start or end']]],
-  ['Editing', [['Ctrl / ⌘ + K', 'Split selected clip'], ['Q', 'Trim left side to playhead'], ['W', 'Trim right side to playhead'], ['Delete', 'Delete selected item'], ['M', 'Toggle marker at playhead'], ['F', 'Toggle impact flash at playhead'], ['Ctrl / ⌘ + Z', 'Undo'], ['Ctrl / ⌘ + Shift + Z', 'Redo']]],
+  ['Editing', [['Ctrl / ⌘ + K', 'Split selected clip'], ['Ctrl / ⌘ + C', 'Copy selected clip'], ['Ctrl / ⌘ + V', 'Paste at playhead'], ['Q', 'Trim left side to playhead'], ['W', 'Trim right side to playhead'], ['Delete', 'Delete selected item'], ['M', 'Toggle marker at playhead'], ['F', 'Toggle impact flash at playhead'], ['Ctrl / ⌘ + Z', 'Undo'], ['Ctrl / ⌘ + Shift + Z', 'Redo']]],
   ['Timeline', [['Drag clip', 'Reorder clips'], ['Shift + drag clip', 'Trim or restore the clip start'], ['Drag clip edge', 'Trim or restore that edge'], ['Alt while trimming', 'Temporarily disable snapping'], ['Ctrl + scroll', 'Zoom around the pointer']]],
   ['Preview & files', [['Ctrl + scroll', 'Zoom preview'], ['Alt + drag', 'Pan a zoomed preview'], ['Ctrl / ⌘ + O', 'Import videos'], ['Ctrl / ⌘ + S', 'Save project'], ['Ctrl / ⌘ + E', 'Export clip']]],
 ] as const;
@@ -30,6 +31,7 @@ const customPresetName = (presets: Preset[]) => {
   while (names.has(`Custom Preset ${index}`)) index++;
   return `Custom Preset ${index}`;
 };
+const fileSize = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(bytes >= 100 * 1024 ** 2 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 const matchesHdr = (transfer?: string) => transfer === 'smpte2084' || transfer === 'arib-std-b67';
 const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | number | null>>): TrackMarkers => ({
   video: Array.isArray(value?.video) ? value.video.filter(Number.isFinite) : Number.isFinite(value?.video) ? [value!.video as number] : [],
@@ -56,6 +58,19 @@ const fitEffectToClip = (effect: FlashEffect, segments: Segment[]): FlashEffect 
   }
   return effect;
 };
+const overlaps = (start: number, end: number, itemStart: number, itemEnd: number) => start < itemEnd - .001 && end > itemStart + .001;
+const sameCoverage = (left: Segment[], right: Segment[]) => {
+  const ranges = (items: Segment[]) => items.map(item => `${item.start.toFixed(4)}:${item.end.toFixed(4)}`).sort();
+  const a = ranges(left), b = ranges(right);
+  return a.length === b.length && a.every((range, index) => range === b[index]);
+};
+const markersAfterEdit = (previous: Segment[], next: Segment[], values: number[]) => values.filter(marker => {
+  if (!previous.some(clip => marker >= clip.start - .001 && marker <= clip.end + .001)) return true;
+  if (next.some(clip => marker > clip.start + .001 && marker < clip.end - .001)) return true;
+  const ending = next.some(clip => Math.abs(clip.end - marker) <= .001);
+  const starting = next.some(clip => Math.abs(clip.start - marker) <= .001);
+  return ending && starting;
+});
 const normalizeText = (value: Partial<TextOverlay>): TextOverlay => ({
   id: value.id || crypto.randomUUID(), trackId: value.trackId || '', text: value.text ?? 'Text', start: value.start ?? 0, end: value.end ?? 3,
   x: value.x ?? .5, y: value.y ?? .5, scale: value.scale ?? 1, boxWidth: value.boxWidth ?? .7, rotation: value.rotation ?? 0,
@@ -110,7 +125,7 @@ export default function App() {
   const [home, setHome] = useState(true), [projectLoading, setProjectLoading] = useState(false), [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
   const [selectedClip, setSelectedClip] = useState<{ track: 'video' | 'music'; id: string } | null>(null), [colorScope, setColorScope] = useState<'clip' | 'all'>('clip');
   const [colorPreviewBefore, setColorPreviewBefore] = useState(false);
-  const undoStack = useRef<EditorSnapshot[]>([]), redoStack = useRef<EditorSnapshot[]>([]);
+  const undoStack = useRef<EditorSnapshot[]>([]), redoStack = useRef<EditorSnapshot[]>([]), editorClipboard = useRef<EditorClipboard | null>(null);
   const playhead = useRef(0), lastTimeReport = useRef(0), manualSeekUntil = useRef(0);
   const lastPresetEdit = useRef(0), lastTextEdit = useRef(0), lastEffectEdit = useRef(0);
   const initialized = useRef(false), importRevision = useRef(0), lastSaved = useRef(''), storeRef = useRef(store);
@@ -203,11 +218,11 @@ export default function App() {
     lastPresetEdit.current = 0;
     undoStack.current.push(snapshot());
     if (undoStack.current.length > 100) undoStack.current.shift();
-    redoStack.current = []; setSegments(next); setEffects(current => current.map(effect => fitFlash(fitEffectToClip(effect, next), editedDuration(next))));
+    redoStack.current = []; if (!sameCoverage(segments, next)) setMarkers(current => ({ ...current, video: markersAfterEdit(segments, next, current.video) })); setSegments(next); setEffects(current => current.map(effect => fitFlash(fitEffectToClip(effect, next), editedDuration(next))));
     if (preservePlayback) return;
     const value = editedToSource(next, sourceToEdited(next, playhead.current));
     playhead.current = value; setTimestamp(value); setPlaying(false);
-  }, [snapshot]);
+  }, [snapshot, segments]);
   function edit<K extends 'background' | 'gameplay' | 'boost'>(key: K, values: Partial<Preset[K]>) { change({ ...preset, [key]: { ...preset[key], ...values } }); }
   function reset(key: 'background' | 'gameplay' | 'boost') { change({ ...preset, [key]: structuredClone(classic[key]) }); }
   const importPaths = useCallback(async (paths: string[]) => {
@@ -380,6 +395,46 @@ export default function App() {
       report(e);
     }
   }, [report, rememberOutputFolder]);
+  const copySelection = useCallback(() => {
+    const effect = effects.find(item => item.id === selectedEffectId);
+    const text = texts.find(item => item.id === selectedTextId);
+    const clip = selectedClip?.track === 'video' ? segments.find(item => item.id === selectedClip.id) : music?.segments.find(item => item.id === selectedClip?.id);
+    if (effect) editorClipboard.current = { type: 'effect', clip: structuredClone(effect) };
+    else if (text) editorClipboard.current = { type: 'text', clip: structuredClone(text) };
+    else if (clip && selectedClip) editorClipboard.current = { type: selectedClip.track, clip: structuredClone(clip) };
+    else return;
+    setNotice('Clip copied');
+  }, [effects, selectedEffectId, texts, selectedTextId, selectedClip, segments, music]);
+  const pasteSelection = useCallback(() => {
+    const copied = editorClipboard.current;
+    if (!copied || !segments.length) return;
+    const at = Math.max(0, Math.min(editedDuration(segments), sourceToEdited(segments, playhead.current)));
+    undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
+    if (copied.type === 'effect') {
+      const length = copied.clip.duration, start = Math.min(at, Math.max(0, editedDuration(segments) - length)), end = start + length;
+      let track = [...effectTracks].reverse().find(candidate => !effects.some(item => item.trackId === candidate.id && overlaps(start, end, item.time, item.time + item.duration)));
+      if (!track) { track = { id: crypto.randomUUID(), name: `Effects ${effectTracks.reduce((max, item) => Math.max(max, Number(item.name.match(/\d+$/)?.[0] ?? 0)), 0) + 1}` }; setEffectTracks(current => [...current, track!]); }
+      const next = { ...structuredClone(copied.clip), id: crypto.randomUUID(), trackId: track.id, timing: 'duration' as const, time: start };
+      setEffects(current => [...current, next].sort((a, b) => a.time - b.time)); setSelectedEffectId(next.id); setSelectedTextId(null); setSelectedClip(null); setLayer(null);
+    } else if (copied.type === 'text') {
+      const length = copied.clip.end - copied.clip.start, start = Math.min(at, Math.max(0, editedDuration(segments) - length)), end = start + length;
+      let track = [...textTracks].reverse().find(candidate => !texts.some(item => item.trackId === candidate.id && overlaps(start, end, item.start, item.end)));
+      if (!track) { track = { id: crypto.randomUUID(), name: `Text ${textTracks.reduce((max, item) => Math.max(max, Number(item.name.match(/\d+$/)?.[0] ?? 0)), 0) + 1}` }; setTextTracks(current => [...current, track!]); }
+      const next = { ...structuredClone(copied.clip), id: crypto.randomUUID(), trackId: track.id, start, end };
+      setTexts(current => [...current, next]); setSelectedTextId(next.id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null);
+    } else if (copied.type === 'video') {
+      const offsets: number[] = []; let cursor = 0; for (const clip of segments) { offsets.push(cursor); cursor += clip.end - clip.start; }
+      const index = offsets.findIndex((offset, item) => at < offset + segments[item].end - segments[item].start);
+      const nextClip = { ...structuredClone(copied.clip), id: crypto.randomUUID() }, next = [...segments]; next.splice(index < 0 ? next.length : index + 1, 0, nextClip);
+      setSegments(next); setSelectedClip({ track: 'video', id: nextClip.id }); setSelectedTextId(null); setSelectedEffectId(null); setLayer(null);
+    } else if (music) {
+      const lane = music.segments, offsets: number[] = []; let cursor = 0; for (const clip of lane) { offsets.push(cursor); cursor += clip.end - clip.start; }
+      const index = offsets.findIndex((offset, item) => at < offset + lane[item].end - lane[item].start);
+      const nextClip = { ...structuredClone(copied.clip), id: crypto.randomUUID() }, next = [...lane]; next.splice(index < 0 ? next.length : index + 1, 0, nextClip);
+      setMusic({ ...music, segments: next }); setSelectedClip({ track: 'music', id: nextClip.id }); setSelectedTextId(null); setSelectedEffectId(null); setLayer(null);
+    }
+    setPlaying(false); setNotice('Clip pasted at playhead');
+  }, [segments, snapshot, effectTracks, effects, textTracks, texts, music]);
   const startExport = useCallback(async () => {
     if (!video || exporting || exportStarting)
       return;
@@ -452,6 +507,12 @@ export default function App() {
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault(); saveCurrentProject();
       }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault(); copySelection();
+      }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault(); pasteSelection();
+      }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault(); if (e.shiftKey) redo(); else undo();
       }
@@ -465,7 +526,7 @@ export default function App() {
         jump(e.shiftKey ? 1 : 1 / (video?.fps ?? 30));
       }
     } window.addEventListener('keydown', keyboard); return () => window.removeEventListener('keydown', keyboard);
-  }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath, togglePlayback]);
+  }, [importVideo, startExport, jump, video, modal, undo, redo, proxyPath, togglePlayback, copySelection, pasteSelection]);
   function create() { const p = copyPreset(preset, customPresetName(store.presets)); setStore(s => ({ ...s, presets: [...s.presets, p], activePreset: p.id })); setRename(p.name); setModal('presets'); }
   function remove(id = preset.id) {
     const target = allPresets.find(item => item.id === id);
@@ -533,8 +594,13 @@ export default function App() {
       if (ticket !== importRevision.current) return;
       const total = sources.reduce((sum, source) => sum + source.duration, 0);
       const restoredSegments = project.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), volume: segment.volume ?? 1, colorFix: segment.colorFix ?? 0 }));
-      const projectPreset = project.preset.id === 'classic' ? classic : { ...project.preset, id: `project-${project.id}` };
-      setStore(current => ({ ...current, activePreset: projectPreset.id, presets: projectPreset.id === 'classic' ? current.presets : [...current.presets.filter(item => item.id !== projectPreset.id), projectPreset] }));
+      const projectPreset = project.preset.id === 'classic' ? classic : project.preset;
+      setStore(current => {
+        if (projectPreset.id === 'classic') return { ...current, activePreset: 'classic' };
+        const legacyMatch = projectPreset.id.startsWith('project-') ? current.presets.find(item => !item.id.startsWith('project-') && item.name === projectPreset.name) : undefined;
+        const restored = legacyMatch ? { ...projectPreset, id: legacyMatch.id, name: legacyMatch.name } : projectPreset;
+        return { ...current, activePreset: restored.id, presets: [...current.presets.filter(item => item.id !== restored.id && !(item.id.startsWith('project-') && item.name === restored.name)), restored] };
+      });
       const sourceTexts = project.texts ?? [], restoredTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
       const sourceEffects = project.effects ?? [], restoredEffectTracks = project.effectTracks?.length ? project.effectTracks : sourceEffects.length ? [{ id: crypto.randomUUID(), name: 'Effects 1' }] : [];
       setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, waveform: project.music.waveform ?? [], segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setEffectTracks(restoredEffectTracks); setEffects(sourceEffects.map(effect => fitFlash(fitEffectToClip(normalizeFlash({ ...effect, trackId: effect.trackId || restoredEffectTracks[0]?.id }), restoredSegments), editedDuration(restoredSegments)))); setSelectedEffectId(null); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
@@ -562,6 +628,13 @@ export default function App() {
     setNotice('Project duplicated');
   }
   const b = preset.boost;
+  const exportDuration = editedDuration(segments);
+  const exportScale = aiUpscale && !aiKeepResolution ? 2 : 1;
+  const exportWidth = quality * exportScale, exportHeight = (quality === 480 ? 854 : quality === 720 ? 1280 : 1920) * exportScale;
+  const estimatedVideoRate = exportWidth * exportHeight * fps * (quality >= 1080 ? .095 : quality >= 720 ? .105 : .12);
+  const estimatedAudioRate = video?.hasAudio || music ? 192_000 : 0;
+  const estimatedExportBytes = exportDuration * (estimatedVideoRate + estimatedAudioRate) / 8;
+  const estimatedExportSize = exportDuration > 0 ? `${fileSize(estimatedExportBytes * .8)}–${fileSize(estimatedExportBytes * 1.25)}` : '—';
   const textTrackOrder = new Map(textTracks.map((track, index) => [track.id, index]));
   const stackedTexts = [...texts].sort((a, b) => (textTrackOrder.get(b.trackId) ?? -1) - (textTrackOrder.get(a.trackId) ?? -1));
   const effectTrackOrder = new Map(effectTracks.map((track, index) => [track.id, index]));
@@ -761,7 +834,7 @@ export default function App() {
             setMusic(null);
             setMarkers(current => ({ ...current, music: [] }));
             setSelectedClip(null);
-          } else setMusic({ ...music, segments: next });
+          } else { if (!sameCoverage(previous, next)) setMarkers(current => ({ ...current, music: markersAfterEdit(previous, next, current.music) })); setMusic({ ...music, segments: next }); }
           if (!volumeOnly) setPlaying(false);
         }} />}
       {video && <footer className="workspace-footer">
@@ -866,8 +939,8 @@ export default function App() {
           </Section>}
           {selectedVideoSegment && <Section title="Color correction" icon={<Palette size={16} />}>
             <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
-            <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .65 : 0); }} /></div>
-            {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.65} onChange={setColorFix} suffix="×" /></>}
+            <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .5 : 0); }} /></div>
+            {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.5} onChange={setColorFix} suffix="×" /></>}
           </Section>}
         </div> : <div className="inspector-pane export-pane">
           <Section title="Video" icon={<Film size={16} />}>
@@ -896,6 +969,7 @@ export default function App() {
             {!init?.aiAvailable && <div className="inline-warning">AI runtime is not available in this build.</div>}
           </Section>
           <Section title="File" icon={<FolderOpen size={16} />}>
+            <div className="export-size-estimate"><span>Estimated size</span><strong>{estimatedExportSize}</strong><small>Content-aware encoding can vary within this range.</small></div>
             <label className="field">Output filename<input value={outputName} onChange={e => setOutputName(e.target.value)} placeholder="rlcut-edit.mp4" />
             </label>
             <label className="field">Destination folder<div className="folder-picker">

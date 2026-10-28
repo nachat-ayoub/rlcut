@@ -66,7 +66,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), panGesture = useRef<PanGesture | null>(null), textGesture = useRef<TextGesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
   const playbackTimestamp = useRef(timestamp);
-  const textFrame = useRef(-1), textSignature = useRef('');
+  const textFrame = useRef(-1), textSignature = useRef(''), effectSignature = useRef('');
   const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -128,9 +128,11 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         const active = current.texts.filter(text => edited >= text.start && edited <= text.end);
         const signature = active.map(text => text.id).join(',');
         const fading = active.some(text => (text.fadeIn && edited < text.start + text.fadeIn) || (text.fadeOut && edited > text.end - text.fadeOut));
-        const flashing = current.effects.some(effect => edited >= effect.time && edited <= effect.time + effect.duration);
-        if (!current.playing || signature !== textSignature.current || ((fading || flashing) && Math.abs(edited - textFrame.current) >= 1 / 30)) {
-          textFrame.current = edited; textSignature.current = signature; setVisualTime(edited);
+        const activeEffects = current.effects.filter(effect => edited >= effect.time && edited < effect.time + effect.duration);
+        const effectsSignature = activeEffects.map(effect => effect.id).join(',');
+        const animating = activeEffects.some(effect => effect.kind === 'flash');
+        if (!current.playing || signature !== textSignature.current || effectsSignature !== effectSignature.current || ((fading || animating) && Math.abs(edited - textFrame.current) >= 1 / 30)) {
+          textFrame.current = edited; textSignature.current = signature; effectSignature.current = effectsSignature; setVisualTime(edited);
         }
         setMediaReady(true); draw.current(); snapshot.current();
       },
@@ -139,7 +141,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); setPlaybackFailed(true); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
-    }, video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 480 : 640);
+    }, video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 440 : 540);
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
@@ -251,7 +253,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         </div>
       </div>
     </div>;
-  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime <= effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'darkGray' ? effect.intensity : effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) }));
+  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'darkGray' ? effect.intensity : effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) }));
   const grayAmount = (scope: 'video' | 'all') => activeEffects.reduce((amount, item) => item.effect.kind === 'darkGray' && (scope === 'video' || item.effect.scope === 'all') ? Math.max(amount, item.amount) : amount, 0);
   const grayFilter = (amount: number) => amount > 0 ? `grayscale(${amount}) brightness(${1 - amount * .12}) contrast(${1 + amount * .08})` : undefined;
   const videoGray = grayAmount('video');

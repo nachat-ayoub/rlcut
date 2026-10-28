@@ -1196,18 +1196,47 @@ pub async fn open_export(state: State<'_, AppState>, folder: bool) -> Result<(),
     }
     blocking(move || {
         let path = PathBuf::from(p.output);
-        let target = if folder {
-            path.parent().ok_or("Output folder missing")?.to_path_buf()
-        } else {
-            path
-        };
         #[cfg(target_os = "windows")]
-        let mut c = std::process::Command::new("explorer.exe");
+        let mut c = {
+            let mut command = std::process::Command::new("explorer.exe");
+            if folder {
+                command.arg("/select,").arg(&path);
+            } else {
+                command.arg(&path);
+            }
+            command
+        };
         #[cfg(target_os = "macos")]
-        let mut c = std::process::Command::new("open");
+        let mut c = {
+            let mut command = std::process::Command::new("open");
+            if folder {
+                command.arg("-R");
+            }
+            command.arg(&path);
+            command
+        };
         #[cfg(target_os = "linux")]
-        let mut c = std::process::Command::new("xdg-open");
-        c.arg(target).spawn().map_err(|e| e.to_string())?;
+        if folder {
+            if std::process::Command::new("nautilus")
+                .arg("--select")
+                .arg(&path)
+                .spawn()
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        #[cfg(target_os = "linux")]
+        let mut c = {
+            let mut command = std::process::Command::new("xdg-open");
+            command.arg(if folder {
+                path.parent().ok_or("Output folder missing")?
+            } else {
+                &path
+            });
+            command
+        };
+        c.spawn().map_err(|e| e.to_string())?;
         Ok(())
     })
     .await

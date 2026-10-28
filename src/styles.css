@@ -2002,6 +2002,10 @@ progress::-moz-progress-bar {
 .output-resolution-note { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:2px 0 10px; padding:9px 10px; border:1px solid #34303b; border-radius:7px; background:#141219 }
 .output-resolution-note strong { color:#d8c5ee; font-size:10px; font-variant-numeric:tabular-nums }
 .output-resolution-note span { color:#766e7d; font-size:8px }
+.export-size-estimate { display:grid; grid-template-columns:1fr auto; align-items:center; gap:3px 10px; padding:10px; border:1px solid #34303b; border-radius:7px; background:#141219 }
+.export-size-estimate span { color:#8b8290; font-size:9px }
+.export-size-estimate strong { color:#d9c4ed; font-size:11px; font-variant-numeric:tabular-nums }
+.export-size-estimate small { grid-column:1/-1; color:#6f6875; font-size:7px; line-height:1.35 }
 .inspector-help { margin-top:3px; padding-top:8px; border-top:1px solid #292530; color:#817688; font-size:8px }
 .inspector-help summary { cursor:pointer; color:#a394ae; font-size:9px }
 .inspector-help p { margin:7px 0 1px; line-height:1.55 }
