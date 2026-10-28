@@ -161,8 +161,8 @@ pub fn probe_music(b: &Binaries, path: &Path) -> Result<MusicFile, String> {
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_lowercase();
-    if !["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"].contains(&ext.as_str()) {
-        return Err("Supported audio: MP3, WAV, M4A, AAC, FLAC, OGG and Opus".into());
+    if !["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus", "webm"].contains(&ext.as_str()) {
+        return Err("Supported audio: MP3, WAV, M4A, AAC, FLAC, OGG, Opus and WebM".into());
     }
     let out = command(b.ffprobe()?)
         .args([

@@ -193,6 +193,7 @@ export type Project = {
   fps: number;
   outputFolder: string;
   outputName: string;
+  timelineZoom?: number;
 };
 export type Init = {
   version?: string;

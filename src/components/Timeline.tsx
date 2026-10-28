@@ -37,7 +37,7 @@ const waveformPath = (samples: number[], start: number, end: number, duration: n
   return `M 0 12 L ${peaks.map((peak, index) => point(index, peak)).join(' L ')} L ${[...peaks].reverse().map((peak, reverseIndex) => point(peaks.length - reverseIndex - 1, peak, true)).join(' L ')} Z`;
 };
 
-export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, initialZoom = 64, onZoomChange, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
@@ -51,6 +51,8 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   texts: TextOverlay[];
   textTracks: TextTrack[];
   selectedTextId: string | null;
+  initialZoom?: number;
+  onZoomChange?: (value: number) => void;
   playing: boolean;
   playbackReady: boolean;
   canUndo: boolean;
@@ -79,7 +81,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   onImportMusic: () => void;
 }) {
   const cursor = useRef<HTMLElement>(null), clock = useRef<HTMLSpanElement>(null);
-  const [pixelsPerSecond, setPixelsPerSecond] = useState(64);
+  const [pixelsPerSecond, setPixelsPerSecond] = useState(() => Math.max(20, Math.min(240, initialZoom)));
   const [selection, setSelection] = useState<{ track: Track; id: string }>({ track: 'video', id: segments[0]?.id ?? '' });
   const [trimPreview, setTrimPreview] = useState<TrimPreview | null>(null);
   const [reorderPreview, setReorderPreview] = useState<ReorderPreview | null>(null);
@@ -128,6 +130,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   useEffect(() => {
     if (!segments.some(s => selection.track === 'video' && s.id === selection.id) && !musicSegments.some(s => selection.track === 'music' && s.id === selection.id)) setSelection({ track: 'video', id: segments[0]?.id ?? '' });
   }, [segments, musicSegments, selection]);
+  useEffect(() => { setPixelsPerSecond(Math.max(20, Math.min(240, initialZoom))); }, [initialZoom]);
   const selectedVolume = selection.track === 'video' ? segments[0]?.volume ?? 1 : selected?.volume ?? 1;
   useEffect(() => { volumeDirty.current = false; setVolume(selectedVolume); }, [selection, selectedVolume]);
   useEffect(() => {
@@ -340,11 +343,12 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       : [{ ...segment, [operation]: at }]));
   };
   const zoom = (next: number, anchor = cursorTime(), screenX?: number) => {
-    const bounded = Math.max(12, Math.min(240, next));
-    const value = Math.abs(bounded - 64) <= 5 ? 64 : 12 + Math.round((bounded - 12) / 4) * 4;
+    const bounded = Math.max(20, Math.min(240, next));
+    const value = Math.abs(bounded - 64) <= 5 ? 64 : 20 + Math.round((bounded - 20) / 4) * 4;
     const viewport = scroll.current;
     const anchorX = screenX ?? (viewport ? Math.max(0, Math.min(viewport.clientWidth, anchor * pixelsPerSecond - viewport.scrollLeft)) : 0);
     setPixelsPerSecond(value);
+    onZoomChange?.(value);
     if (viewport) requestAnimationFrame(() => { viewport.scrollLeft = Math.max(0, anchor * value - anchorX); });
   };
   const wheelZoom = (event: WheelEvent<HTMLElement>) => {
@@ -379,7 +383,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     const Icon = track === 'video' ? Film : Music2;
     const offset = trimPreview?.mode === 'body' ? displayOffsets[track][index] : offsets[track][index];
     const wave = track === 'music' ? waveformPath(music?.waveform ?? [], preview.start, preview.end, music?.duration ?? 0) : '';
-    return <div key={clip.id} className={`timeline-segment ${track === 'music' ? 'music-segment' : ''} ${selection.track === track && selection.id === clip.id ? 'selected' : ''} ${trimPreview?.track === track && trimPreview.id === clip.id ? 'trimming' : ''} ${reorderPreview?.id === clip.id ? 'reordering' : ''}`} style={{ left: `${(offset + inset) * pixelsPerSecond}px`, width: `${(preview.end - preview.start) * pixelsPerSecond}px` }} title="Drag to reorder · Shift-drag to trim the start · use edge handles to trim" onPointerDown={event => beginClip(event, 'body', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip}>
+    return <div key={clip.id} className={`timeline-segment ${track === 'music' ? 'music-segment' : ''} ${!selectedEffectId && !selectedTextId && selection.track === track && selection.id === clip.id ? 'selected' : ''} ${trimPreview?.track === track && trimPreview.id === clip.id ? 'trimming' : ''} ${reorderPreview?.id === clip.id ? 'reordering' : ''}`} style={{ left: `${(offset + inset) * pixelsPerSecond}px`, width: `${(preview.end - preview.start) * pixelsPerSecond}px` }} title="Drag to reorder · Shift-drag to trim the start · use edge handles to trim" onPointerDown={event => beginClip(event, 'body', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip}>
       <button className="trim-handle start" aria-label={`Trim or extend ${track} clip from left`} title="Snaps to cursor, markers, and clip edges; hold Alt for free trim" onKeyDown={event => nudgeTrim(event, track, clip, 'start', index)} onPointerDown={event => beginClip(event, 'edge', track, clip, 'start', index, offset)} onPointerMove={moveClip} onPointerUp={finishClip} onPointerCancel={cancelClip} />
       {wave && <svg className="music-waveform" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><path d={wave} /></svg>}
       <span className="clip-fill"><Icon size={12} /><b>{track === 'music' ? music?.name : `Clip ${index + 1}`}</b><small>{time(preview.start)} – {time(preview.end)}</small>{clip.volume === 0 && <VolumeX size={11} />}</span>
@@ -442,7 +446,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <button className="editor-tool flash-action" onClick={addEffectAtCursor} disabled={editedDuration < .08} title="Add impact flash at playhead (F)" aria-label="Add effect at playhead"><Sparkles size={15} /></button>
       <button className={`editor-tool marker-action ${!selectedEffect && !selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedEffect || selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
-      <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} style={{ '--range-fill': `${(pixelsPerSecond - 12) / 228 * 100}%` } as React.CSSProperties} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
+      <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 20} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="20" max="240" step="4" value={pixelsPerSecond} style={{ '--range-fill': `${(pixelsPerSecond - 20) / 220 * 100}%` } as React.CSSProperties} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
       <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={Boolean(selectedEffect || selectedText) || !selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
     </div>
     {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>

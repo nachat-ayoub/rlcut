@@ -10,8 +10,10 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
+    collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
     fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -166,7 +168,7 @@ pub async fn pick_music(state: State<'_, AppState>) -> Result<Option<MusicFile>,
         let Some(path) = rfd::FileDialog::new()
             .add_filter(
                 "Audio",
-                &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus"],
+                &["mp3", "wav", "m4a", "aac", "flac", "ogg", "opus", "webm"],
             )
             .pick_file()
         else {
@@ -478,7 +480,7 @@ async fn download_youtube_audio_with_ytdlp(
                 "--quiet",
                 "--no-warnings",
                 "--format",
-                "bestaudio[ext=m4a]/bestaudio",
+                "bestaudio/best",
                 "--output",
             ])
             .arg(&template)
@@ -605,43 +607,55 @@ fn convert_audio_preview(
     }
     fs::create_dir_all(cache)
         .map_err(|error| format!("Could not prepare the audio preview cache: {error}"))?;
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos());
-    let output = cache.join(format!(".browser-preview-{nonce}.wav"));
-    let result = crate::video::binaries::command(binaries.ffmpeg()?)
-        .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
-        .arg(path)
-        .args([
-            "-map",
-            "0:a:0",
-            "-vn",
-            "-t",
-            "90",
-            "-ac",
-            "1",
-            "-ar",
-            "32000",
-            "-c:a",
-            "pcm_s16le",
-        ])
-        .arg(&output)
-        .output()
-        .map_err(|error| format!("Could not start the safe audio preview converter: {error}"))?;
-    if !result.status.success() {
-        let _ = fs::remove_file(&output);
-        let details = String::from_utf8_lossy(&result.stderr).trim().to_string();
-        return Err(if details.is_empty() {
-            "Could not convert this audio into a safe preview".into()
-        } else {
-            format!("Could not convert this audio into a safe preview: {details}")
-        });
+    let mut key = DefaultHasher::new();
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .hash(&mut key);
+    metadata.len().hash(&mut key);
+    metadata.modified().ok().hash(&mut key);
+    let output = cache.join(format!(".browser-preview-{:x}.mp3", key.finish()));
+    if !output.metadata().is_ok_and(|value| value.len() > 0) {
+        let partial = output.with_extension("partial.mp3");
+        let result = crate::video::binaries::command(binaries.ffmpeg()?)
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+            .arg(path)
+            .args([
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+                "-c:a",
+                "libmp3lame",
+                "-q:a",
+                "0",
+                "-write_xing",
+                "1",
+            ])
+            .arg(&partial)
+            .output()
+            .map_err(|error| {
+                format!("Could not start the safe audio preview converter: {error}")
+            })?;
+        if !result.status.success() {
+            let _ = fs::remove_file(&partial);
+            let details = String::from_utf8_lossy(&result.stderr).trim().to_string();
+            return Err(if details.is_empty() {
+                "Could not convert this audio into a safe preview".into()
+            } else {
+                format!("Could not convert this audio into a safe preview: {details}")
+            });
+        }
+        fs::rename(&partial, &output).map_err(|error| {
+            let _ = fs::remove_file(&partial);
+            format!("Could not finish the safe audio preview: {error}")
+        })?;
     }
     let bytes = fs::read(&output)
-        .map_err(|error| format!("Could not read the safe audio preview: {error}"));
-    let _ = fs::remove_file(&output);
-    let bytes = bytes?;
-    if bytes.len() <= 44 || bytes.len() > 8 * 1024 * 1024 {
+        .map_err(|error| format!("Could not read the safe audio preview: {error}"))?;
+    if bytes.len() <= 128 || bytes.len() > 256 * 1024 * 1024 {
         return Err("The converted audio preview has an invalid size".into());
     }
     Ok(bytes)
@@ -688,41 +702,25 @@ pub async fn save_youtube_audio(
     if !folder.is_dir() {
         return Err("Choose an existing Music Library folder in Settings".into());
     }
-    let output = folder.join(format!("{stem} [{id}].m4a"));
     let binaries = state.binaries.clone();
-    if output.is_file() {
-        return blocking(move || metadata::probe_music(&binaries, &output)).await;
+    if let Some(existing) = ["webm", "m4a", "opus", "ogg", "mp3"]
+        .into_iter()
+        .map(|extension| folder.join(format!("{stem} [{id}].{extension}")))
+        .find(|path| path.is_file())
+    {
+        return blocking(move || metadata::probe_music(&binaries, &existing)).await;
     }
-    let (source, mime) = download_youtube_audio(state.audio_cache.clone(), id).await?;
+    let (source, _) = download_youtube_audio(state.audio_cache.clone(), id.clone()).await?;
     blocking(move || {
-        let partial = output.with_file_name(format!(".{stem}.rlcut-partial.m4a"));
-        if mime.contains("mp4") {
-            fs::copy(&source, &partial)
-                .map_err(|error| format!("Could not copy the downloaded audio: {error}"))?;
-        } else {
-            let result = crate::video::binaries::command(binaries.ffmpeg()?)
-                .args(["-y", "-hide_banner", "-loglevel", "error", "-i"])
-                .arg(&source)
-                .args([
-                    "-vn",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "192k",
-                    "-movflags",
-                    "+faststart",
-                ])
-                .arg(&partial)
-                .output()
-                .map_err(|error| format!("Could not convert the downloaded audio: {error}"))?;
-            if !result.status.success() {
-                let _ = fs::remove_file(&partial);
-                return Err(format!(
-                    "Could not convert the downloaded audio: {}",
-                    String::from_utf8_lossy(&result.stderr)
-                ));
-            }
-        }
+        let extension = source
+            .extension()
+            .and_then(|value| value.to_str())
+            .filter(|value| ["webm", "m4a", "opus", "ogg", "mp3"].contains(value))
+            .unwrap_or("m4a");
+        let output = folder.join(format!("{stem} [{id}].{extension}"));
+        let partial = output.with_file_name(format!(".{stem}.rlcut-partial.{extension}"));
+        fs::copy(&source, &partial)
+            .map_err(|error| format!("Could not copy the downloaded audio: {error}"))?;
         if output.exists() {
             fs::remove_file(&output)
                 .map_err(|error| format!("Could not replace the saved audio: {error}"))?;
@@ -1604,11 +1602,83 @@ mod youtube_audio_tests {
         let binaries = Binaries::detect(Path::new(""));
         let preview = convert_audio_preview(&binaries, &root, &path)
             .expect("downloaded audio should convert into a safe browser preview");
-        assert!(preview.starts_with(b"RIFF"), "preview is not a WAV file");
-        assert_eq!(&preview[8..12], b"WAVE", "preview has no WAVE header");
+        assert!(preview.len() > 1024, "preview MP3 is unexpectedly small");
         assert!(
-            preview.len() <= 8 * 1024 * 1024,
+            preview.len() <= 256 * 1024 * 1024,
             "preview exceeds its bounded IPC size"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn long_audio_preview_preserves_duration_and_is_seekable() {
+        let root = std::env::temp_dir().join(format!(
+            "rlcut-long-audio-preview-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("temporary preview folder");
+        let binaries = Binaries::detect(Path::new(""));
+        let source = root.join("five-minutes.wav");
+        let generated = crate::video::binaries::command(binaries.ffmpeg().expect("ffmpeg"))
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:sample_rate=48000:duration=305",
+                "-c:a",
+                "pcm_s16le",
+                "-y",
+            ])
+            .arg(&source)
+            .status()
+            .expect("generate long audio fixture");
+        assert!(generated.success(), "could not generate long audio fixture");
+        let bytes = convert_audio_preview(&binaries, &root, &source)
+            .expect("long audio should convert into a complete browser preview");
+        assert!(bytes.len() > 1024, "preview MP3 is unexpectedly small");
+        let preview = fs::read_dir(&root)
+            .expect("preview cache")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.extension().is_some_and(|extension| extension == "mp3"))
+            .expect("cached browser preview MP3");
+        let duration = crate::video::binaries::command(binaries.ffprobe().expect("ffprobe"))
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+            ])
+            .arg(&preview)
+            .output()
+            .expect("probe complete preview duration");
+        assert!(duration.status.success(), "ffprobe rejected preview MP3");
+        let seconds: f64 = String::from_utf8_lossy(&duration.stdout)
+            .trim()
+            .parse()
+            .expect("numeric preview duration");
+        assert!(
+            (seconds - 305.).abs() < 0.25,
+            "preview was truncated to {seconds}s"
+        );
+        let seeked = crate::video::binaries::command(binaries.ffmpeg().expect("ffmpeg"))
+            .args(["-hide_banner", "-loglevel", "error", "-ss", "217", "-i"])
+            .arg(&preview)
+            .args(["-t", "0.2", "-f", "null", "-"])
+            .status()
+            .expect("seek inside preview");
+        assert!(
+            seeked.success(),
+            "preview could not seek past the former 90-second cap"
         );
         let _ = fs::remove_dir_all(root);
     }

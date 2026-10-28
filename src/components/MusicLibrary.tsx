@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { CheckCircle2, Download, Eye, FolderOpen, Headphones, LoaderCircle, Music2, Pause, Play, Search, Star, X } from 'lucide-react';
+import { CheckCircle2, Download, Eye, FolderOpen, Headphones, LoaderCircle, Music2, Pause, Play, Search, SkipBack, SkipForward, Star, X } from 'lucide-react';
 import type { MusicFile, MusicLibrarySong } from '../types';
 import { invoke, message } from '../lib/native';
 type AudioSource = { path: string };
@@ -95,7 +95,7 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
       const preview: AudioSource = item.localPath ? { path: item.localPath } : await invoke<AudioSource>('youtube_audio_preview', { id: item.id });
       const response = await invoke<ArrayBuffer | number[]>('audio_preview_bytes', { path: preview.path });
       const buffer = response instanceof ArrayBuffer ? response : Uint8Array.from(response).buffer as ArrayBuffer;
-      const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
+      const url = URL.createObjectURL(new Blob([buffer], { type: 'audio/mpeg' }));
       if (previewRequest.current !== token) { URL.revokeObjectURL(url); return; }
       previewUrl.current = url; setAudioPreview({ ...preview, url, id: item.id }); setPlayerVersion(version => version + 1);
     } catch (reason) {
@@ -109,6 +109,12 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
     if (!audio) { if (selected) void play(selected); return; }
     if (audio.paused) void audio.play().catch(reason => setPreviewError(message(reason)));
     else audio.pause();
+  };
+  const seekPreview = (seconds: number) => {
+    const audio = player.current;
+    if (!audio || !Number.isFinite(audio.duration)) return;
+    audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+    setPlayback(value => ({ ...value, current: audio.currentTime }));
   };
   const show = (next: typeof view) => {
     const items = next === 'favorites' ? favorites : next === 'downloaded' ? installed : results;
@@ -143,8 +149,8 @@ export function MusicLibrary({ favorites, installed, onFavoritesChange, onInstal
             <div className="music-player-card">
               <div className="music-player-cover"><img src={selected.thumbnail} alt="" /><button aria-label={playback.playing ? 'Pause preview' : `Play ${selected.title}`} onClick={togglePreview}>{previewLoading && playingId === selected.id ? <LoaderCircle className="spin" size={22} /> : playback.playing ? <Pause size={22} fill="currentColor" /> : <Play size={22} fill="currentColor" />}</button></div>
               <div className="music-player-copy"><small>{selected.isShort ? 'YOUTUBE SHORT · AUDIO' : 'AUDIO PREVIEW'}</small><strong title={selected.title}>{selected.title}</strong><span>{selected.channel}</span></div>
-              {audioPreview?.id === selected.id && <audio ref={player} key={`${selected.id}-${playerVersion}`} src={audioPreview.url} preload="auto" autoPlay onCanPlay={event => { if (autoStarted.current === selected.id) return; autoStarted.current = selected.id; const audio = event.currentTarget; void audio.play().catch(reason => setPreviewError(message(reason))); }} onLoadedMetadata={event => { const duration = event.currentTarget.duration; setPlayback(value => ({ ...value, duration: Number.isFinite(duration) ? duration : 0 })); }} onTimeUpdate={event => { const current = event.currentTarget.currentTime; setPlayback(value => ({ ...value, current })); }} onPlay={() => { setPreviewError(null); setPlayback(value => ({ ...value, playing: true })); }} onPause={() => setPlayback(value => ({ ...value, playing: false }))} onEnded={() => setPlayback(value => ({ ...value, current: 0, playing: false }))} onError={() => setPreviewError('This downloaded preview could not be decoded by the audio player.')} />}
-              <div className="music-player-progress"><input aria-label="Audio preview position" type="range" min="0" max={Math.max(.01, playback.duration)} step=".01" value={Math.min(playback.current, Math.max(.01, playback.duration))} style={{ '--range-fill': `${playback.duration > 0 ? playback.current / playback.duration * 100 : 0}%` } as React.CSSProperties} onChange={event => { if (player.current) player.current.currentTime = Number(event.target.value); }} /><div><span>{clock(playback.current)}</span><span>{playback.duration > 0 ? clock(playback.duration) : '--:--'}</span></div></div>
+              {audioPreview?.id === selected.id && <audio ref={player} key={`${selected.id}-${playerVersion}`} src={audioPreview.url} preload="auto" autoPlay onCanPlay={event => { if (autoStarted.current === selected.id) return; autoStarted.current = selected.id; const audio = event.currentTarget; void audio.play().catch(reason => setPreviewError(message(reason))); }} onLoadedMetadata={event => { const audio = event.currentTarget, duration = audio.duration; if (audio.currentTime !== 0) audio.currentTime = 0; setPlayback(value => ({ ...value, current: 0, duration: Number.isFinite(duration) ? duration : 0 })); }} onTimeUpdate={event => { const current = event.currentTarget.currentTime; setPlayback(value => ({ ...value, current })); }} onSeeked={event => { const current = event.currentTarget.currentTime; setPlayback(value => ({ ...value, current })); }} onPlay={() => { setPreviewError(null); setPlayback(value => ({ ...value, playing: true })); }} onPause={() => setPlayback(value => ({ ...value, playing: false }))} onEnded={() => setPlayback(value => ({ ...value, current: 0, playing: false }))} onError={() => setPreviewError('This downloaded preview could not be decoded by the audio player.')} />}
+              <div className="music-player-progress"><div className="music-player-seek"><button onClick={() => seekPreview(-5)} disabled={!audioPreview} title="Back 5 seconds" aria-label="Back 5 seconds"><SkipBack size={14} /><small>5</small></button><input aria-label="Audio preview position" type="range" min="0" max={Math.max(.01, playback.duration)} step=".01" value={Math.min(playback.current, Math.max(.01, playback.duration))} style={{ '--range-fill': `${playback.duration > 0 ? playback.current / playback.duration * 100 : 0}%` } as React.CSSProperties} onChange={event => { const audio = player.current; if (!audio) return; const current = Number(event.target.value); audio.currentTime = current; setPlayback(value => ({ ...value, current })); }} /><button onClick={() => seekPreview(5)} disabled={!audioPreview} title="Forward 5 seconds" aria-label="Forward 5 seconds"><SkipForward size={14} /><small>5</small></button></div><div><span>{clock(playback.current)}</span><span>{playback.duration > 0 ? clock(playback.duration) : '--:--'}</span></div></div>
               {!audioPreview && !previewLoading && <button className="music-preview-start" onClick={() => void play(selected)}><Headphones size={16} />Preview audio</button>}
             </div>
             {previewError && <div className="music-preview-error"><span>{previewError}</span><button onClick={() => void play(selected)}>Try again</button></div>}
