@@ -272,12 +272,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     if (existing >= 0) onMarker(track, markers[track].filter((_, index) => index !== existing));
     else onMarker(track, [...markers[track], editedToSource(lanes[track], edited)].sort((a, b) => a - b));
   };
-  const effectAtCursor = () => effects.find(effect => Math.abs(effect.time - cursorTime()) * pixelsPerSecond <= SNAP_PIXELS);
-  const toggleEffectAtCursor = () => {
-    const existing = effectAtCursor();
-    if (existing) onEffectDelete(existing.id);
-    else onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)));
-  };
+  const addEffectAtCursor = () => onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)));
   const beginEffect = (event: PointerEvent<HTMLElement>, effect: FlashEffect, mode: EffectGesture['mode']) => {
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
     onEffectSelect(effect.id); effectPreviewRef.current = effect; setEffectPreview(effect);
@@ -368,7 +363,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       else if (key === 'q') { event.preventDefault(); cut('start'); }
       else if (key === 'w') { event.preventDefault(); cut('end'); }
       else if ((event.key === 'Delete' || event.key === 'Backspace') && (selectedEffect || selectedText || selected)) { event.preventDefault(); if (selectedEffect) onEffectDelete(selectedEffect.id); else if (selectedText) onTextDelete(selectedText.id); else onEdit(selection.track, clips.filter(segment => segment.id !== selected!.id)); }
-      else if (key === 'f' && !event.ctrlKey && !event.metaKey) { event.preventDefault(); toggleEffectAtCursor(); }
+      else if (key === 'f' && !event.ctrlKey && !event.metaKey) { event.preventDefault(); addEffectAtCursor(); }
       else if (key === 'm' && selected && !selectedText && !selectedEffect) { event.preventDefault(); setMarkerAtCursor(selection.track); }
       else if (event.key === '-' || event.key === '_') { event.preventDefault(); zoom(pixelsPerSecond / 1.2); }
       else if (event.key === '=' || event.key === '+') { event.preventDefault(); zoom(pixelsPerSecond * 1.2); }
@@ -444,7 +439,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <button className="editor-tool" onClick={() => cut('split')} disabled={Boolean(selectedEffect) || (selectedText ? !canCutText : !canCut)} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={Boolean(selectedEffect) || (selectedText ? !canCutText : !canCut)} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
       <button className="editor-tool" onClick={() => selectedEffect ? onEffectDelete(selectedEffect.id) : selectedText ? onTextDelete(selectedText.id) : selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selectedEffect && !selectedText && !selected} title="Delete selection (Delete)" aria-label="Delete selection"><Trash2 size={16} /></button>
-      <button className={`editor-tool flash-action ${effectAtCursor() ? 'active' : ''}`} onClick={toggleEffectAtCursor} disabled={editedDuration < .08} title={`${effectAtCursor() ? 'Remove effect' : 'Add impact flash'} at playhead (F)`} aria-label="Toggle effect at playhead"><Sparkles size={15} /></button>
+      <button className="editor-tool flash-action" onClick={addEffectAtCursor} disabled={editedDuration < .08} title="Add impact flash at playhead (F)" aria-label="Add effect at playhead"><Sparkles size={15} /></button>
       <button className={`editor-tool marker-action ${!selectedEffect && !selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedEffect || selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
       <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 12} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="12" max="240" step="4" value={pixelsPerSecond} style={{ '--range-fill': `${(pixelsPerSecond - 12) / 228 * 100}%` } as React.CSSProperties} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>

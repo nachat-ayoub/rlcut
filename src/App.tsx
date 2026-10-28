@@ -672,11 +672,16 @@ export default function App() {
   const addEffect = useCallback((at: number, requestedTrackId?: string) => {
     const total = editedDuration(segments); if (total < .08) return;
     undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
-    const trackId = requestedTrackId || effects.find(effect => effect.id === selectedEffectId)?.trackId || effectTracks[0]?.id || crypto.randomUUID();
-    if (!effectTracks.some(track => track.id === trackId)) setEffectTracks(current => [{ id: trackId, name: 'Effects 1' }, ...current]);
-    const next = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId, time: at }), total);
+    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', time: at }), total);
+    const freeTrack = requestedTrackId ? effectTracks.find(track => track.id === requestedTrackId) : [...effectTracks].reverse().find(track => !effects.some(effect => effect.trackId === track.id && overlaps(candidate.time, candidate.time + candidate.duration, effect.time, effect.time + effect.duration)));
+    const trackId = freeTrack?.id || crypto.randomUUID();
+    if (!freeTrack) {
+      const number = effectTracks.reduce((max, track) => Math.max(max, Number(track.name.match(/\d+$/)?.[0] ?? 0)), 0) + 1;
+      setEffectTracks(current => [...current, { id: trackId, name: `Effects ${number}` }]);
+    }
+    const next = { ...candidate, trackId };
     setEffects(current => [...current, next].sort((a, b) => a.time - b.time)); setSelectedEffectId(next.id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); setPlaying(false);
-  }, [segments, snapshot, effects, selectedEffectId, effectTracks]);
+  }, [segments, snapshot, effects, effectTracks]);
   const editEffect = useCallback((next: FlashEffect) => {
     const now = performance.now();
     if (!lastEffectEdit.current || now - lastEffectEdit.current > 350) { undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); }
