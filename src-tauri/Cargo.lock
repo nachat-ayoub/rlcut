@@ -600,6 +600,7 @@ version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cae36683101b2899f48bd31f8db9839437356188e3b1ff23096e73dab09ba8fe"
 dependencies = [
+ "brotli",
  "compression-core",
  "flate2",
  "memchr",
@@ -3674,6 +3675,7 @@ dependencies = [
 name = "rlcut"
 version = "0.6.6"
 dependencies = [
+ "reqwest 0.12.28",
  "rfd",
  "rusty_ytdl",
  "serde",

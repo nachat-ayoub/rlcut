@@ -189,6 +189,145 @@ fn limited(value: String, max: usize) -> String {
     value.chars().take(max).collect()
 }
 
+fn first_json_object_after<'a>(source: &'a str, marker: &str) -> Option<&'a str> {
+    let marker_end = source.find(marker)? + marker.len();
+    let start = marker_end + source[marker_end..].find('{')?;
+    let mut depth = 0_u32;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (offset, character) in source[start..].char_indices() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == '"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match character {
+            '"' => quoted = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(&source[start..start + offset + character.len_utf8()]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn short_song(model: &serde_json::Value) -> Option<LibrarySong> {
+    let id = model
+        .pointer("/onTap/innertubeCommand/reelWatchEndpoint/videoId")?
+        .as_str()?;
+    if !valid_youtube_id(id) {
+        return None;
+    }
+    let title = model
+        .pointer("/overlayMetadata/primaryText/content")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            model
+                .get("accessibilityText")
+                .and_then(serde_json::Value::as_str)
+        })?
+        .split(", ")
+        .next()
+        .unwrap_or("YouTube Short")
+        .trim();
+    let thumbnails = model
+        .pointer("/onTap/innertubeCommand/reelWatchEndpoint/thumbnail/thumbnails")
+        .or_else(|| model.pointer("/thumbnailViewModel/thumbnailViewModel/image/sources"))
+        .and_then(serde_json::Value::as_array);
+    let thumbnail = thumbnails
+        .and_then(|items| {
+            items
+                .iter()
+                .max_by_key(|item| {
+                    item.get("width")
+                        .and_then(serde_json::Value::as_u64)
+                        .unwrap_or(0)
+                        * item
+                            .get("height")
+                            .and_then(serde_json::Value::as_u64)
+                            .unwrap_or(0)
+                })
+                .and_then(|item| item.get("url"))
+                .and_then(serde_json::Value::as_str)
+        })
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("https://i.ytimg.com/vi/{id}/hqdefault.jpg"));
+    Some(LibrarySong {
+        id: id.into(),
+        title: limited(title.into(), 500),
+        channel: "YouTube Shorts".into(),
+        thumbnail: limited(thumbnail, 2_000),
+        views: 0,
+        duration: 0.,
+        is_short: true,
+        local_path: None,
+        local_name: None,
+    })
+}
+
+fn collect_short_songs(value: &serde_json::Value, songs: &mut Vec<LibrarySong>) {
+    if songs.len() >= 18 {
+        return;
+    }
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(model) = object.get("shortsLockupViewModel") {
+                if let Some(song) = short_song(model) {
+                    songs.push(song);
+                }
+            }
+            for child in object.values() {
+                collect_short_songs(child, songs);
+            }
+        }
+        serde_json::Value::Array(array) => {
+            for child in array {
+                collect_short_songs(child, songs);
+            }
+        }
+        _ => {}
+    }
+}
+
+async fn search_youtube_shorts(query: &str) -> Result<Vec<LibrarySong>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/141 Safari/537.36")
+        .build()
+        .map_err(|error| format!("Could not start YouTube Shorts search: {error}"))?;
+    let response = client
+        .get("https://www.youtube.com/results")
+        .query(&[("search_query", query), ("hl", "en")])
+        .send()
+        .await
+        .map_err(|error| format!("YouTube Shorts search failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("YouTube Shorts search failed: {error}"))?
+        .text()
+        .await
+        .map_err(|error| format!("Could not read YouTube Shorts results: {error}"))?;
+    let json = ["var ytInitialData = ", "window[\"ytInitialData\"] = "]
+        .into_iter()
+        .find_map(|marker| first_json_object_after(&response, marker))
+        .ok_or_else(|| "YouTube did not return its Shorts results".to_string())?;
+    let data: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| format!("Could not understand YouTube Shorts results: {error}"))?;
+    let mut songs = Vec::new();
+    collect_short_songs(&data, &mut songs);
+    let mut seen = HashSet::new();
+    songs.retain(|song| seen.insert(song.id.clone()));
+    Ok(songs)
+}
+
 #[tauri::command]
 pub async fn search_youtube(query: String, shorts_only: bool) -> Result<Vec<LibrarySong>, String> {
     use rusty_ytdl::search::{SearchOptions, SearchResult, SearchType, YouTube};
@@ -201,74 +340,60 @@ pub async fn search_youtube(query: String, shorts_only: bool) -> Result<Vec<Libr
         return Err("Search must be 200 characters or fewer".into());
     }
 
+    if shorts_only {
+        return search_youtube_shorts(query).await;
+    }
+    // Standard search should remain useful if YouTube changes the optional
+    // Shorts shelf markup. The explicit Shorts-only mode still surfaces that
+    // error because returning ordinary videos there would be misleading.
+    let shorts = search_youtube_shorts(query).await.unwrap_or_default();
     let youtube =
         YouTube::new().map_err(|error| format!("Could not start YouTube search: {error}"))?;
     let options = SearchOptions {
-        limit: if shorts_only { 18 } else { 12 },
+        limit: 14,
         search_type: SearchType::Video,
         safe_search: false,
     };
-    let mut batches = Vec::new();
-    if !shorts_only {
-        batches.push((
-            youtube
-                .search(query, Some(&options))
-                .await
-                .map_err(|error| format!("YouTube search failed: {error}"))?,
-            false,
-        ));
-    }
-    // rusty_ytdl parses standard video renderers but not YouTube's dedicated
-    // Shorts shelf. A second #shorts search makes those videos part of the
-    // default result set and powers the explicit Shorts-only scope.
-    let shorts_query = format!("{query} #shorts");
-    let shorts_options = SearchOptions {
-        limit: if shorts_only { 24 } else { 10 },
-        search_type: SearchType::Video,
-        safe_search: false,
-    };
-    match youtube.search(&shorts_query, Some(&shorts_options)).await {
-        Ok(results) => batches.push((results, true)),
-        Err(error) if shorts_only => return Err(format!("YouTube Shorts search failed: {error}")),
-        Err(_) => {}
-    }
-
+    let results = youtube
+        .search(query, Some(&options))
+        .await
+        .map_err(|error| format!("YouTube search failed: {error}"))?;
     let mut seen = HashSet::new();
-    Ok(batches
+    let mut songs = results
         .into_iter()
-        .flat_map(|(results, shorts_search)| {
-            results.into_iter().filter_map(move |result| match result {
-                SearchResult::Video(video) if !video.id.is_empty() => {
-                    let is_short = shorts_search && video.duration <= 180_000;
-                    if shorts_only && !is_short {
-                        return None;
-                    }
-                    let thumbnail = video
-                        .thumbnails
-                        .iter()
-                        .max_by_key(|thumbnail| thumbnail.width.saturating_mul(thumbnail.height))
-                        .map(|thumbnail| thumbnail.url.clone())
-                        .unwrap_or_else(|| {
-                            format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", video.id)
-                        });
-                    Some(LibrarySong {
-                        id: limited(video.id, 32),
-                        title: limited(video.title, 500),
-                        channel: limited(video.channel.name, 300),
-                        thumbnail: limited(thumbnail, 2_000),
-                        views: video.views,
-                        duration: video.duration as f64 / 1_000.,
-                        is_short,
-                        local_path: None,
-                        local_name: None,
-                    })
-                }
-                _ => None,
-            })
+        .filter_map(|result| match result {
+            SearchResult::Video(video) if !video.id.is_empty() => {
+                let thumbnail = video
+                    .thumbnails
+                    .iter()
+                    .max_by_key(|thumbnail| thumbnail.width.saturating_mul(thumbnail.height))
+                    .map(|thumbnail| thumbnail.url.clone())
+                    .unwrap_or_else(|| {
+                        format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", video.id)
+                    });
+                Some(LibrarySong {
+                    id: limited(video.id, 32),
+                    title: limited(video.title, 500),
+                    channel: limited(video.channel.name, 300),
+                    thumbnail: limited(thumbnail, 2_000),
+                    views: video.views,
+                    duration: video.duration as f64 / 1_000.,
+                    is_short: false,
+                    local_path: None,
+                    local_name: None,
+                })
+            }
+            _ => None,
         })
         .filter(|song| seen.insert(song.id.clone()))
-        .take(18)
-        .collect())
+        .collect::<Vec<_>>();
+    songs.extend(
+        shorts
+            .into_iter()
+            .filter(|song| seen.insert(song.id.clone())),
+    );
+    songs.truncate(18);
+    Ok(songs)
 }
 
 #[derive(Serialize)]
@@ -456,6 +581,34 @@ pub async fn youtube_audio_preview(
         path: path.to_string_lossy().into_owned(),
         mime,
     })
+}
+
+#[tauri::command]
+pub async fn audio_preview_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    blocking(move || {
+        let path = PathBuf::from(path);
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_ascii_lowercase)
+            .ok_or("Audio preview file has no extension")?;
+        if !matches!(
+            extension.as_str(),
+            "m4a" | "mp3" | "webm" | "ogg" | "opus" | "wav" | "aac" | "flac"
+        ) {
+            return Err("Unsupported audio preview format".into());
+        }
+        let metadata = path
+            .metadata()
+            .map_err(|error| format!("Could not open the audio preview: {error}"))?;
+        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 64 * 1024 * 1024 {
+            return Err("Audio preview must be a non-empty file smaller than 64 MB".into());
+        }
+        fs::read(path)
+            .map(tauri::ipc::Response::new)
+            .map_err(|error| format!("Could not read the audio preview: {error}"))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1296,6 +1449,38 @@ pub fn cancel_preparation(state: State<AppState>) {
 #[cfg(test)]
 mod youtube_audio_tests {
     use super::*;
+
+    #[test]
+    fn shorts_parser_only_accepts_youtube_shorts_cards() {
+        let data = serde_json::json!({
+            "contents": [
+                { "videoRenderer": { "videoId": "landscape01", "lengthText": { "simpleText": "0:14" } } },
+                { "shortsLockupViewModel": {
+                    "onTap": { "innertubeCommand": { "reelWatchEndpoint": {
+                        "videoId": "shortsId001",
+                        "thumbnail": { "thumbnails": [{ "url": "https://i.ytimg.com/vi/shortsId001/oar2.jpg", "width": 405, "height": 720 }] }
+                    } } },
+                    "overlayMetadata": { "primaryText": { "content": "A real Short" } }
+                } }
+            ]
+        });
+        let mut songs = Vec::new();
+        collect_short_songs(&data, &mut songs);
+        assert_eq!(songs.len(), 1);
+        assert_eq!(songs[0].id, "shortsId001");
+        assert!(songs[0].is_short);
+        assert!(songs[0].thumbnail.contains("oar2.jpg"));
+    }
+
+    #[test]
+    #[ignore = "requires live YouTube network access"]
+    fn finds_actual_youtube_shorts_cards() {
+        let songs = tauri::async_runtime::block_on(search_youtube_shorts("rocket league edit"))
+            .expect("YouTube Shorts search should work");
+        assert!(!songs.is_empty(), "YouTube returned no Shorts cards");
+        assert!(songs.iter().all(|song| song.is_short));
+        assert!(songs.iter().all(|song| valid_youtube_id(&song.id)));
+    }
 
     #[test]
     #[ignore = "requires live YouTube network access"]

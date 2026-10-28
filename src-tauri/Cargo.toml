@@ -21,13 +21,14 @@ required-features = ["desktop"]
 [features]
 default = ["serialization"]
 serialization = ["dep:serde", "dep:serde_json"]
-desktop = ["serialization", "dep:tauri", "dep:tauri-build", "dep:rfd", "dep:rusty_ytdl"]
+desktop = ["serialization", "dep:tauri", "dep:tauri-build", "dep:rfd", "dep:reqwest", "dep:rusty_ytdl"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 tauri = { version = "2", features = ["protocol-asset"], optional = true }
 rfd = { version = "0.15", optional = true, default-features = false, features = ["gtk3"] }
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "gzip", "brotli"] }
 rusty_ytdl = { version = "0.7.4", optional = true, default-features = false, features = ["search", "rustls-tls"] }
 
 [build-dependencies]

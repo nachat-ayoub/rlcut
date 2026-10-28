@@ -29,6 +29,7 @@ pub fn run() {
             commands::import_music_path,
             commands::search_youtube,
             commands::youtube_audio_preview,
+            commands::audio_preview_bytes,
             commands::save_youtube_audio,
             commands::music_waveform,
             commands::pick_folder,

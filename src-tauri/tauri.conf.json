@@ -22,8 +22,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://fonts.google.com https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' asset: http://asset.localhost data: https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com https://*.ggpht.com https://*.googleusercontent.com; media-src 'self' asset: http://asset.localhost https://*.googlevideo.com; style-src 'self' 'unsafe-inline'; script-src 'self'",
-      "devCsp": "default-src 'self'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420 ws://localhost:1420 https://fonts.google.com https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' asset: http://asset.localhost data: https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com https://*.ggpht.com https://*.googleusercontent.com; media-src 'self' asset: http://asset.localhost https://*.googlevideo.com; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost https://fonts.google.com https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' asset: http://asset.localhost data: https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com https://*.ggpht.com https://*.googleusercontent.com; media-src 'self' blob: asset: http://asset.localhost https://*.googlevideo.com; style-src 'self' 'unsafe-inline'; script-src 'self'",
+      "devCsp": "default-src 'self'; connect-src ipc: http://ipc.localhost ws://127.0.0.1:1420 ws://localhost:1420 https://fonts.google.com https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' asset: http://asset.localhost data: https://fonts.gstatic.com; img-src 'self' data: https://i.ytimg.com https://*.ggpht.com https://*.googleusercontent.com; media-src 'self' blob: asset: http://asset.localhost https://*.googlevideo.com; style-src 'self' 'unsafe-inline'; script-src 'self'",
       "assetProtocol": {
         "enable": true,
         "scope": [

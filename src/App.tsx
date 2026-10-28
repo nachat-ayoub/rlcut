@@ -757,7 +757,11 @@ export default function App() {
           if (undoStack.current.length > 100) undoStack.current.shift();
           lastPresetEdit.current = 0;
           redoStack.current = [];
-          setMusic({ ...music, segments: next });
+          if (!next.length) {
+            setMusic(null);
+            setMarkers(current => ({ ...current, music: [] }));
+            setSelectedClip(null);
+          } else setMusic({ ...music, segments: next });
           if (!volumeOnly) setPlaying(false);
         }} />}
       {video && <footer className="workspace-footer">
