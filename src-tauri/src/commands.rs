@@ -1250,15 +1250,14 @@ pub async fn open_export(state: State<'_, AppState>, folder: bool) -> Result<(),
             command
         };
         #[cfg(target_os = "linux")]
-        if folder {
-            if std::process::Command::new("nautilus")
+        if folder
+            && std::process::Command::new("nautilus")
                 .arg("--select")
                 .arg(&path)
                 .spawn()
                 .is_ok()
-            {
-                return Ok(());
-            }
+        {
+            return Ok(());
         }
         #[cfg(target_os = "linux")]
         let mut c = {
