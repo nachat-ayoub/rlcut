@@ -1,4 +1,4 @@
-name: Cross-platform release
+name: Linux and Windows release
 on:
   create:
   workflow_dispatch:
@@ -93,53 +93,8 @@ jobs:
           path: dist/rlcut-Windows-x86_64-setup.exe
           if-no-files-found: error
 
-  macos:
-    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-apple-darwin
-            tool_arch: x64
-            asset: rlcut-macOS-x86_64.dmg
-          - target: aarch64-apple-darwin
-            tool_arch: arm64
-            asset: rlcut-macOS-arm64.dmg
-    runs-on: macos-14
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: ${{ matrix.target }}
-      - run: npm ci
-      - name: Prepare verified macOS video tools
-        run: bash scripts/prepare-macos-tools.sh '${{ matrix.tool_arch }}'
-      - name: Build macOS disk image
-        run: |
-          npm run desktop:build:native -- --target '${{ matrix.target }}' --bundles dmg --config src-tauri/tauri.macos.conf.json
-          mkdir -p dist
-          mapfile=($(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -name '*.dmg' -type f))
-          test "${#mapfile[@]}" -eq 1
-          cp "${mapfile[0]}" 'dist/${{ matrix.asset }}'
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}
-          if-no-files-found: error
-
   publish:
-    needs: [linux, windows, macos]
+    needs: [linux, windows]
     if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
     runs-on: ubuntu-24.04
     env:
@@ -158,21 +113,16 @@ jobs:
           test -s rlcut-Linux-x86_64.AppImage
           test -s rlcut-Linux-x86_64
           test -s rlcut-Windows-x86_64-setup.exe
-          test -s rlcut-macOS-x86_64.dmg
-          test -s rlcut-macOS-arm64.dmg
           sha256sum rlcut-* > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Publish all native downloads
         run: |
           cat > /tmp/release-notes.md <<'NOTES'
-          Native rlcut downloads for Linux, Windows, and macOS.
+          Native rlcut downloads for Linux and Windows.
 
           - Linux: `rlcut-Linux-x86_64.AppImage` or the FUSE-independent `rlcut-Linux-x86_64` launcher.
           - Windows 10/11 x64: `rlcut-Windows-x86_64-setup.exe` with FFmpeg and offline WebView2 bundled.
-          - Intel macOS: `rlcut-macOS-x86_64.dmg`.
-          - Apple Silicon macOS: `rlcut-macOS-arm64.dmg`.
-
-          macOS builds are currently unsigned. Use Finder's **Open** action if Gatekeeper asks for confirmation. Offline AI smoothing/upscaling is currently included only in the Linux package; normal editing and export are available on every platform.
+          Offline AI smoothing/upscaling is currently included only in the Linux package; normal editing and export are available on both platforms.
 
           Verify downloads with `SHA256SUMS`.
           NOTES
