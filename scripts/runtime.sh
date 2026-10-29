@@ -98,9 +98,7 @@ case "$action" in
       if [[ -n "$appimage" ]]; then
         cp "$appimage" dist/rlcut.AppImage
         chmod 755 dist/rlcut.AppImage
-        rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut
-        chmod 755 dist/rlcut
-        echo 'Standalone app saved to dist/rlcut (double-click) and dist/rlcut.AppImage'
+        echo 'AppImage saved to dist/rlcut.AppImage'
       fi
     else
       npm run desktop:build:native -- "$@"

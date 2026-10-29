@@ -58,15 +58,11 @@ jobs:
           mkdir -p dist
           mapfile -t images < <(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -type f)
           test "${#images[@]}" -eq 1
-          cp "${images[0]}" dist/rlcut.AppImage
-          rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut-Linux-x86_64
-          mv dist/rlcut.AppImage dist/rlcut-Linux-x86_64.AppImage
+          cp "${images[0]}" dist/rlcut-Linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: rlcut-Linux-x86_64
-          path: |
-            dist/rlcut-Linux-x86_64.AppImage
-            dist/rlcut-Linux-x86_64
+          path: dist/rlcut-Linux-x86_64.AppImage
           if-no-files-found: error
 
   windows:
@@ -142,7 +138,6 @@ jobs:
         working-directory: dist
         run: |
           test -s rlcut-Linux-x86_64.AppImage
-          test -s rlcut-Linux-x86_64
           test -s rlcut-Windows-x86_64-setup.exe
           sha256sum rlcut-* > SHA256SUMS
           sha256sum --check SHA256SUMS
@@ -151,7 +146,7 @@ jobs:
           cat > /tmp/release-notes.md <<'NOTES'
           Native rlcut downloads for Linux and Windows.
 
-          - Linux: `rlcut-Linux-x86_64.AppImage` or the FUSE-independent `rlcut-Linux-x86_64` launcher.
+          - Linux: `rlcut-Linux-x86_64.AppImage`.
           - Windows 10/11 x64: `rlcut-Windows-x86_64-setup.exe` with FFmpeg bundled. Windows 11 already includes WebView2; the installer fetches it on older systems when needed.
           Offline AI smoothing/upscaling is currently included only in the Linux package; normal editing and export are available on both platforms.
 
