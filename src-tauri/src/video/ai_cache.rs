@@ -2,20 +2,25 @@
 use super::{
     args,
     binaries::Binaries,
-    enhance,
     export::{self, Job},
-    metadata,
 };
+#[cfg(not(target_os = "windows"))]
+use super::{enhance, metadata};
 use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
+#[cfg(not(target_os = "windows"))]
 use std::{
     collections::hash_map::DefaultHasher,
-    fs,
     hash::{Hash, Hasher},
     io::Read,
+    time::UNIX_EPOCH,
+};
+use std::{
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Instant, UNIX_EPOCH},
+    time::Instant,
 };
+#[cfg(not(target_os = "windows"))]
 const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub fn root() -> Result<PathBuf, String> {
     let base = std::env::var_os("XDG_CACHE_HOME")
@@ -24,6 +29,7 @@ pub fn root() -> Result<PathBuf, String> {
         .ok_or("Cannot locate AI cache directory")?;
     Ok(base.join("io.rlcut.desktop/ai-exports-v4"))
 }
+#[cfg(not(target_os = "windows"))]
 fn fingerprint(path: &Path) -> Result<serde_json::Value, String> {
     let p = path
         .canonicalize()
@@ -38,6 +44,7 @@ fn fingerprint(path: &Path) -> Result<serde_json::Value, String> {
             .map(|d| d.as_nanos().to_string())
     ]))
 }
+#[cfg(not(target_os = "windows"))]
 fn model_identity(path: &Path) -> Result<serde_json::Value, String> {
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hash = 0xcbf29ce484222325u64;
@@ -59,6 +66,7 @@ fn model_identity(path: &Path) -> Result<serde_json::Value, String> {
         format!("{hash:016x}")
     ]))
 }
+#[cfg(not(target_os = "windows"))]
 fn compatible(old: &serde_json::Value, current: &serde_json::Value) -> bool {
     if old == current {
         return true;
@@ -113,6 +121,7 @@ fn compatible(old: &serde_json::Value, current: &serde_json::Value) -> bool {
                 .any(|old| old[0] == model[0] && old[1] == model[1])
     })
 }
+#[cfg(not(target_os = "windows"))]
 fn cache_warning(job: &Job) {
     if let Ok(mut p) = job.progress.lock() {
         let warning = "AI video could not be cached. Future exports will repeat AI processing; check free disk space and cache permissions.";
@@ -122,6 +131,7 @@ fn cache_warning(job: &Job) {
         ));
     }
 }
+#[cfg(not(target_os = "windows"))]
 fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
     let Ok(v) = metadata::probe(b, path) else {
         return false;
@@ -134,6 +144,7 @@ fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
         && (v.duration - duration).abs() < 0.15
         && (v.fps - o.fps as f64).abs() < 0.1
 }
+#[cfg(not(target_os = "windows"))]
 fn directory_size(path: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(path) else {
         return 0;
@@ -152,6 +163,7 @@ fn directory_size(path: &Path) -> u64 {
         })
         .sum()
 }
+#[cfg(not(target_os = "windows"))]
 fn prune(root: &Path, keep: &Path) {
     let Ok(dirs) = fs::read_dir(root) else {
         return;
