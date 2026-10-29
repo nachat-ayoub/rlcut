@@ -703,24 +703,56 @@ pub async fn save_youtube_audio(
         return Err("Choose an existing Music Library folder in Settings".into());
     }
     let binaries = state.binaries.clone();
-    if let Some(existing) = ["webm", "m4a", "opus", "ogg", "mp3"]
+    let output = folder.join(format!("{stem} [{id}].mp3"));
+    if output.is_file() {
+        return blocking(move || metadata::probe_music(&binaries, &output)).await;
+    }
+    let legacy = ["webm", "m4a", "opus", "ogg"]
         .into_iter()
         .map(|extension| folder.join(format!("{stem} [{id}].{extension}")))
-        .find(|path| path.is_file())
-    {
-        return blocking(move || metadata::probe_music(&binaries, &existing)).await;
-    }
-    let (source, _) = download_youtube_audio(state.audio_cache.clone(), id.clone()).await?;
+        .find(|path| path.is_file());
+    let source = match legacy.as_ref() {
+        Some(path) => path.clone(),
+        None => {
+            download_youtube_audio(state.audio_cache.clone(), id.clone())
+                .await?
+                .0
+        }
+    };
     blocking(move || {
-        let extension = source
-            .extension()
-            .and_then(|value| value.to_str())
-            .filter(|value| ["webm", "m4a", "opus", "ogg", "mp3"].contains(value))
-            .unwrap_or("m4a");
-        let output = folder.join(format!("{stem} [{id}].{extension}"));
-        let partial = output.with_file_name(format!(".{stem}.rlcut-partial.{extension}"));
-        fs::copy(&source, &partial)
-            .map_err(|error| format!("Could not copy the downloaded audio: {error}"))?;
+        let partial = output.with_file_name(format!(".{stem}.rlcut-partial.mp3"));
+        let result = crate::video::binaries::command(binaries.ffmpeg()?)
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i"])
+            .arg(&source)
+            .args([
+                "-map",
+                "0:a:0",
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                "48000",
+                "-c:a",
+                "libmp3lame",
+                "-b:a",
+                "320k",
+                "-id3v2_version",
+                "3",
+                "-write_xing",
+                "1",
+            ])
+            .arg(&partial)
+            .output()
+            .map_err(|error| format!("Could not convert the downloaded audio to MP3: {error}"))?;
+        if !result.status.success() {
+            let _ = fs::remove_file(&partial);
+            let details = String::from_utf8_lossy(&result.stderr).trim().to_string();
+            return Err(if details.is_empty() {
+                "Could not convert the downloaded audio to MP3".into()
+            } else {
+                format!("Could not convert the downloaded audio to MP3: {details}")
+            });
+        }
         if output.exists() {
             fs::remove_file(&output)
                 .map_err(|error| format!("Could not replace the saved audio: {error}"))?;
@@ -729,7 +761,11 @@ pub async fn save_youtube_audio(
             let _ = fs::remove_file(&partial);
             format!("Could not finish saving the audio file: {error}")
         })?;
-        metadata::probe_music(&binaries, &output)
+        let music = metadata::probe_music(&binaries, &output)?;
+        if let Some(legacy) = legacy {
+            let _ = fs::remove_file(legacy);
+        }
+        Ok(music)
     })
     .await
 }

@@ -2064,7 +2064,12 @@ progress::-moz-progress-bar {
 .font-favorite { position:relative; z-index:2; justify-self:end }
 .font-picker-popover .font-source-tabs { margin-right:2px }
 .font-picker-popover .font-search { margin-right:2px }
-.inspector-scroll:has(.font-picker-popover) { overflow:hidden }
+.premium-text-inspector .font-picker-popover {
+  position:relative;
+  inset:auto;
+  margin-top:5px;
+  box-shadow:0 10px 24px #06040888
+}
 
 /* Professional text property editor: one surface, progressive disclosure. */
 .premium-text-inspector { gap:9px }
