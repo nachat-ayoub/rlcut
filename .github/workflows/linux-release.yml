@@ -29,6 +29,8 @@ jobs:
     env:
       CARGO_BUILD_JOBS: '2'
       APPIMAGE_EXTRACT_AND_RUN: '1'
+      RLCUT_PREBUILT_AI_APPIMAGE: https://github.com/nachat-ayoub/rlcut/releases/download/v0.6.6/rlcut-Linux-x86_64.AppImage
+      RLCUT_PREBUILT_AI_SHA256: 4782e5fe06fd70fa70c5f2d86d55bb4ba00c20c1da8cebef55fa9d504493988d
     steps:
       - name: Install clean Ubuntu 22.04 build dependencies
         env:
