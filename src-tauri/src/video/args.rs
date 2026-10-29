@@ -60,11 +60,28 @@ fn append_effect_filters(
                     effect.time,
                     effect.time + effect.duration
                 );
-                let saturation = 1. - effect.intensity;
-                let brightness = -0.12 * effect.intensity;
+                // Match CSS `grayscale() brightness() contrast()` exactly.
+                // The preview uses that filter chain, so exporting through a
+                // YUV hue filter produces visibly different colors. CSS uses
+                // this sRGB luminance matrix and applies brightness before
+                // contrast; the alpha-channel terms provide contrast's offset.
+                let amount = effect.intensity;
+                let inverse = 1. - amount;
+                let brightness = 1. - amount * 0.12;
                 let contrast = 1. + 0.08 * effect.intensity;
+                let gain = brightness * contrast;
+                let offset = 0.5 * (1. - contrast);
+                let rr = gain * (0.2126 + 0.7874 * inverse);
+                let rg = gain * (0.7152 * amount);
+                let rb = gain * (0.0722 * amount);
+                let gr = gain * (0.2126 * amount);
+                let gg = gain * (0.7152 + 0.2848 * inverse);
+                let gb = gain * (0.0722 * amount);
+                let br = gain * (0.2126 * amount);
+                let bg = gain * (0.7152 * amount);
+                let bb = gain * (0.0722 + 0.9278 * inverse);
                 graph.push_str(&format!(
-                    ";[{video_output}]hue=s={saturation:.6}:enable='{enabled}',eq=brightness={brightness:.6}:contrast={contrast:.6}:enable='{enabled}'[{next}]"
+                    ";[{video_output}]colorchannelmixer=rr={rr:.6}:rg={rg:.6}:rb={rb:.6}:ra={offset:.6}:gr={gr:.6}:gg={gg:.6}:gb={gb:.6}:ga={offset:.6}:br={br:.6}:bg={bg:.6}:bb={bb:.6}:ba={offset:.6}:enable='{enabled}'[{next}]"
                 ));
             }
         }
@@ -855,10 +872,8 @@ mod tests {
         let text = graph.find("drawtext=").unwrap();
         let all_effect = graph.find("[all_effect1]").unwrap();
         assert!(video_effect < text && text < all_effect);
-        assert!(graph.contains("hue=s=0.300000:enable='between(t\\,0.200000\\,0.600000)'"));
-        assert!(graph.contains(
-            "eq=brightness=-0.084000:contrast=1.056000:enable='between(t\\,0.200000\\,0.600000)'"
-        ));
+        assert!(graph.contains("colorchannelmixer="));
+        assert!(graph.contains(":enable='between(t\\,0.200000\\,0.600000)'"));
     }
     #[test]
     fn structured_args_cfr_optional_audio() {

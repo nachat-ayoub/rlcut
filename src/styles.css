@@ -887,7 +887,7 @@ h1 {
 .layer-delete:hover { border-color:#453a4d; color:#c9bacf; background:#27212d }
 .base-track { justify-content:flex-start; gap:7px; padding:0 9px }
 .base-track small { min-width:0; overflow:hidden; color:#8f8299; font-size:8px; font-weight:600; text-overflow:ellipsis }
-.composition-text { position:absolute; z-index:5; min-width:max-content; max-width:90%; display:grid; padding:.08em .18em; white-space:pre-wrap; overflow-wrap:anywhere; cursor:move; user-select:none; touch-action:none; transform-origin:center; border:1px solid transparent; border-radius:3px }
+.composition-text { position:absolute; z-index:5; min-width:0; max-width:90%; display:grid; padding:.08em .18em; white-space:pre-wrap; overflow-wrap:anywhere; cursor:move; user-select:none; touch-action:none; transform-origin:center; border:1px solid transparent; border-radius:3px }
 .composition-text>span { grid-area:1/1; white-space:inherit; overflow-wrap:inherit }
 .composition-text-fill { position:relative; z-index:1 }
 .composition-text-shadow { position:relative; z-index:0; pointer-events:none }
