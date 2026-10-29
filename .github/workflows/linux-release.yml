@@ -1,23 +1,24 @@
-name: Linux AppImage release
+name: Cross-platform release
 on:
-  # Tag creation is separate from push CI, so a build-only release is possible
-  # even when a commit deliberately skips the repository's test workflow.
   create:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing version tag to build (for example v0.2.0)'
+        description: 'Existing version tag to build (for example v0.6.7)'
         required: true
         type: string
+
 permissions:
   contents: write
   actions: read
+
 concurrency:
-  group: linux-release-${{ github.event.inputs.tag || github.ref_name }}
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
   cancel-in-progress: false
+
 jobs:
-  appimage:
-    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v')) || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release-build-'))
+  linux:
+    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
     runs-on: ubuntu-24.04
     container:
       image: ubuntu:22.04
@@ -29,18 +30,12 @@ jobs:
       CARGO_BUILD_JOBS: '2'
       APPIMAGE_EXTRACT_AND_RUN: '1'
     steps:
-      - name: Clean Ubuntu 22.04 build dependencies
+      - name: Install clean Ubuntu 22.04 build dependencies
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          # A clean container avoids preinstalled runner packages conflicting with GTK.
-          if ! apt-get update > /tmp/rlcut-apt.log 2>&1 || ! apt-get install -y --no-install-recommends ca-certificates git gh curl python3 file wget xz-utils unzip build-essential cmake libpng-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libvulkan1 libgstreamer1.0-dev gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good >> /tmp/rlcut-apt.log 2>&1; then
-            message="$(tail -c 2500 /tmp/rlcut-apt.log)"
-            message="${message//'%'/'%25'}"
-            message="${message//$'\n'/'%0A'}"
-            printf '::error::%s\n' "$message"
-            exit 1
-          fi
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git curl python3 file wget xz-utils unzip build-essential cmake libpng-dev pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf ffmpeg libvulkan1 libgstreamer1.0-dev gstreamer1.0-tools gstreamer1.0-libav gstreamer1.0-plugins-base gstreamer1.0-plugins-good
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
@@ -53,42 +48,98 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
-      - name: Build Linux AppImage (no test execution)
+      - name: Build Linux AppImage
         run: |
-          exec > >(tee /tmp/rlcut-build.log) 2>&1
-          report_failure() {
-            status=$?
-            trap - ERR
-            message="$(tail -c 2500 /tmp/rlcut-build.log)"
-            message="${message//'%'/'%25'}"
-            message="${message//$'\n'/'%0A'}"
-            printf '::error::%s\n' "$message"
-            exit "$status"
-          }
-          trap report_failure ERR
           bash scripts/prepare-appimage.sh
           npm run desktop:build:native -- --bundles appimage --config src-tauri/tauri.appimage.conf.json
           mkdir -p dist
           mapfile -t images < <(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -type f)
           test "${#images[@]}" -eq 1
           cp "${images[0]}" dist/rlcut-Linux-x86_64.AppImage
-          cp dist/rlcut-Linux-x86_64.AppImage dist/rlcut.AppImage
           rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut-Linux-x86_64
-          cd dist
-          sha256sum rlcut-Linux-x86_64.AppImage rlcut-Linux-x86_64 > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: rlcut-Linux-x86_64
           path: |
             dist/rlcut-Linux-x86_64.AppImage
             dist/rlcut-Linux-x86_64
-            dist/SHA256SUMS
           if-no-files-found: error
-          retention-days: 30
+
+  windows:
+    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build Windows installer with bundled video tools
+        shell: pwsh
+        run: |
+          npm run desktop:build:windows
+          Move-Item dist/rlcut-setup.exe dist/rlcut-Windows-x86_64-setup.exe -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rlcut-Windows-x86_64
+          path: dist/rlcut-Windows-x86_64-setup.exe
+          if-no-files-found: error
+
+  macos:
+    if: github.event_name == 'workflow_dispatch' || (github.event.ref_type == 'tag' && startsWith(github.event.ref, 'v'))
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            tool_arch: x64
+            asset: rlcut-macOS-x86_64.dmg
+          - target: aarch64-apple-darwin
+            tool_arch: arm64
+            asset: rlcut-macOS-arm64.dmg
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+      - run: npm ci
+      - name: Prepare verified macOS video tools
+        run: bash scripts/prepare-macos-tools.sh '${{ matrix.tool_arch }}'
+      - name: Build macOS disk image
+        run: |
+          npm run desktop:build:native -- --target '${{ matrix.target }}' --bundles dmg --config src-tauri/tauri.macos.conf.json
+          mkdir -p dist
+          mapfile=($(find "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -name '*.dmg' -type f))
+          test "${#mapfile[@]}" -eq 1
+          cp "${mapfile[0]}" 'dist/${{ matrix.asset }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
   publish:
-    # Publish on the host with current gh, outside the build container. A publishing
-    # failure must not discard successful builds or prevent Rust cache saving.
-    needs: appimage
+    needs: [linux, windows, macos]
     if: github.event_name == 'workflow_dispatch' || github.event.ref_type == 'tag'
     runs-on: ubuntu-24.04
     env:
@@ -98,32 +149,35 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: rlcut-Linux-x86_64
+          pattern: rlcut-*
           path: dist
-      - name: Verify downloadable artifacts
+          merge-multiple: true
+      - name: Verify and checksum release assets
         working-directory: dist
-        run: sha256sum --check SHA256SUMS
-      - name: Publish downloadable GitHub release assets
+        run: |
+          test -s rlcut-Linux-x86_64.AppImage
+          test -s rlcut-Linux-x86_64
+          test -s rlcut-Windows-x86_64-setup.exe
+          test -s rlcut-macOS-x86_64.dmg
+          test -s rlcut-macOS-arm64.dmg
+          sha256sum rlcut-* > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - name: Publish all native downloads
         run: |
           cat > /tmp/release-notes.md <<'NOTES'
-          Linux x86_64 AppImage with optional offline RIFE AI smoothing in Export.
+          Native rlcut downloads for Linux, Windows, and macOS.
 
-          Download `rlcut-Linux-x86_64.AppImage`, make it executable, and run it. If FUSE is unavailable, run with `--appimage-extract-and-run`, or use the single-file `rlcut-Linux-x86_64` launcher instead.
+          - Linux: `rlcut-Linux-x86_64.AppImage` or the FUSE-independent `rlcut-Linux-x86_64` launcher.
+          - Windows 10/11 x64: `rlcut-Windows-x86_64-setup.exe` with FFmpeg and offline WebView2 bundled.
+          - Intel macOS: `rlcut-macOS-x86_64.dmg`.
+          - Apple Silicon macOS: `rlcut-macOS-arm64.dmg`.
 
-          Font export fix: titles are rendered once using the editor's browser font engine, preserving Google variable-font weight/italic selection instead of FFmpeg opening the font at its default weight. Transparent text images are composited after the AI pass. Google Fonts search now includes a bundled catalog of 1,959 families, including Bricolage Grotesque, and reselecting downloaded fonts retains their style variants.
+          macOS builds are currently unsigned. Use Finder's **Open** action if Gatekeeper asks for confirmation. Offline AI smoothing/upscaling is currently included only in the Linux package; normal editing and export are available on every platform.
 
-          Completed full-AI caches from stock v0.5.0/v0.5.1/v0.6.0 are reused when source footage, edit and AI settings match. Future cache identity uses model content instead of app version/helper timestamps, so text-only updates do not force another long AI pass. A failed cache save now shows a warning. New clips, changed cuts/layout/color/FPS/resolution/models or a removed/evicted cache still require AI processing again; runtime speed for new work is unchanged in this patch.
-
-          Faster software preview: adaptive playing canvas, reduced frame transfers, reusable native buffers, cached blur/masks, lookup-table color correction, fewer React updates and source-timed frame polling. Linux automatically enables graphics compatibility when no readable GPU render node is present; force it with `RLCUT_SOFTWARE_RENDERING=1`. The preview now displays measured FPS and the sidebar shows the actual app version. Pausing restores a larger canvas. Preview optimizations do not change export settings. Actual FPS depends on the PC and scene.
-
-          AI upscaling now automatically uses a hardware Vulkan GPU when its driver is working, with full-AI CPU fallback on failure. CPU inference processes tiles concurrently with shared model weights: up to 12 threads, leaving two threads available on larger machines, and one to three tile workers based on available RAM. Progress identifies the actual GPU or CPU backend. Software Vulkan devices are excluded; an unbound or missing GPU driver cannot provide acceleration. RIFE smoothing remains on CPU. Both Upscayl Lite and compact video models run offline in persistent workers. Keep selected size mode uses a 540 × 960 AI input for 1080 × 1920 output; ×2 enlargement remains available. AI processes the edited footage before crisp text and audio, then caches that video for later text/music edits. Exact duplicate frames reuse the previous enhanced result. Bounded concurrency, low priority and tiled inference reduce pressure. The final text/audio pass now estimates its own remaining time. Full AI processing has no timed quality downgrade or 45-minute cutoff; thirty minutes is a target, not a measured hardware guarantee.
-
-          Docker playback forwards an available PulseAudio/PipeWire-Pulse socket or uses silent preview when none exists, preserving exported audio. Decoder timeouts now show a retry control. Choose 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage when smoothing. AI may introduce flicker, motion/texture errors or lose native detail; normal exports can look better for already sharp 4K recordings. No GPU, account, Python installation or model download is needed on your laptop.
-
-          This release was built without running tests, as requested. Check SHA256SUMS after downloading.
+          Verify downloads with `SHA256SUMS`.
           NOTES
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --clobber
+            gh release upload "$RELEASE_TAG" dist/* --clobber
           else
-            gh release create "$RELEASE_TAG" dist/rlcut-Linux-x86_64.AppImage dist/rlcut-Linux-x86_64 dist/SHA256SUMS --verify-tag --title "rlcut $RELEASE_TAG · Linux AI export" --notes-file /tmp/release-notes.md
+            gh release create "$RELEASE_TAG" dist/* --verify-tag --title "rlcut $RELEASE_TAG" --notes-file /tmp/release-notes.md
           fi
