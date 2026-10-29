@@ -58,8 +58,9 @@ jobs:
           mkdir -p dist
           mapfile -t images < <(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' -type f)
           test "${#images[@]}" -eq 1
-          cp "${images[0]}" dist/rlcut-Linux-x86_64.AppImage
+          cp "${images[0]}" dist/rlcut.AppImage
           rustc --edition=2021 -C opt-level=2 -C strip=symbols scripts/linux-launcher.rs -o dist/rlcut-Linux-x86_64
+          mv dist/rlcut.AppImage dist/rlcut-Linux-x86_64.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: rlcut-Linux-x86_64
