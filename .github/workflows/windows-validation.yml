@@ -1,0 +1,42 @@
+name: Validate Windows portable app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/windows-portable-runtime
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/cache@v4
+        with:
+          path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
+          key: windows-ffmpeg-8.1.2-db580001
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm test
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --features desktop --all-targets -- -D warnings
+      - name: Build portable Windows executable
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rlcut-Windows-x86_64-portable-validation
+          path: dist/rlcut-Windows-x86_64-portable.exe
+          if-no-files-found: error
