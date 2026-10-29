@@ -7,7 +7,7 @@
       "../.runtime/windows/tools/notices/": "resources/ffmpeg/notices/"
     },
     "windows": {
-      "webviewInstallMode": { "type": "offlineInstaller" },
+      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": { "installMode": "currentUser" }
     }
   }

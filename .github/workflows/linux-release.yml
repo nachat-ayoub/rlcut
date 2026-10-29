@@ -81,6 +81,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - uses: actions/cache@v4
+        with:
+          path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
+          key: windows-ffmpeg-8.1.2-db580001
       - run: npm ci
       - name: Build Windows installer with bundled video tools
         shell: pwsh
@@ -121,7 +125,7 @@ jobs:
           Native rlcut downloads for Linux and Windows.
 
           - Linux: `rlcut-Linux-x86_64.AppImage` or the FUSE-independent `rlcut-Linux-x86_64` launcher.
-          - Windows 10/11 x64: `rlcut-Windows-x86_64-setup.exe` with FFmpeg and offline WebView2 bundled.
+          - Windows 10/11 x64: `rlcut-Windows-x86_64-setup.exe` with FFmpeg bundled. Windows 11 already includes WebView2; the installer fetches it on older systems when needed.
           Offline AI smoothing/upscaling is currently included only in the Linux package; normal editing and export are available on both platforms.
 
           Verify downloads with `SHA256SUMS`.
