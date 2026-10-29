@@ -28,6 +28,9 @@ jobs:
           path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
           key: windows-ffmpeg-8.1.2-db580001
       - run: npm ci
+      - name: Prepare verified Windows media tools
+        shell: pwsh
+        run: ./scripts/prepare-windows-tools.ps1
       - run: npm run format:check
       - run: npm run lint
       - run: npm test
