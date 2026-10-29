@@ -32,18 +32,6 @@ export async function stampText(text: TextOverlay, width: number, height: number
   const font = `${text.italic ? 'italic' : 'normal'} ${text.fontWeight} ${size}px ${JSON.stringify(text.fontFamily)}`;
   await document.fonts.load(font, text.text || ' ');
   await document.fonts.ready;
-  const host = document.createElement('div');
-  Object.assign(host.style, { position: 'fixed', left: '-100000px', top: '0', width: `${width}px`, height: `${height}px`, visibility: 'hidden', pointerEvents: 'none' });
-  const box = document.createElement('div');
-  box.className = 'composition-text';
-  Object.assign(box.style, {
-    left: '0', top: '0', width: `${text.boxWidth * 100}%`,
-    fontFamily: text.fontFamily, fontSize: `${size}px`, fontWeight: String(text.fontWeight),
-    fontStyle: text.italic ? 'italic' : 'normal', letterSpacing: `${text.letterSpacing * factor}px`,
-    lineHeight: String(text.lineHeight), textAlign: text.align,
-  });
-  const span = document.createElement('span');
-  span.textContent = text.text; box.append(span); host.append(box); document.body.append(host);
   try {
     const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
     const ctx = canvas.getContext('2d');
@@ -57,26 +45,10 @@ export async function stampText(text: TextOverlay, width: number, height: number
     const nativeSpacing = Reflect.has(ctx, 'letterSpacing');
     const measure = (value: string) => ctx.measureText(value).width + Math.max(0, Array.from(value).length - 1) * letterSpacing;
     const paddingX = size * .18, paddingY = size * .08;
-    const bounds = { width: text.boxWidth * width, height: 0 };
-    const maxLineWidth = Math.max(size * .5, bounds.width - paddingX * 2);
-    const wrap = (paragraph: string) => {
-      if (!paragraph) return [''];
-      const output: string[] = [];
-      let line = '';
-      for (const character of paragraph) {
-        if (!line || measure(line + character) <= maxLineWidth) { line += character; continue; }
-        const breakAt = line.lastIndexOf(' ');
-        if (breakAt > 0) {
-          output.push(line.slice(0, breakAt));
-          line = `${line.slice(breakAt + 1)}${character}`;
-        } else {
-          output.push(line); line = character;
-        }
-      }
-      output.push(line);
-      return output;
-    };
-    const values = text.text.replace(/\r\n?/g, '\n').split('\n').flatMap(wrap);
+    // Text is intrinsically sized. Only explicit newlines create new rows;
+    // users control wrapping by pressing Enter in the text editor.
+    const values = text.text.replace(/\r\n?/g, '\n').split('\n');
+    const bounds = { width: Math.max(size * .5, ...values.map(measure)) + paddingX * 2, height: 0 };
     const lineStep = size * text.lineHeight;
     const textHeight = ascent + descent + Math.max(0, values.length - 1) * lineStep;
     bounds.height = textHeight + paddingY * 2;
@@ -164,5 +136,5 @@ export async function stampText(text: TextOverlay, width: number, height: number
     const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
     cropped.width = cropped.height = 0;
     return { renderedPath: await invoke<string>('save_text_stamp', { bytes }), renderedX: left, renderedY: top };
-  } finally { host.remove(); }
+  } finally { /* Canvas resources are released above. */ }
 }

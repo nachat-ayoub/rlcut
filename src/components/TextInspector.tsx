@@ -62,7 +62,6 @@ export function TextInspector({ value, fonts, favoriteFonts, onChange, onAddGoog
       <PropertyGroup title="Typography" icon={<Type size={15} />} summary={`${weightName} · ${Math.round(value.fontSize)} px`} open={groups.typography} onToggle={() => toggle('typography')}>
         <Slider label="Font size" value={value.fontSize} min={12} max={240} step={1} defaultValue={72} onChange={next => set('fontSize', next)} suffix="px" />
         <Slider label="Opacity" value={value.opacity} min={0} max={1} step={.01} defaultValue={1} onChange={next => set('opacity', next)} suffix="×" />
-        <Slider label="Text box width" value={value.boxWidth} min={.1} max={1} step={.01} defaultValue={.7} onChange={next => set('boxWidth', next)} suffix="×" />
         <Slider label="Letter spacing" value={value.letterSpacing} min={-5} max={30} step={.5} defaultValue={0} onChange={next => set('letterSpacing', next)} suffix="px" />
         <Slider label="Line height" value={value.lineHeight} min={.7} max={2} step={.05} defaultValue={1.2} onChange={next => set('lineHeight', next)} suffix="×" />
       </PropertyGroup>
