@@ -31,7 +31,17 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm test
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --features desktop --all-targets -- -D warnings
+      - name: Compile and lint Windows runtime
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'windows-clippy.log'
+          & cargo clippy --manifest-path src-tauri/Cargo.toml --features desktop --all-targets -- -D warnings 2>&1 | Tee-Object -FilePath $log
+          $exit = $LASTEXITCODE
+          if ($exit -ne 0) {
+            $detail = ((Get-Content $log -Tail 80) -join ' | ').Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Host "::error title=Windows Rust compilation failed::$detail"
+            exit $exit
+          }
       - name: Build portable Windows executable
         shell: pwsh
         run: ./scripts/build-windows.ps1

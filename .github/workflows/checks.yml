@@ -31,7 +31,7 @@ jobs:
           # installer replaces these placeholders with verified FFmpeg binaries.
           $tools = '.runtime/windows/tools'
           New-Item -ItemType Directory -Force -Path "$tools/notices" | Out-Null
-          New-Item -ItemType File -Force -Path "$tools/ffmpeg.exe", "$tools/ffprobe.exe" | Out-Null
+          New-Item -ItemType File -Force -Path "$tools/ffmpeg.exe", "$tools/ffprobe.exe", "$tools/ffplay.exe" | Out-Null
           Copy-Item THIRD_PARTY_NOTICES.md "$tools/notices/THIRD_PARTY_NOTICES.md"
       - run: npm ci
       - run: npm run format:check
