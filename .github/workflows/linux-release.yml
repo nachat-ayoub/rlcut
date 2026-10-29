@@ -86,11 +86,36 @@ jobs:
           path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
           key: windows-ffmpeg-8.1.2-db580001
       - run: npm ci
-      - name: Build Windows installer with bundled video tools
+      - name: Prepare verified Windows video tools
         shell: pwsh
         run: |
-          npm run desktop:build:windows
-          Move-Item dist/rlcut-setup.exe dist/rlcut-Windows-x86_64-setup.exe -Force
+          $log = Join-Path $env:RUNNER_TEMP 'windows-tools.log'
+          try {
+            & ./scripts/prepare-windows-tools.ps1 2>&1 | Tee-Object -FilePath $log
+          } catch {
+            $_ | Out-String | Tee-Object -FilePath $log -Append | Write-Host
+            $detail = ((Get-Content $log -Tail 40) -join ' | ').Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Host "::error title=Windows video tools failed::$detail"
+            exit 1
+          }
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'windows-installer.log'
+          & npm run desktop:build:native -- --config src-tauri/tauri.windows.conf.json 2>&1 | Tee-Object -FilePath $log
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            $detail = ((Get-Content $log -Tail 60) -join ' | ').Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Host "::error title=Windows installer build failed::$detail"
+            exit $buildExit
+          }
+          $installer = @(Get-ChildItem 'src-tauri/target/release/bundle/nsis' -Filter '*-setup.exe')
+          if ($installer.Count -ne 1) {
+            Write-Host "::error title=Windows installer missing::Expected one NSIS installer, found $($installer.Count)."
+            exit 1
+          }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $installer[0].FullName 'dist/rlcut-Windows-x86_64-setup.exe' -Force
       - uses: actions/upload-artifact@v4
         with:
           name: rlcut-Windows-x86_64
