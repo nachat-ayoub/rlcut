@@ -47,7 +47,7 @@ pub fn installation() -> Option<(PathBuf, PathBuf)> {
 }
 
 pub fn available() -> bool {
-    installation().is_some()
+    cfg!(target_os = "windows") || installation().is_some()
 }
 
 fn ai_threads() -> usize {

@@ -192,10 +192,10 @@ The latter handles extraction on Linux without requiring FUSE. Copy/run the app
 without neighboring FFmpeg files or Docker. Required tools/plugins are bundled;
 AppImage extraction into temporary storage is normal runtime behavior.
 
-**Native engine packaging currently supports Linux only.** Windows/macOS native
-runtime integration and packaging are pending; the old browser fallback was
-removed. Do not publish the earlier Windows installer as if native playback there
-were supported. Cross-platform support remains an outstanding project requirement.
+Linux uses the native GStreamer engine. Windows now uses a bundled FFmpeg raw-frame
+decoder with FFplay audio and is published as a self-extracting portable executable;
+macOS native playback remains pending. Windows AI switches use a compatible FFmpeg
+motion-compensation/Lanczos backend, while Linux retains the bundled NCNN models.
 
 ## User priorities to preserve
 

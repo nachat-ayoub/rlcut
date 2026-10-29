@@ -1,4 +1,4 @@
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 fn main() {
     use rlcut_lib::{model::Segment, video::player::Player};
     use std::{
@@ -22,6 +22,8 @@ fn main() {
             volume: 1.,
             color_fix: 0.,
         }],
+        PathBuf::from("ffmpeg"),
+        Some(PathBuf::from("ffplay")),
     )
     .expect("native player should open");
     player.play(true).expect("native player should play");
@@ -42,7 +44,7 @@ fn main() {
     assert!(fps >= 30., "native decoding fell below 30 FPS");
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 fn main() {
-    eprintln!("The native playback FPS check is currently Linux-only");
+    eprintln!("The native playback FPS check is not available on this platform");
 }

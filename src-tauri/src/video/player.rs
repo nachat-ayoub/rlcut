@@ -3,6 +3,13 @@
 use crate::model::{MusicTrack, Segment};
 #[cfg(target_os = "linux")]
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::path::PathBuf;
+#[cfg(target_os = "windows")]
+use std::{
+    io::{BufReader, Read},
+    process::{Child, ChildStdout, Stdio},
+    time::{Duration, Instant},
+};
 #[cfg(target_os = "linux")]
 unsafe extern "C" {
     fn rl_player_open(
@@ -45,7 +52,33 @@ pub struct Player {
     error: Option<String>,
     music: Option<MusicPlayer>,
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
+pub struct Player {
+    path: String,
+    ffmpeg: PathBuf,
+    ffplay: Option<PathBuf>,
+    decoder: Option<Child>,
+    frames: Option<BufReader<ChildStdout>>,
+    audio: Option<Child>,
+    music_audio: Option<Child>,
+    width: u32,
+    height: u32,
+    playing: bool,
+    seeking: Option<f64>,
+    ended: bool,
+    segments: Vec<Segment>,
+    segment_index: usize,
+    rgba: Vec<u8>,
+    sequence: u32,
+    frame_time: f64,
+    position: f64,
+    decode_origin: f64,
+    decoded_frames: u64,
+    next_frame: Instant,
+    error: Option<String>,
+    music: Option<MusicTrack>,
+}
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub struct Player;
 // Every call is protected by the application's player mutex; GStreamer owns
 // its internal streaming threads and provides thread-safe control functions.
@@ -58,6 +91,8 @@ impl Player {
         height: u32,
         time: f64,
         segments: Vec<Segment>,
+        _ffmpeg: PathBuf,
+        _ffplay: Option<PathBuf>,
     ) -> Result<Self, String> {
         let file = CString::new(path).map_err(|_| "Invalid playback path")?;
         let mut error = [0i8; 1024];
@@ -318,6 +353,298 @@ impl Player {
         Ok(packet)
     }
 }
+#[cfg(target_os = "windows")]
+impl Player {
+    const FPS: f64 = 60.;
+
+    pub fn open(
+        path: &str,
+        width: u32,
+        height: u32,
+        time: f64,
+        segments: Vec<Segment>,
+        ffmpeg: PathBuf,
+        ffplay: Option<PathBuf>,
+    ) -> Result<Self, String> {
+        if segments.is_empty() {
+            return Err("Timeline has no clips".into());
+        }
+        let mut player = Self {
+            path: path.into(),
+            ffmpeg,
+            ffplay,
+            decoder: None,
+            frames: None,
+            audio: None,
+            music_audio: None,
+            width,
+            height,
+            playing: false,
+            seeking: Some(time),
+            ended: false,
+            segments,
+            segment_index: 0,
+            rgba: Vec::new(),
+            sequence: 0,
+            frame_time: time,
+            position: time,
+            decode_origin: time,
+            decoded_frames: 0,
+            next_frame: Instant::now(),
+            error: None,
+            music: None,
+        };
+        player.seek(time)?;
+        player.tick()?;
+        Ok(player)
+    }
+
+    fn stop(child: &mut Option<Child>) {
+        if let Some(mut child) = child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn restart_decoder(&mut self, time: f64) -> Result<(), String> {
+        Self::stop(&mut self.decoder);
+        self.frames = None;
+        let mut command = crate::video::binaries::command(&self.ffmpeg);
+        command
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-ss"])
+            .arg(format!("{time:.6}"))
+            .arg("-i")
+            .arg(&self.path)
+            .args(["-map", "0:v:0", "-an", "-sn", "-vf"])
+            .arg(format!(
+                "scale={}:{}:flags=fast_bilinear,fps={}",
+                self.width,
+                self.height,
+                Self::FPS as u32
+            ))
+            .args(["-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("Could not start Windows preview decoder: {error}"))?;
+        let stdout = child.stdout.take().ok_or("Preview decoder has no output")?;
+        self.frames = Some(BufReader::new(stdout));
+        self.decoder = Some(child);
+        self.decode_origin = time;
+        self.decoded_frames = 0;
+        self.next_frame = Instant::now();
+        Ok(())
+    }
+
+    fn edited_time(&self) -> f64 {
+        self.segments
+            .iter()
+            .take(self.segment_index)
+            .map(|segment| segment.end - segment.start)
+            .sum::<f64>()
+            + self.segments.get(self.segment_index).map_or(0., |segment| {
+                (self.position - segment.start).clamp(0., segment.end - segment.start)
+            })
+    }
+
+    fn restart_audio(&mut self) {
+        Self::stop(&mut self.audio);
+        Self::stop(&mut self.music_audio);
+        if !self.playing {
+            return;
+        }
+        let Some(ffplay) = self.ffplay.as_ref() else {
+            return;
+        };
+        let volume = self
+            .segments
+            .get(self.segment_index)
+            .map_or(100., |segment| segment.volume.clamp(0., 2.) * 100.);
+        let mut source = crate::video::binaries::command(ffplay);
+        source
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "quiet",
+                "-nodisp",
+                "-autoexit",
+                "-ss",
+            ])
+            .arg(format!("{:.6}", self.position))
+            .args(["-volume", &format!("{volume:.0}")])
+            .arg(&self.path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        self.audio = source.spawn().ok();
+
+        if let Some(track) = self.music.as_ref() {
+            let edited = self.edited_time();
+            let mut offset = 0.;
+            if let Some((time, gain)) = track.segments.iter().find_map(|segment| {
+                let duration = segment.end - segment.start;
+                let found = (edited >= offset && edited < offset + duration)
+                    .then_some((segment.start + edited - offset, segment.volume));
+                offset += duration;
+                found
+            }) {
+                let mut music = crate::video::binaries::command(ffplay);
+                music
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "quiet",
+                        "-nodisp",
+                        "-autoexit",
+                        "-ss",
+                    ])
+                    .arg(format!("{time:.6}"))
+                    .args(["-volume", &format!("{:.0}", gain.clamp(0., 2.) * 100.)])
+                    .arg(&track.path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                self.music_audio = music.spawn().ok();
+            }
+        }
+    }
+
+    pub fn music(&mut self, track: MusicTrack) -> Result<(), String> {
+        track.validate()?;
+        self.music = (!track.segments.is_empty()).then_some(track);
+        self.restart_audio();
+        Ok(())
+    }
+
+    pub fn play(&mut self, playing: bool) -> Result<(), String> {
+        self.playing = playing;
+        self.ended = false;
+        self.next_frame = Instant::now();
+        self.restart_audio();
+        Ok(())
+    }
+
+    pub fn seek(&mut self, time: f64) -> Result<(), String> {
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| time >= segment.start && time < segment.end)
+            .unwrap_or_else(|| self.segments.len().saturating_sub(1));
+        let segment = self.segments.get(index).ok_or("Timeline has no clips")?;
+        let time = time.clamp(segment.start, (segment.end - 0.001).max(segment.start));
+        self.segment_index = index;
+        self.position = time;
+        self.frame_time = time;
+        self.seeking = Some(time);
+        self.ended = false;
+        self.restart_decoder(time)?;
+        self.restart_audio();
+        Ok(())
+    }
+
+    pub fn segments(&mut self, segments: Vec<Segment>) -> Result<(), String> {
+        if segments.is_empty() {
+            return Err("Timeline has no clips".into());
+        }
+        self.segments = segments;
+        self.seek(self.position)
+    }
+
+    pub fn tick(&mut self) -> Result<(), String> {
+        if !self.playing && self.seeking.is_none() && !self.rgba.is_empty() {
+            return Ok(());
+        }
+        if self.playing && self.seeking.is_none() && Instant::now() < self.next_frame {
+            return Ok(());
+        }
+        let length = self.width as usize * self.height as usize * 4;
+        let mut rgba = vec![0; length];
+        let result = self
+            .frames
+            .as_mut()
+            .ok_or("Preview decoder is unavailable")?
+            .read_exact(&mut rgba);
+        if let Err(error) = result {
+            if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                self.playing = false;
+                self.ended = true;
+                self.restart_audio();
+                return Ok(());
+            }
+            return Err(format!("Could not decode Windows preview frame: {error}"));
+        }
+        self.rgba = rgba;
+        self.frame_time = self.decode_origin + self.decoded_frames as f64 / Self::FPS;
+        self.position = self.frame_time;
+        self.decoded_frames += 1;
+        self.sequence = self.sequence.wrapping_add(1);
+        self.seeking = None;
+        self.next_frame += Duration::from_secs_f64(1. / Self::FPS);
+
+        if self
+            .segments
+            .get(self.segment_index)
+            .is_some_and(|segment| self.position >= segment.end - 0.0005)
+        {
+            if let Some(next) = self.segments.get(self.segment_index + 1) {
+                let time = next.start;
+                self.segment_index += 1;
+                self.position = time;
+                self.seeking = Some(time);
+                self.restart_decoder(time)?;
+                self.restart_audio();
+            } else {
+                self.playing = false;
+                self.ended = true;
+                self.restart_audio();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn pump(&mut self) {
+        if self.error.is_none() && (self.playing || self.seeking.is_some() || self.rgba.is_empty())
+        {
+            if let Err(error) = self.tick() {
+                self.playing = false;
+                self.restart_audio();
+                self.error = Some(error);
+            }
+        }
+    }
+
+    pub fn frame(&self, last: u32) -> Result<Vec<u8>, String> {
+        if let Some(error) = self.error.as_ref() {
+            return Err(error.clone());
+        }
+        let ready = self.seeking.is_none() && !self.rgba.is_empty();
+        let changed = ready && last != self.sequence;
+        let mut packet = Vec::with_capacity(32 + if changed { self.rgba.len() } else { 0 });
+        packet.extend(self.width.to_le_bytes());
+        packet.extend(self.height.to_le_bytes());
+        packet.extend(self.sequence.to_le_bytes());
+        let flags =
+            u32::from(self.playing) | (u32::from(ready) << 1) | (u32::from(self.ended) << 2);
+        packet.extend(flags.to_le_bytes());
+        packet.extend(self.position.to_le_bytes());
+        packet.extend(self.frame_time.to_le_bytes());
+        if changed {
+            packet.extend_from_slice(&self.rgba);
+        }
+        Ok(packet)
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for Player {
+    fn drop(&mut self) {
+        Self::stop(&mut self.decoder);
+        Self::stop(&mut self.audio);
+        Self::stop(&mut self.music_audio);
+    }
+}
 #[cfg(target_os = "linux")]
 struct MusicPlayer {
     handle: *mut c_void,
@@ -422,12 +749,20 @@ impl Drop for Player {
         unsafe { rl_player_free(self.handle) };
     }
 }
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 impl Player {
     pub fn music(&mut self, _: MusicTrack) -> Result<(), String> {
         Err("Native playback unavailable".into())
     }
-    pub fn open(_: &str, _: u32, _: u32, _: f64, _: Vec<Segment>) -> Result<Self, String> {
+    pub fn open(
+        _: &str,
+        _: u32,
+        _: u32,
+        _: f64,
+        _: Vec<Segment>,
+        _: PathBuf,
+        _: Option<PathBuf>,
+    ) -> Result<Self, String> {
         Err("Native playback packaging is currently available on Linux".into())
     }
     pub fn play(&mut self, _: bool) -> Result<(), String> {

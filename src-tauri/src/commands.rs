@@ -1460,8 +1460,15 @@ pub async fn playback_open(
         let scale = (max_edge as f64 / metadata.width.max(metadata.height) as f64).min(1.);
         let w = ((metadata.width as f64 * scale / 2.).round() as u32 * 2).max(2);
         let h = ((metadata.height as f64 * scale / 2.).round() as u32 * 2).max(2);
-        let player =
-            crate::video::player::Player::open(&file.to_string_lossy(), w, h, time, segments)?;
+        let player = crate::video::player::Player::open(
+            &file.to_string_lossy(),
+            w,
+            h,
+            time,
+            segments,
+            tools.ffmpeg()?.to_path_buf(),
+            tools.ffplay().map(Path::to_path_buf),
+        )?;
         slot.player = Some(player);
         slot.session = session;
         Ok(())

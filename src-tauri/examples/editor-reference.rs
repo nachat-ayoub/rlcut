@@ -17,6 +17,7 @@ fn main() {
     let tools = Binaries {
         ffmpeg: Some(root.join("usr/bin/ffmpeg")),
         ffprobe: Some(root.join("usr/bin/ffprobe")),
+        ffplay: None,
     };
     let mut video = metadata::probe(&tools, &input).unwrap();
     video.width = 1280;

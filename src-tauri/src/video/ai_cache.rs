@@ -211,201 +211,318 @@ pub fn run(
     log: &Path,
 ) -> Result<(), String> {
     let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
-    let (_, model) = enhance::installation().ok_or("AI components unavailable")?;
-    let folder = model.parent().ok_or("Missing AI directory")?;
-    let source = videos
-        .iter()
-        .map(|v| fingerprint(Path::new(&v.path)))
-        .collect::<Result<Vec<_>, _>>()?;
-    let models = [
-        model.join("flownet.param"),
-        model.join("flownet.bin"),
-        folder.join(if o.ai_upscale_lite {
-            "upscayl-lite-4x.param"
-        } else {
-            "realesr-animevideov3-x2.param"
-        }),
-        folder.join(if o.ai_upscale_lite {
-            "upscayl-lite-4x.bin"
-        } else {
-            "realesr-animevideov3-x2.bin"
-        }),
-    ]
-    .iter()
-    .map(|path| model_identity(path))
-    .collect::<Result<Vec<_>, _>>()?;
-    let ranges = segments
-        .iter()
-        .map(|s| serde_json::json!([s.start, s.end, s.color_fix]))
-        .collect::<Vec<_>>();
-    let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"resumable-frames-v1", "sources":source,"video":videos,"basePreset":{"background":&p.background,"gameplay":&p.gameplay},"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
-    let mut hash = DefaultHasher::new();
-    manifest.hash(&mut hash);
-    let cache_id = format!("{:016x}", hash.finish());
-    let root = root()?;
-    fs::create_dir_all(&root).map_err(|e| format!("Cannot prepare AI cache: {e}"))?;
-    let current: serde_json::Value =
-        serde_json::from_slice(&manifest).map_err(|e| e.to_string())?;
-    let mut entry = root.join(&cache_id);
-    let mut hit = fs::read(entry.join("manifest.json")).ok().as_deref()
-        == Some(manifest.as_slice())
-        && valid(b, &entry.join("video.mp4"), o, duration);
-    // Text-only app updates and AppImage mount/packaging timestamps do not
-    // change neural output. Reuse validated full-AI caches from stock releases.
-    if !hit {
-        if let Ok(entries) = fs::read_dir(&root) {
-            for candidate in entries.flatten().map(|e| e.path()) {
-                let old = fs::read(candidate.join("manifest.json"))
-                    .ok()
-                    .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
-                if old.as_ref().is_some_and(|old| compatible(old, &current))
-                    && valid(b, &candidate.join("video.mp4"), o, duration)
-                {
-                    entry = candidate;
-                    hit = true;
-                    break;
-                }
-            }
-        }
-    }
-    let cache = entry.join("video.mp4");
-    let intermediate = out.with_extension("ai-base.mp4");
-    let _cleanup = Temporary(intermediate.clone());
-    let processed = out.with_extension("ai-processed.mp4");
-    let _cleanup2 = Temporary(processed.clone());
-    let work = root.join(format!("{cache_id}.partial"));
-    let ai_video = if hit {
-        let _ = fs::remove_dir_all(&work);
-        let _ = fs::write(entry.join("last-used"), b"");
-        if let Ok(mut progress) = job.progress.lock() {
-            progress.percent = 90.;
-            progress.stage = Some("Reusing prepared AI video · updating boost/text/audio".into());
-            progress.warning = fs::read_to_string(entry.join("warning.txt"))
-                .ok()
-                .map(|w| format!("Prepared AI video: {w}"));
-        }
-        cache.clone()
-    } else {
-        if let Ok(mut progress) = job.progress.lock() {
-            progress.stage =
-                Some("Preparing gameplay/background for AI · boost/text/audio deferred".into());
-        }
-        let mut base_options = o.clone();
-        base_options.ai_enhance = false;
-        base_options.ai_upscale = false;
-        // Timeline effects are cheap finishing operations and must not invalidate
-        // reusable AI frames when their position or styling changes.
-        base_options.effects.clear();
-        if o.ai_enhance {
-            base_options.fps = o.fps / 2;
-        }
-        let mut silent = videos.to_vec();
-        for video in &mut silent {
-            video.has_audio = false;
-        }
-        let mut base_preset = p.clone();
-        base_preset.boost.enabled = false;
-        let render = args::export_args_timeline_sources(
-            &silent,
-            &base_preset,
-            segments,
-            &base_options,
-            &intermediate,
-            None,
-            None,
-            &[],
-        )?;
-        export::execute(
-            b,
-            args::safe_ai_render_args(render),
-            log,
-            duration,
-            job.clone(),
-            start,
-            0.,
-            20.,
-            true,
-        )?;
-        let mut elapsed = 0.;
-        let cuts = segments
+    #[cfg(target_os = "windows")]
+    return run_windows(
+        b, videos, p, segments, o, out, job, music, fade, texts, start, log, duration,
+    );
+    #[cfg(not(target_os = "windows"))]
+    {
+        let (_, model) = enhance::installation().ok_or("AI components unavailable")?;
+        let folder = model.parent().ok_or("Missing AI directory")?;
+        let source = videos
             .iter()
-            .map(|s| {
-                elapsed += s.end - s.start;
-                elapsed
-            })
+            .map(|v| fingerprint(Path::new(&v.path)))
+            .collect::<Result<Vec<_>, _>>()?;
+        let models = [
+            model.join("flownet.param"),
+            model.join("flownet.bin"),
+            folder.join(if o.ai_upscale_lite {
+                "upscayl-lite-4x.param"
+            } else {
+                "realesr-animevideov3-x2.param"
+            }),
+            folder.join(if o.ai_upscale_lite {
+                "upscayl-lite-4x.bin"
+            } else {
+                "realesr-animevideov3-x2.bin"
+            }),
+        ]
+        .iter()
+        .map(|path| model_identity(path))
+        .collect::<Result<Vec<_>, _>>()?;
+        let ranges = segments
+            .iter()
+            .map(|s| serde_json::json!([s.start, s.end, s.color_fix]))
             .collect::<Vec<_>>();
-        if fs::read(work.join("manifest.json")).ok().as_deref() != Some(manifest.as_slice()) {
-            if work.exists() {
-                fs::remove_dir_all(&work)
-                    .map_err(|e| format!("Cannot reset stale AI checkpoint: {e}"))?;
+        let manifest=serde_json::to_vec(&serde_json::json!({"algorithm":"resumable-frames-v1", "sources":source,"video":videos,"basePreset":{"background":&p.background,"gameplay":&p.gameplay},"ranges":ranges,"quality":o.quality,"fps":o.fps,"smooth":o.ai_enhance,"upscale":o.ai_upscale,"lite":o.ai_upscale_lite,"keepResolution":o.ai_keep_resolution,"models":models})).map_err(|e|e.to_string())?;
+        let mut hash = DefaultHasher::new();
+        manifest.hash(&mut hash);
+        let cache_id = format!("{:016x}", hash.finish());
+        let root = root()?;
+        fs::create_dir_all(&root).map_err(|e| format!("Cannot prepare AI cache: {e}"))?;
+        let current: serde_json::Value =
+            serde_json::from_slice(&manifest).map_err(|e| e.to_string())?;
+        let mut entry = root.join(&cache_id);
+        let mut hit = fs::read(entry.join("manifest.json")).ok().as_deref()
+            == Some(manifest.as_slice())
+            && valid(b, &entry.join("video.mp4"), o, duration);
+        // Text-only app updates and AppImage mount/packaging timestamps do not
+        // change neural output. Reuse validated full-AI caches from stock releases.
+        if !hit {
+            if let Ok(entries) = fs::read_dir(&root) {
+                for candidate in entries.flatten().map(|e| e.path()) {
+                    let old = fs::read(candidate.join("manifest.json"))
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+                    if old.as_ref().is_some_and(|old| compatible(old, &current))
+                        && valid(b, &candidate.join("video.mp4"), o, duration)
+                    {
+                        entry = candidate;
+                        hit = true;
+                        break;
+                    }
+                }
             }
-            fs::create_dir_all(work.join("frames"))
-                .map_err(|e| format!("Cannot create AI checkpoint: {e}"))?;
-            fs::write(work.join("manifest.json"), &manifest)
-                .map_err(|e| format!("Cannot identify AI checkpoint: {e}"))?;
+        }
+        let cache = entry.join("video.mp4");
+        let intermediate = out.with_extension("ai-base.mp4");
+        let _cleanup = Temporary(intermediate.clone());
+        let processed = out.with_extension("ai-processed.mp4");
+        let _cleanup2 = Temporary(processed.clone());
+        let work = root.join(format!("{cache_id}.partial"));
+        let ai_video = if hit {
+            let _ = fs::remove_dir_all(&work);
+            let _ = fs::write(entry.join("last-used"), b"");
+            if let Ok(mut progress) = job.progress.lock() {
+                progress.percent = 90.;
+                progress.stage =
+                    Some("Reusing prepared AI video · updating boost/text/audio".into());
+                progress.warning = fs::read_to_string(entry.join("warning.txt"))
+                    .ok()
+                    .map(|w| format!("Prepared AI video: {w}"));
+            }
+            cache.clone()
         } else {
-            fs::create_dir_all(work.join("frames"))
-                .map_err(|e| format!("Cannot open AI checkpoint: {e}"))?;
-        }
-        let _ = fs::write(work.join("last-used"), b"");
-        prune(&root, &work);
-        enhance::run(
-            b,
-            &intermediate,
-            &processed,
-            o,
-            duration,
-            &cuts,
-            job.clone(),
-            start,
-            log,
-            &work.join("frames"),
-        )?;
-        if !valid(b, &processed, o, duration) {
-            return Err(
-                "Prepared AI video failed metadata validation; nothing was cached or published"
-                    .into(),
-            );
-        }
-        // Publish only a completed and validated result, with its exact manifest and quality warning.
-        let temp = root.join(format!(".building-{}", job.snapshot()?.id));
-        if fs::create_dir(&temp).is_ok() {
-            let saved = (|| -> Result<(), String> {
-                fs::copy(&processed, temp.join("video.mp4")).map_err(|e| e.to_string())?;
-                fs::write(temp.join("manifest.json"), &manifest).map_err(|e| e.to_string())?;
-                fs::write(temp.join("last-used"), b"").map_err(|e| e.to_string())?;
-                if let Some(warning) = job.snapshot()?.warning {
-                    fs::write(temp.join("warning.txt"), warning).map_err(|e| e.to_string())?;
+            if let Ok(mut progress) = job.progress.lock() {
+                progress.stage =
+                    Some("Preparing gameplay/background for AI · boost/text/audio deferred".into());
+            }
+            let mut base_options = o.clone();
+            base_options.ai_enhance = false;
+            base_options.ai_upscale = false;
+            // Timeline effects are cheap finishing operations and must not invalidate
+            // reusable AI frames when their position or styling changes.
+            base_options.effects.clear();
+            if o.ai_enhance {
+                base_options.fps = o.fps / 2;
+            }
+            let mut silent = videos.to_vec();
+            for video in &mut silent {
+                video.has_audio = false;
+            }
+            let mut base_preset = p.clone();
+            base_preset.boost.enabled = false;
+            let render = args::export_args_timeline_sources(
+                &silent,
+                &base_preset,
+                segments,
+                &base_options,
+                &intermediate,
+                None,
+                None,
+                &[],
+            )?;
+            export::execute(
+                b,
+                args::safe_ai_render_args(render),
+                log,
+                duration,
+                job.clone(),
+                start,
+                0.,
+                20.,
+                true,
+            )?;
+            let mut elapsed = 0.;
+            let cuts = segments
+                .iter()
+                .map(|s| {
+                    elapsed += s.end - s.start;
+                    elapsed
+                })
+                .collect::<Vec<_>>();
+            if fs::read(work.join("manifest.json")).ok().as_deref() != Some(manifest.as_slice()) {
+                if work.exists() {
+                    fs::remove_dir_all(&work)
+                        .map_err(|e| format!("Cannot reset stale AI checkpoint: {e}"))?;
                 }
-                if entry.exists() {
-                    // Replace an invalid/stale entry; it was explicitly rejected above.
-                    fs::remove_dir_all(&entry).map_err(|e| e.to_string())?;
+                fs::create_dir_all(work.join("frames"))
+                    .map_err(|e| format!("Cannot create AI checkpoint: {e}"))?;
+                fs::write(work.join("manifest.json"), &manifest)
+                    .map_err(|e| format!("Cannot identify AI checkpoint: {e}"))?;
+            } else {
+                fs::create_dir_all(work.join("frames"))
+                    .map_err(|e| format!("Cannot open AI checkpoint: {e}"))?;
+            }
+            let _ = fs::write(work.join("last-used"), b"");
+            prune(&root, &work);
+            enhance::run(
+                b,
+                &intermediate,
+                &processed,
+                o,
+                duration,
+                &cuts,
+                job.clone(),
+                start,
+                log,
+                &work.join("frames"),
+            )?;
+            if !valid(b, &processed, o, duration) {
+                return Err(
+                    "Prepared AI video failed metadata validation; nothing was cached or published"
+                        .into(),
+                );
+            }
+            // Publish only a completed and validated result, with its exact manifest and quality warning.
+            let temp = root.join(format!(".building-{}", job.snapshot()?.id));
+            if fs::create_dir(&temp).is_ok() {
+                let saved = (|| -> Result<(), String> {
+                    fs::copy(&processed, temp.join("video.mp4")).map_err(|e| e.to_string())?;
+                    fs::write(temp.join("manifest.json"), &manifest).map_err(|e| e.to_string())?;
+                    fs::write(temp.join("last-used"), b"").map_err(|e| e.to_string())?;
+                    if let Some(warning) = job.snapshot()?.warning {
+                        fs::write(temp.join("warning.txt"), warning).map_err(|e| e.to_string())?;
+                    }
+                    if entry.exists() {
+                        // Replace an invalid/stale entry; it was explicitly rejected above.
+                        fs::remove_dir_all(&entry).map_err(|e| e.to_string())?;
+                    }
+                    fs::rename(&temp, &entry).map_err(|e| e.to_string())?;
+                    let _ = fs::remove_dir_all(&work);
+                    Ok(())
+                })();
+                if saved.is_err() {
+                    let _ = fs::remove_dir_all(&temp);
+                    cache_warning(&job);
                 }
-                fs::rename(&temp, &entry).map_err(|e| e.to_string())?;
-                let _ = fs::remove_dir_all(&work);
-                Ok(())
-            })();
-            if saved.is_err() {
-                let _ = fs::remove_dir_all(&temp);
+            } else {
                 cache_warning(&job);
             }
-        } else {
-            cache_warning(&job);
+            prune(&root, &entry);
+            processed.clone()
+        };
+        if let Ok(mut progress) = job.progress.lock() {
+            progress.percent = 90.;
+            progress.stage = Some("Finishing boost, text and audio · AI already prepared".into());
         }
-        prune(&root, &entry);
-        processed.clone()
-    };
+        let mut finish = args::safe_ai_render_args(args::finish_ai_args(
+            videos, p, segments, o, out, music, fade, texts, &ai_video,
+        )?);
+        for i in 0..finish.len().saturating_sub(1) {
+            if finish[i] == "-crf" {
+                finish[i + 1] = "17".into();
+            }
+        }
+        export::execute(b, finish, log, duration, job, start, 90., 9.9, true)
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[allow(clippy::too_many_arguments)]
+fn run_windows(
+    b: &Binaries,
+    videos: &[Video],
+    p: &Preset,
+    segments: &[Segment],
+    o: &ExportOptions,
+    out: &Path,
+    job: Arc<Job>,
+    music: Option<&MusicTrack>,
+    fade: Option<f64>,
+    texts: &[TextOverlay],
+    start: Instant,
+    log: &Path,
+    duration: f64,
+) -> Result<(), String> {
+    let intermediate = out.with_extension("windows-ai-base.mp4");
+    let _cleanup = Temporary(intermediate.clone());
+    let mut base = o.clone();
+    base.ai_enhance = false;
+    base.ai_upscale = false;
+    base.ai_upscale_lite = false;
+    base.ai_keep_resolution = false;
+    if o.ai_enhance {
+        base.fps = (o.fps / 2).max(30);
+    }
     if let Ok(mut progress) = job.progress.lock() {
-        progress.percent = 90.;
-        progress.stage = Some("Finishing boost, text and audio · AI already prepared".into());
+        progress.stage = Some("Preparing the edited timeline for Windows enhancement".into());
     }
-    let mut finish = args::safe_ai_render_args(args::finish_ai_args(
-        videos, p, segments, o, out, music, fade, texts, &ai_video,
-    )?);
-    for i in 0..finish.len().saturating_sub(1) {
-        if finish[i] == "-crf" {
-            finish[i + 1] = "17".into();
-        }
+    export::execute(
+        b,
+        args::export_args_timeline_sources(
+            videos,
+            p,
+            segments,
+            &base,
+            &intermediate,
+            music,
+            fade,
+            texts,
+        )?,
+        log,
+        duration,
+        job.clone(),
+        start,
+        0.,
+        55.,
+        true,
+    )?;
+    let (width, height) = o.output_resolution()?;
+    let mut filters = Vec::new();
+    if o.ai_enhance {
+        filters.push(format!(
+            "minterpolate=fps={}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
+            o.fps
+        ));
     }
-    export::execute(b, finish, log, duration, job, start, 90., 9.9, true)
+    if o.ai_upscale {
+        filters.push(format!("scale={width}:{height}:flags=lanczos"));
+        filters.push("unsharp=5:5:0.35:5:5:0".into());
+    }
+    if filters.is_empty() {
+        filters.push("null".into());
+    }
+    if let Ok(mut progress) = job.progress.lock() {
+        progress.stage = Some(
+            match (o.ai_enhance, o.ai_upscale) {
+                (true, true) => "Windows smoothing + high-quality upscaling",
+                (true, false) => "Windows motion-compensated smoothing",
+                _ => "Windows high-quality upscaling",
+            }
+            .into(),
+        );
+        progress.warning = Some("Windows currently uses FFmpeg motion compensation and Lanczos enhancement; Linux releases use the bundled NCNN neural models.".into());
+    }
+    let arguments = vec![
+        "-hide_banner".into(),
+        "-loglevel".into(),
+        "error".into(),
+        "-nostdin".into(),
+        "-y".into(),
+        "-i".into(),
+        intermediate.to_string_lossy().into_owned(),
+        "-map".into(),
+        "0:v:0".into(),
+        "-map".into(),
+        "0:a?".into(),
+        "-vf".into(),
+        filters.join(","),
+        "-c:v".into(),
+        "libx264".into(),
+        "-preset".into(),
+        "medium".into(),
+        "-crf".into(),
+        "16".into(),
+        "-pix_fmt".into(),
+        "yuv420p".into(),
+        "-c:a".into(),
+        "copy".into(),
+        "-movflags".into(),
+        "+faststart".into(),
+        "-progress".into(),
+        "pipe:1".into(),
+        out.to_string_lossy().into_owned(),
+    ];
+    export::execute(b, arguments, log, duration, job, start, 55., 44.9, true)
 }

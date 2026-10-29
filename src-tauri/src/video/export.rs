@@ -438,6 +438,7 @@ mod tests {
             Binaries {
                 ffmpeg: None,
                 ffprobe: None,
+                ffplay: None,
             },
             v,
             Preset::default(),
@@ -475,6 +476,7 @@ mod tests {
                 Binaries {
                     ffmpeg: Some(binary),
                     ffprobe: None,
+                    ffplay: None,
                 },
                 v,
                 Preset::default(),

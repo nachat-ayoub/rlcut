@@ -219,14 +219,15 @@ The in-app logo lives in `public/branding/logo.png`. The original launcher artwo
 
 On Linux, double-click the executable `dist/rlcut`. It contains the complete AppImage and handles extraction automatically, including on school PCs without FUSE. Keep or copy this one file wherever you want; it needs no neighboring FFmpeg files, Docker, or terminal flags. The conventional `dist/rlcut.AppImage` is also exported.
 
-On Windows, the intended end-user package is `rlcut-setup.exe`: open the installer once, then use its Start menu shortcut. The installer includes both video tools and the offline WebView2 installer. No FFmpeg or PATH setup is required. Developer packaging on a Windows machine uses `npm run desktop:build:windows`; it downloads and verifies a versioned Windows video-tool archive at build time and exports the installer to `dist/rlcut-setup.exe`. The manual GitHub Actions **Windows installer** workflow runs the same packaging process. Windows packaging has not been executed or runtime-tested from this Linux session.
+On Windows, open `rlcut-Windows-x86_64-portable.exe` directly. It extracts its private runtime into the user's temporary directory and starts rlcut without installing it. FFmpeg, FFprobe and FFplay are included, so no PATH setup is required. Windows 10 may require Microsoft's WebView2 runtime; Windows 11 includes it.
 
 The local app-menu shortcut can be installed with `bash scripts/install-shortcut.sh` after building. It creates a user-owned `rlcut` entry using the generated launcher icon, with no sudo or system-wide changes. This provides a click-to-open option on desktops whose file manager does not launch executables on double-click.
 
 ### Native playback and progress
 
 The Linux AppImage includes the native GStreamer playback engine, H.264/AAC
-plugins, and video tools. No codec installation or separate server is needed.
+plugins, and video tools. The Windows portable executable includes an FFmpeg
+frame backend and FFplay audio backend. No separate codec installation or server is needed.
 Import shows preparation percentage, elapsed time, estimated remaining time, and
 Cancel. The first import prepares a cached SDR source; subsequent scene changes
 update live, without rendering the whole clip again.
@@ -237,8 +238,7 @@ bounded binary frames and uses GPU composition with a software fallback. Preview
 resolution adapts for responsiveness; export retains original media and output
 quality. See [editor architecture](docs/EDITOR_ARCHITECTURE.md).
 
-Windows/macOS native playback packaging is pending. The earlier Windows installer
-workflow has not been upgraded for this engine; do not distribute its output yet.
+macOS native playback packaging remains pending.
 
 `Failed to load module "canberra-gtk-module"` is an optional GTK desktop sound
 hook message; it is unrelated to decoding or exports.
