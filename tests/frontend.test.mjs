@@ -1,6 +1,7 @@
 import '../scripts/register-ts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 const { classic, copyPreset, clamp, time, duration, filename } = await import('../src/lib/presets.ts');
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { createElement } = await import('react');
@@ -39,6 +40,16 @@ test('empty workspace has an actionable import control', () => {
   const html = renderToStaticMarkup(createElement(Composition, {video:null, importVideo:()=>{}}));
   assert.match(html, /Import gameplay/);
   assert.match(html, /MP4/);
+});
+test('desktop updates expose check, verified download, progress and install actions', async () => {
+  const [app, commands] = await Promise.all([readFile(new URL('../src/App.tsx', import.meta.url), 'utf8'), readFile(new URL('../src-tauri/src/commands.rs', import.meta.url), 'utf8')]);
+  for (const action of ['check_update','download_update','update_progress','install_update']) {
+    assert.match(app, new RegExp(`['"]${action}['"]`));
+    assert.match(commands, new RegExp(`fn ${action}`));
+  }
+  assert.match(commands, /SHA256SUMS/);
+  assert.match(commands, /rlcut-Windows-x86_64-portable\.zip/);
+  assert.match(commands, /rlcut-Linux-x86_64\.AppImage/);
 });
 test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () => {
   const html = renderToStaticMarkup(createElement(Timeline, {

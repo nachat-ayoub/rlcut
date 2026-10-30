@@ -8,12 +8,14 @@ use crate::{
         metadata, preview,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     collections::hash_map::DefaultHasher,
     collections::{HashMap, HashSet},
     fs,
     hash::{Hash, Hasher},
+    io::Write,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -21,6 +23,50 @@ use std::{
     },
 };
 use tauri::State;
+
+const RELEASES_API: &str = "https://api.github.com/repos/nachat-ayoub/rlcut/releases/latest";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    version: String,
+    notes: String,
+    release_url: String,
+    size: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProgress {
+    info: Option<UpdateInfo>,
+    downloaded: u64,
+    total: u64,
+    downloading: bool,
+    ready: bool,
+    error: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct UpdateStatus {
+    progress: UpdateProgress,
+    package: Option<PathBuf>,
+}
+
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    body: Option<String>,
+    html_url: String,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+}
+
 pub struct AppState {
     file: PathBuf,
     cache: PathBuf,
@@ -36,10 +82,13 @@ pub struct AppState {
     playback_worker: Mutex<Option<std::thread::JoinHandle<()>>>,
     pub job: Arc<Mutex<Option<Arc<Job>>>>,
     pub worker: Mutex<Option<std::thread::JoinHandle<()>>>,
+    update_cache: PathBuf,
+    update: Arc<Mutex<UpdateStatus>>,
 }
 impl AppState {
     pub fn new(file: PathBuf, cache: PathBuf, binaries: Binaries) -> Self {
         let audio_cache = cache.join("music-previews");
+        let update_cache = cache.with_file_name("updates");
         let _ = fs::remove_dir_all(&audio_cache);
         let _ = fs::create_dir_all(&audio_cache);
         let player = Arc::new(Mutex::new(PlayerSlot {
@@ -74,6 +123,8 @@ impl AppState {
             preparation: Arc::new(Mutex::new(Preparation::default())),
             job: Arc::new(Mutex::new(None)),
             worker: Mutex::new(None),
+            update_cache,
+            update: Arc::new(Mutex::new(UpdateStatus::default())),
         }
     }
     pub fn shutdown(&self) {
@@ -142,6 +193,295 @@ pub fn initialize(state: State<AppState>) -> Init {
         preview_audio: std::env::var("RLCUT_PREVIEW_SILENT").as_deref() != Ok("1"),
         software_rendering: std::env::var("LIBGL_ALWAYS_SOFTWARE").as_deref() == Ok("1"),
     }
+}
+
+#[cfg(target_os = "linux")]
+const UPDATE_ASSET: &str = "rlcut-Linux-x86_64.AppImage";
+#[cfg(target_os = "windows")]
+const UPDATE_ASSET: &str = "rlcut-Windows-x86_64-portable.zip";
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+const UPDATE_ASSET: &str = "";
+
+fn version_numbers(value: &str) -> Vec<u64> {
+    value
+        .trim_start_matches(['v', 'V'])
+        .split(['.', '-', '+'])
+        .take(3)
+        .map(|part| part.parse().unwrap_or(0))
+        .collect()
+}
+
+fn newer_version(candidate: &str) -> bool {
+    let mut candidate = version_numbers(candidate);
+    let mut current = version_numbers(env!("CARGO_PKG_VERSION"));
+    candidate.resize(3, 0);
+    current.resize(3, 0);
+    candidate > current
+}
+
+async fn latest_release() -> Result<GithubRelease, String> {
+    reqwest::Client::builder()
+        .user_agent(concat!("rlcut/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|error| format!("Could not start the update checker: {error}"))?
+        .get(RELEASES_API)
+        .send()
+        .await
+        .map_err(|error| format!("Could not check for updates: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("Could not check for updates: {error}"))?
+        .json()
+        .await
+        .map_err(|error| format!("Could not read the latest release: {error}"))
+}
+
+fn release_info(release: &GithubRelease) -> Result<Option<UpdateInfo>, String> {
+    if UPDATE_ASSET.is_empty() || !newer_version(&release.tag_name) {
+        return Ok(None);
+    }
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == UPDATE_ASSET)
+        .ok_or_else(|| {
+            format!(
+                "Release {} does not include {UPDATE_ASSET}",
+                release.tag_name
+            )
+        })?;
+    Ok(Some(UpdateInfo {
+        version: release.tag_name.trim_start_matches(['v', 'V']).to_string(),
+        notes: release.body.clone().unwrap_or_default(),
+        release_url: release.html_url.clone(),
+        size: asset.size,
+    }))
+}
+
+fn set_update_error(status: &Arc<Mutex<UpdateStatus>>, error: &str) {
+    if let Ok(mut status) = status.lock() {
+        status.progress.downloading = false;
+        status.progress.error = Some(error.to_string());
+    }
+}
+
+#[tauri::command]
+pub async fn check_update(state: State<'_, AppState>) -> Result<Option<UpdateInfo>, String> {
+    let release = latest_release().await?;
+    let info = release_info(&release)?;
+    let mut status = state
+        .update
+        .lock()
+        .map_err(|_| "Update state unavailable")?;
+    status.progress = UpdateProgress {
+        info: info.clone(),
+        total: info.as_ref().map_or(0, |update| update.size),
+        ..UpdateProgress::default()
+    };
+    status.package = None;
+    Ok(info)
+}
+
+#[tauri::command]
+pub fn update_progress(state: State<'_, AppState>) -> Result<UpdateProgress, String> {
+    state
+        .update
+        .lock()
+        .map(|status| status.progress.clone())
+        .map_err(|_| "Update state unavailable".into())
+}
+
+#[tauri::command]
+pub async fn download_update(state: State<'_, AppState>) -> Result<(), String> {
+    let status = state.update.clone();
+    let cache = state.update_cache.clone();
+    {
+        let mut current = status.lock().map_err(|_| "Update state unavailable")?;
+        if current.progress.downloading {
+            return Err("An update is already downloading".into());
+        }
+        current.progress.downloading = true;
+        current.progress.ready = false;
+        current.progress.error = None;
+        current.progress.downloaded = 0;
+        current.package = None;
+    }
+    let result: Result<(), String> = async {
+        let release = latest_release().await?;
+        let info = release_info(&release)?.ok_or("rlcut is already up to date")?;
+        let asset = release
+            .assets
+            .iter()
+            .find(|asset| asset.name == UPDATE_ASSET)
+            .ok_or_else(|| {
+                format!(
+                    "Release {} does not include {UPDATE_ASSET}",
+                    release.tag_name
+                )
+            })?;
+        let checksums = release
+            .assets
+            .iter()
+            .find(|asset| asset.name == "SHA256SUMS")
+            .ok_or("The release is missing its SHA256SUMS verification file")?;
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("rlcut/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .map_err(|error| format!("Could not start the update download: {error}"))?;
+        let checksum_text = client
+            .get(&checksums.browser_download_url)
+            .send()
+            .await
+            .map_err(|error| format!("Could not download update checksums: {error}"))?
+            .error_for_status()
+            .map_err(|error| format!("Could not download update checksums: {error}"))?
+            .text()
+            .await
+            .map_err(|error| format!("Could not read update checksums: {error}"))?;
+        let expected = checksum_text
+            .lines()
+            .find_map(|line| {
+                let mut fields = line.split_whitespace();
+                let checksum = fields.next()?;
+                let name = fields.next()?.trim_start_matches('*');
+                (name == UPDATE_ASSET).then(|| checksum.to_ascii_lowercase())
+            })
+            .ok_or_else(|| format!("SHA256SUMS does not contain {UPDATE_ASSET}"))?;
+        fs::create_dir_all(&cache)
+            .map_err(|error| format!("Could not prepare the update folder: {error}"))?;
+        let partial = cache.join(format!("{UPDATE_ASSET}.partial"));
+        let package = cache.join(UPDATE_ASSET);
+        let _ = fs::remove_file(&partial);
+        let mut response = client
+            .get(&asset.browser_download_url)
+            .send()
+            .await
+            .map_err(|error| format!("Could not download the update: {error}"))?
+            .error_for_status()
+            .map_err(|error| format!("Could not download the update: {error}"))?;
+        let total = response.content_length().unwrap_or(asset.size);
+        {
+            let mut current = status.lock().map_err(|_| "Update state unavailable")?;
+            current.progress.info = Some(info);
+            current.progress.total = total;
+        }
+        let mut file = fs::File::create(&partial)
+            .map_err(|error| format!("Could not create the update file: {error}"))?;
+        let mut hasher = Sha256::new();
+        let mut downloaded = 0_u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|error| format!("Update download stopped: {error}"))?
+        {
+            file.write_all(&chunk)
+                .map_err(|error| format!("Could not save the update: {error}"))?;
+            hasher.update(&chunk);
+            downloaded += chunk.len() as u64;
+            if let Ok(mut current) = status.lock() {
+                current.progress.downloaded = downloaded;
+            }
+        }
+        file.sync_all()
+            .map_err(|error| format!("Could not finish saving the update: {error}"))?;
+        let actual = format!("{:x}", hasher.finalize());
+        if actual != expected {
+            let _ = fs::remove_file(&partial);
+            return Err("The downloaded update failed SHA-256 verification".into());
+        }
+        fs::rename(&partial, &package)
+            .map_err(|error| format!("Could not stage the verified update: {error}"))?;
+        let mut current = status.lock().map_err(|_| "Update state unavailable")?;
+        current.package = Some(package);
+        current.progress.downloaded = downloaded;
+        current.progress.downloading = false;
+        current.progress.ready = true;
+        Ok(())
+    }
+    .await;
+    if let Err(error) = &result {
+        set_update_error(&status, error);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn install_update(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let package = state
+        .update
+        .lock()
+        .map_err(|_| "Update state unavailable")?
+        .package
+        .clone()
+        .ok_or("Download the update before installing it")?;
+    let current =
+        std::env::current_exe().map_err(|error| format!("Could not locate rlcut: {error}"))?;
+    let pid = std::process::id().to_string();
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let target = std::env::var_os("APPIMAGE")
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .ok_or("Automatic installation requires running the packaged rlcut AppImage")?;
+        let staged = target.with_extension("AppImage.update");
+        fs::copy(&package, &staged).map_err(|error| {
+            format!("Could not stage the AppImage beside the current version: {error}")
+        })?;
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755))
+            .map_err(|error| format!("Could not make the update executable: {error}"))?;
+        std::process::Command::new("sh")
+            .args(["-c", "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; mv -f \"$2\" \"$3\" && chmod +x \"$3\" && exec \"$3\"", "rlcut-updater"])
+            .arg(pid)
+            .arg(staged)
+            .arg(target)
+            .spawn()
+            .map_err(|error| format!("Could not start the AppImage updater: {error}"))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let target = current
+            .parent()
+            .ok_or("Could not locate the rlcut folder")?;
+        let test = target.join(".rlcut-update-write-test");
+        fs::write(&test, b"update")
+            .map_err(|error| format!("The rlcut folder is not writable: {error}"))?;
+        let _ = fs::remove_file(test);
+        let script = state.update_cache.join("install-update.ps1");
+        fs::write(
+            &script,
+            r#"param([int]$AppPid,[string]$Archive,[string]$Target,[string]$Exe)
+$ErrorActionPreference = 'Stop'
+while (Get-Process -Id $AppPid -ErrorAction SilentlyContinue) { Start-Sleep -Milliseconds 200 }
+$Stage = Join-Path ([System.IO.Path]::GetTempPath()) ('rlcut-update-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path $Stage | Out-Null
+Expand-Archive -LiteralPath $Archive -DestinationPath $Stage -Force
+Copy-Item -Path (Join-Path $Stage '*') -Destination $Target -Recurse -Force
+Start-Process -FilePath (Join-Path $Target $Exe)
+Remove-Item -LiteralPath $Stage -Recurse -Force -ErrorAction SilentlyContinue
+"#,
+        )
+        .map_err(|error| format!("Could not prepare the Windows updater: {error}"))?;
+        std::process::Command::new("powershell.exe")
+            .creation_flags(0x08000000)
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(script)
+            .arg(pid)
+            .arg(package)
+            .arg(target)
+            .arg(
+                current
+                    .file_name()
+                    .ok_or("Could not determine the rlcut executable name")?,
+            )
+            .spawn()
+            .map_err(|error| format!("Could not start the Windows updater: {error}"))?;
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    return Err("Automatic updates are available on Linux and Windows".into());
+    let _ = current;
+    app.exit(0);
+    Ok(())
 }
 #[tauri::command]
 pub fn save_store(state: State<AppState>, store: Store) -> Result<(), String> {
@@ -1581,6 +1921,13 @@ pub fn cancel_preparation(state: State<AppState>) {
 #[cfg(test)]
 mod youtube_audio_tests {
     use super::*;
+
+    #[test]
+    fn updater_compares_semantic_release_versions() {
+        assert!(version_numbers("v1.10.0") > version_numbers("1.9.9"));
+        assert!(version_numbers("v0.8.0") > version_numbers("0.7.12"));
+        assert_eq!(version_numbers("v0.7.8"), vec![0, 7, 8]);
+    }
 
     #[test]
     fn shorts_parser_only_accepts_youtube_shorts_cards() {

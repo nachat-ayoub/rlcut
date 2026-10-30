@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import type { EffectTrack, FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, SfxTrack, Store, TextOverlay, TextTrack, TrackMarkers, Video } from './types';
+import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, RefreshCw, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, X } from 'lucide-react';
+import type { EffectTrack, FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, SfxTrack, Store, TextOverlay, TextTrack, TrackMarkers, UpdateInfo, UpdateProgress, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { fileUrl, invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -118,6 +118,7 @@ export default function App() {
   const [quality, setQuality] = useState(1080), [fps, setFps] = useState(60), [rename, setRename] = useState('');
   const [timelineZoom, setTimelineZoom] = useState(64);
   const [saved, setSaved] = useState(true);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null), [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null), [checkingUpdate, setCheckingUpdate] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
   const [music, setMusic] = useState<MusicTrack | null>(null), [sfxTracks, setSfxTracks] = useState<SfxTrack[]>([]);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
@@ -137,6 +138,29 @@ export default function App() {
   const exporting = progress?.phase === 'running';
   const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), sfxTracks: structuredClone(sfxTracks), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks) }), [preset, segments, music, sfxTracks, markers, effects, effectTracks, texts, textTracks]);
   const report = useCallback((e: unknown) => setError(message(e)), []);
+  const refreshUpdate = useCallback(async (announce = true) => {
+    if (!isDesktop()) return;
+    setCheckingUpdate(true);
+    try {
+      const info = await invoke<UpdateInfo | null>('check_update');
+      setUpdateInfo(info); setUpdateProgress(null);
+      if (announce) setNotice(info ? `rlcut ${info.version} is available` : 'rlcut is up to date');
+    } catch (error) {
+      if (announce) report(error);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }, [report]);
+  const downloadUpdate = useCallback(async () => {
+    setUpdateProgress({ info: updateInfo, downloaded: 0, total: updateInfo?.size ?? 0, downloading: true, ready: false, error: null });
+    try {
+      await invoke<void>('download_update');
+      const progress = await invoke<UpdateProgress>('update_progress');
+      setUpdateProgress(progress);
+    } catch (error) {
+      const text = message(error); setUpdateProgress(current => current ? { ...current, downloading: false, error: text } : null); report(error);
+    }
+  }, [report, updateInfo]);
   useEffect(() => {
     if (initialized.current)
       return;
@@ -148,6 +172,16 @@ export default function App() {
     invoke<Init>('initialize').then(data => { const migrated = migratePresetNames(data.store); setInit(data); setStore(migrated); lastSaved.current = JSON.stringify(data.store); setOutputFolder(migrated.settings.outputFolder); setQuality(migrated.settings.quality); setFps(migrated.settings.fps); setError(data.storageError); setReady(true); }).catch(e => { report(e); setReady(true); });
   }, [report]);
   useEffect(() => { if (ready && isDesktop()) invoke<FontOption[]>('list_system_fonts').then(setFonts).catch(() => undefined); }, [ready]);
+  useEffect(() => {
+    if (!ready || !isDesktop()) return;
+    const timer = window.setTimeout(() => void refreshUpdate(false), 1800);
+    return () => window.clearTimeout(timer);
+  }, [ready, refreshUpdate]);
+  useEffect(() => {
+    if (!updateProgress?.downloading) return;
+    const timer = window.setInterval(() => void invoke<UpdateProgress>('update_progress').then(progress => { setUpdateProgress(progress); if (progress.info) setUpdateInfo(progress.info); }).catch(() => undefined), 350);
+    return () => window.clearInterval(timer);
+  }, [updateProgress?.downloading]);
   useEffect(() => {
     const path = music?.path;
     if (!path || music.waveform?.length) return;
@@ -803,6 +837,7 @@ export default function App() {
       </div>
     </aside>
     <main className="workspace">
+      {updateInfo && <div className="runtime-notice update-ready"><span><RefreshCw size={14} />rlcut {updateInfo.version} is ready to download.</span><button onClick={() => setModal('settings')}>Update</button></div>}
       {init?.previewAudio === false && <div className="runtime-notice">Preview audio is unavailable in this Docker session. Playback is silent; exports retain audio. Restart with a working PulseAudio/PipeWire socket to hear preview audio.</div>}
       {!isDesktop() && <div className="runtime-notice">Desktop UI preview · Run <code>npm run desktop</code> for file import, live composition previews, and export.</div>}{init && (!init.binaries.ffmpeg || !init.binaries.ffprobe) && <div className="runtime-notice warning">Video processing is unavailable. Reinstall the complete app package and restart rlcut.<button onClick={() => setModal('settings')}>Settings</button>
       </div>}
@@ -1115,6 +1150,15 @@ export default function App() {
               <Download size={15} />Export JSON</button>
           </div>
         </> : <>
+          <section className="update-settings" aria-label="App updates">
+            <div className="update-settings-heading"><span><RefreshCw size={16} /><span><strong>App updates</strong><small>Installed v{init?.version ?? 'preview'} · portable updates for Linux and Windows</small></span></span><button disabled={checkingUpdate || updateProgress?.downloading} onClick={() => void refreshUpdate()}>{checkingUpdate ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}Check</button></div>
+            {updateInfo ? <div className="update-available">
+              <div><span>Version {updateInfo.version}</span><strong>{fileSize(updateInfo.size)}</strong></div>
+              {updateProgress?.downloading && <><progress max={Math.max(1, updateProgress.total)} value={updateProgress.downloaded} /><small>{Math.round(updateProgress.downloaded / Math.max(1, updateProgress.total) * 100)}% · {fileSize(updateProgress.downloaded)} of {fileSize(updateProgress.total)}</small></>}
+              {updateProgress?.error && <p>{updateProgress.error}</p>}
+              <button className="primary" disabled={updateProgress?.downloading || exporting || exportStarting} onClick={() => updateProgress?.ready ? void invoke<void>('install_update').catch(report) : void downloadUpdate()}>{updateProgress?.ready ? <><RefreshCw size={15} />Restart and install</> : updateProgress?.downloading ? <><LoaderCircle className="spin" size={15} />Downloading…</> : <><Download size={15} />Download update</>}</button>
+            </div> : <p className="update-current">{checkingUpdate ? <><LoaderCircle className="spin" size={15} />Checking the latest release…</> : <><CheckCircle2 size={15} />You have the latest available version.</>}</p>}
+          </section>
           <div className="two-controls">
             <label className="field">Default quality<Dropdown label="Default quality" value={store.settings.quality} onChange={value => setStore(s => ({ ...s, settings: { ...s.settings, quality: Number(value) } }))} options={[{ value: 480, label: '480p' }, { value: 720, label: '720p' }, { value: 1080, label: '1080p' }]} />
             </label>

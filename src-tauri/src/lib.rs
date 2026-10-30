@@ -23,6 +23,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::initialize,
+            commands::check_update,
+            commands::update_progress,
+            commands::download_update,
+            commands::install_update,
             commands::save_store,
             commands::pick_video,
             commands::pick_music,

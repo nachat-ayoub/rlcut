@@ -210,4 +210,18 @@ export type Init = {
   };
   storageError: string | null;
 };
+export type UpdateInfo = {
+  version: string;
+  notes: string;
+  releaseUrl: string;
+  size: number;
+};
+export type UpdateProgress = {
+  info: UpdateInfo | null;
+  downloaded: number;
+  total: number;
+  downloading: boolean;
+  ready: boolean;
+  error: string | null;
+};
 export type Layer = 'background' | 'gameplay' | 'boost';
