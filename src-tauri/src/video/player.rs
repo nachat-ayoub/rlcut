@@ -158,7 +158,11 @@ impl Player {
     fn sync_music(&mut self, force_seek: bool) -> Result<(), String> {
         if (self.music.is_none() && self.sfx.is_empty())
             || (!force_seek
-                && self.music.iter().chain(self.sfx.iter()).all(|player| player.last_sync.elapsed().as_millis() < 50))
+                && self
+                    .music
+                    .iter()
+                    .chain(self.sfx.iter())
+                    .all(|player| player.last_sync.elapsed().as_millis() < 50))
         {
             return Ok(());
         }
@@ -182,7 +186,12 @@ impl Player {
             )?;
         }
         for effect in &mut self.sfx {
-            effect.sync(edited, timeline_duration, self.playing && self.seeking.is_none(), force_seek)?;
+            effect.sync(
+                edited,
+                timeline_duration,
+                self.playing && self.seeking.is_none(),
+                force_seek,
+            )?;
         }
         Ok(())
     }
@@ -190,7 +199,14 @@ impl Player {
         let mut players = Vec::with_capacity(tracks.len());
         for track in tracks {
             track.validate()?;
-            let music = MusicTrack { path: track.path, name: track.name, duration: track.duration, waveform: track.waveform, segments: track.segments, fade_out: None };
+            let music = MusicTrack {
+                path: track.path,
+                name: track.name,
+                duration: track.duration,
+                waveform: track.waveform,
+                segments: track.segments,
+                fade_out: None,
+            };
             players.push(MusicPlayer::open(music, track.timeline_start)?);
         }
         self.sfx = players;
@@ -472,7 +488,10 @@ impl Player {
     fn restart_audio(&mut self) {
         Self::stop(&mut self.audio);
         Self::stop(&mut self.music_audio);
-        for child in &mut self.sfx_audio { let _ = child.kill(); let _ = child.wait(); }
+        for child in &mut self.sfx_audio {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         self.sfx_audio.clear();
         if !self.playing {
             return;
@@ -533,29 +552,60 @@ impl Player {
         }
         for track in &self.sfx {
             let local = self.edited_time() - track.timeline_start;
-            if local < 0. { continue; }
+            if local < 0. {
+                continue;
+            }
             let mut offset = 0.;
             if let Some((time, gain)) = track.segments.iter().find_map(|segment| {
                 let duration = segment.end - segment.start;
-                let found = (local >= offset && local < offset + duration).then_some((segment.start + local - offset, segment.volume));
-                offset += duration; found
+                let found = (local >= offset && local < offset + duration)
+                    .then_some((segment.start + local - offset, segment.volume));
+                offset += duration;
+                found
             }) {
                 let mut effect = crate::video::binaries::command(ffplay);
-                effect.args(["-hide_banner", "-loglevel", "quiet", "-nodisp", "-autoexit", "-ss"]).arg(format!("{time:.6}")).args(["-volume", &format!("{:.0}", gain.clamp(0., 2.) * 100.)]).arg(&track.path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-                if let Ok(child) = effect.spawn() { self.sfx_audio.push(child); }
+                effect
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "quiet",
+                        "-nodisp",
+                        "-autoexit",
+                        "-ss",
+                    ])
+                    .arg(format!("{time:.6}"))
+                    .args(["-volume", &format!("{:.0}", gain.clamp(0., 2.) * 100.)])
+                    .arg(&track.path)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                if let Ok(child) = effect.spawn() {
+                    self.sfx_audio.push(child);
+                }
             }
         }
     }
 
     pub fn music(&mut self, track: MusicTrack) -> Result<(), String> {
+        // The frontend sends an empty track to clear optional music. Treat it
+        // as control state, not as a file-backed track requiring validation.
+        if track.segments.is_empty() {
+            self.music = None;
+            self.restart_audio();
+            return Ok(());
+        }
         track.validate()?;
-        self.music = (!track.segments.is_empty()).then_some(track);
+        self.music = Some(track);
         self.restart_audio();
         Ok(())
     }
     pub fn sfx(&mut self, tracks: Vec<SfxTrack>) -> Result<(), String> {
-        for track in &tracks { track.validate()?; }
-        self.sfx = tracks; self.restart_audio(); Ok(())
+        for track in &tracks {
+            track.validate()?;
+        }
+        self.sfx = tracks;
+        self.restart_audio();
+        Ok(())
     }
 
     pub fn play(&mut self, playing: bool) -> Result<(), String> {
@@ -683,7 +733,10 @@ impl Drop for Player {
         Self::stop(&mut self.decoder);
         Self::stop(&mut self.audio);
         Self::stop(&mut self.music_audio);
-        for child in &mut self.sfx_audio { let _ = child.kill(); let _ = child.wait(); }
+        for child in &mut self.sfx_audio {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 #[cfg(target_os = "linux")]
@@ -798,7 +851,9 @@ impl Player {
     pub fn music(&mut self, _: MusicTrack) -> Result<(), String> {
         Err("Native playback unavailable".into())
     }
-    pub fn sfx(&mut self, _: Vec<SfxTrack>) -> Result<(), String> { Err("Native playback unavailable".into()) }
+    pub fn sfx(&mut self, _: Vec<SfxTrack>) -> Result<(), String> {
+        Err("Native playback unavailable".into())
+    }
     pub fn open(
         _: &str,
         _: u32,

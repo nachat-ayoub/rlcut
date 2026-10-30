@@ -121,7 +121,18 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
-    run_timeline(b, v, p, segments, o, job, None, None, Vec::new(), Vec::new())
+    run_timeline(
+        b,
+        v,
+        p,
+        segments,
+        o,
+        job,
+        None,
+        None,
+        Vec::new(),
+        Vec::new(),
+    )
 }
 #[allow(clippy::too_many_arguments)] // Worker entry point carries the complete export snapshot.
 pub fn run_timeline(

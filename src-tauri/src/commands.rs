@@ -1095,7 +1095,9 @@ pub fn start_export(
     if let Some(m) = &music {
         m.validate()?;
     }
-    for track in &sfx { track.validate()?; }
+    for track in &sfx {
+        track.validate()?;
+    }
     preset.validate()?;
     if let Some(duration) = music_fade_out {
         if !duration.is_finite() || !(0.1..=10.).contains(&duration) {
@@ -1521,7 +1523,9 @@ pub async fn playback_control(
             if let Some(music) = music {
                 p.music(music)?;
             }
-            if let Some(sfx) = sfx { p.sfx(sfx)?; }
+            if let Some(sfx) = sfx {
+                p.sfx(sfx)?;
+            }
             if let Some(segments) = segments {
                 p.segments(segments)?;
             }

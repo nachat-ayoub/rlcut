@@ -313,7 +313,8 @@ fn export_args_impl(
         ));
     }
     let mut composition = if enhanced.is_some() {
-        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty())) + sfx.len();
+        let index =
+            videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty())) + sfx.len();
         let mut value = format!("[{index}:v:0]setpts=PTS-STARTPTS[base]");
         if p.boost.enabled {
             let g = super::geometry::geometry(&v, p, w, h)?;
@@ -617,15 +618,22 @@ fn export_args_impl(
     for (track_index, track) in sfx.iter().enumerate() {
         track.validate()?;
         let input_index = videos.len() + music_input_count + track_index;
-        let outputs = (0..track.segments.len()).map(|i| format!("[s{track_index}s{i}]")).collect::<String>();
-        graph.push_str(&format!(";[{input_index}:a:0]asplit={}{outputs}", track.segments.len()));
+        let outputs = (0..track.segments.len())
+            .map(|i| format!("[s{track_index}s{i}]"))
+            .collect::<String>();
+        graph.push_str(&format!(
+            ";[{input_index}:a:0]asplit={}{outputs}",
+            track.segments.len()
+        ));
         for (segment_index, segment) in track.segments.iter().enumerate() {
             graph.push_str(&format!(
                 ";[s{track_index}s{segment_index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[s{track_index}t{segment_index}]",
                 segment.start, segment.end, segment.volume
             ));
         }
-        let inputs = (0..track.segments.len()).map(|i| format!("[s{track_index}t{i}]")).collect::<String>();
+        let inputs = (0..track.segments.len())
+            .map(|i| format!("[s{track_index}t{i}]"))
+            .collect::<String>();
         let delay = (track.timeline_start * 1000.).round() as u64;
         graph.push_str(&format!(
             ";{inputs}concat=n={}:v=0:a=1,adelay={delay}|{delay},apad[sfx_edit{track_index}]",
@@ -633,16 +641,24 @@ fn export_args_impl(
         ));
     }
     let mut mix_inputs = Vec::new();
-    if v.has_audio { mix_inputs.push("[audio_edit]".to_string()); }
-    if music.is_some() { mix_inputs.push("[music_edit]".to_string()); }
+    if v.has_audio {
+        mix_inputs.push("[audio_edit]".to_string());
+    }
+    if music.is_some() {
+        mix_inputs.push("[music_edit]".to_string());
+    }
     mix_inputs.extend((0..sfx.len()).map(|index| format!("[sfx_edit{index}]")));
-    if mix_inputs.len() > 1 {
+    let has_overlay_audio = music.is_some() || !sfx.is_empty();
+    if has_overlay_audio && mix_inputs.len() > 1 {
         graph.push_str(&format!(
             ";{}amix=inputs={}:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]",
             mix_inputs.join(""), mix_inputs.len()
         ));
-    } else if let Some(input) = mix_inputs.first() {
-        graph.push_str(&format!(";{input}alimiter=limit=0.95:level=0:attack=1[audio_mix]"));
+    } else if has_overlay_audio {
+        let input = mix_inputs.first().expect("overlay audio input");
+        graph.push_str(&format!(
+            ";{input}alimiter=limit=0.95:level=0:attack=1[audio_mix]"
+        ));
     }
     let mut args = vec![
         "-hide_banner".into(),
@@ -689,7 +705,11 @@ fn export_args_impl(
         args.extend(
             [
                 "-map",
-                "[audio_mix]",
+                if has_overlay_audio {
+                    "[audio_mix]"
+                } else {
+                    "[audio_edit]"
+                },
                 "-c:a",
                 "aac",
                 "-b:a",
