@@ -67,8 +67,10 @@ fn append_effect_filters(
                 // contrast; the alpha-channel terms provide contrast's offset.
                 let amount = effect.intensity;
                 let inverse = 1. - amount;
-                let brightness = 1. - amount * 0.12;
-                let contrast = 1. + 0.08 * effect.intensity;
+                // A stronger cinematic grade: full intensity is deliberately
+                // darker and punchier instead of looking pale/washed out.
+                let brightness = 1. - amount * 0.28;
+                let contrast = 1. + 0.22 * effect.intensity;
                 let gain = brightness * contrast;
                 let offset = 0.5 * (1. - contrast);
                 let rr = gain * (0.2126 + 0.7874 * inverse);

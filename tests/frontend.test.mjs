@@ -64,7 +64,7 @@ test('black-and-white preview filters rendered video without backdrop filters', 
   const html = renderToStaticMarkup(createElement(Composition, {
     video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[{id:'gray',kind:'darkGray',timing:'duration',scope:'all',time:0,duration:1,intensity:1,color:'#fff',easing:'ease'}], texts:[], preview:null, preset:classic, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
   }));
-  assert.match(html, /filter:grayscale\(1\) brightness\(0\.88\) contrast\(1\.08\)/);
+  assert.match(html, /filter:grayscale\(1\) brightness\(0\.72\) contrast\(1\.22\)/);
   assert.doesNotMatch(html, /backdrop-filter/);
 });
 

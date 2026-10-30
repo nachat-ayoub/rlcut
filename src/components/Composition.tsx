@@ -257,7 +257,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
     </div>;
   const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'darkGray' ? effect.intensity : effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) }));
   const grayAmount = (scope: 'video' | 'all') => activeEffects.reduce((amount, item) => item.effect.kind === 'darkGray' && (scope === 'video' || item.effect.scope === 'all') ? Math.max(amount, item.amount) : amount, 0);
-  const grayFilter = (amount: number) => amount > 0 ? `grayscale(${amount}) brightness(${1 - amount * .12}) contrast(${1 + amount * .08})` : undefined;
+  const grayFilter = (amount: number) => amount > 0 ? `grayscale(${amount}) brightness(${1 - amount * .28}) contrast(${1 + amount * .22})` : undefined;
   const videoGray = grayAmount('video');
   const allGray = grayAmount('all');
   const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount }} />);
