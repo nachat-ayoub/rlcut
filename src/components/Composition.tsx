@@ -255,23 +255,30 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         </div>
       </div>
     </div>;
-  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'darkGray' ? effect.intensity : effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) }));
-  const grayAmount = (scope: 'video' | 'all') => activeEffects.reduce((amount, item) => item.effect.kind === 'darkGray' && (scope === 'video' || item.effect.scope === 'all') ? Math.max(amount, item.amount) : amount, 0);
-  const grayFilter = (amount: number) => amount > 0 ? `grayscale(${amount}) brightness(${1 - amount * .28}) contrast(${1 + amount * .22})` : undefined;
-  const videoGray = grayAmount('video');
-  const allGray = grayAmount('all');
+  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'flash' ? effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) : effect.intensity }));
+  const gradeFilter = (target: 'video' | 'all') => {
+    const filters = activeEffects.flatMap(({ effect, amount }) => {
+      if (effect.kind === 'flash' || (target === 'all' && effect.scope !== 'all')) return [];
+      if (effect.kind === 'darkGray') return [`grayscale(${amount}) brightness(${1 - amount * .4}) contrast(${1 + amount * .35})`];
+      return [`brightness(${1 - amount * .12}) contrast(${1 + amount * .32}) saturate(${1 + amount * .78}) hue-rotate(${-8 * amount}deg)`];
+    });
+    return filters.length ? filters.join(' ') : undefined;
+  };
+  const videoGrade = gradeFilter('video');
+  const allGrade = gradeFilter('all');
   const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
-        <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: grayFilter(videoGray) }} />
+        <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: videoGrade }} />
+        {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={rect('gameplay')} aria-hidden="true" />}
         {renderEffects('video')}
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
           const current = visualTime, local = current - text.start, remaining = text.end - current;
           const fade = Math.min(1, text.fadeIn ? local / text.fadeIn : 1, text.fadeOut ? remaining / text.fadeOut : 1);
           const strokeFactor = text.strokePosition === 'outside' ? 2 : text.strokePosition === 'inside' ? .5 : 1;
-          return <div key={text.id} className={`composition-text ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${text.x * 100}%`, top: `${text.y * 100}%`, transform: `translate(-50%,-50%) scale(${text.scale}) rotate(${text.rotation}deg)`, filter: grayFilter(allGray), fontFamily: text.fontFamily, fontSize: `${text.fontSize / quality * 100}cqw`, fontWeight: text.fontWeight, fontStyle: text.italic ? 'italic' : 'normal', textDecoration: text.underline ? 'underline' : 'none', letterSpacing: `${text.letterSpacing / quality * 100}cqw`, lineHeight: text.lineHeight, textAlign: text.align, color: text.color, opacity: text.opacity * Math.max(0, fade), WebkitTextStroke: `${text.strokeWidth * strokeFactor / quality * 100}cqw ${text.strokeColor}`, paintOrder: text.strokePosition === 'outside' ? 'stroke fill' : 'fill stroke', backgroundColor: `${text.backgroundColor}${Math.round(text.backgroundOpacity * 255).toString(16).padStart(2, '0')}` }} onPointerDown={event => beginText(event, text)} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={finishText}>
+          return <div key={text.id} className={`composition-text ${selectedTextId === text.id ? 'selected' : ''}`} style={{ left: `${text.x * 100}%`, top: `${text.y * 100}%`, transform: `translate(-50%,-50%) scale(${text.scale}) rotate(${text.rotation}deg)`, filter: allGrade, fontFamily: text.fontFamily, fontSize: `${text.fontSize / quality * 100}cqw`, fontWeight: text.fontWeight, fontStyle: text.italic ? 'italic' : 'normal', textDecoration: text.underline ? 'underline' : 'none', letterSpacing: `${text.letterSpacing / quality * 100}cqw`, lineHeight: text.lineHeight, textAlign: text.align, color: text.color, opacity: text.opacity * Math.max(0, fade), WebkitTextStroke: `${text.strokeWidth * strokeFactor / quality * 100}cqw ${text.strokeColor}`, paintOrder: text.strokePosition === 'outside' ? 'stroke fill' : 'fill stroke', backgroundColor: `${text.backgroundColor}${Math.round(text.backgroundOpacity * 255).toString(16).padStart(2, '0')}` }} onPointerDown={event => beginText(event, text)} onPointerMove={moveText} onPointerUp={finishText} onPointerCancel={finishText}>
             {text.shadowEnabled && <span aria-hidden="true" className="composition-text-shadow" style={{ color: text.shadowColor, WebkitTextStrokeColor: text.shadowColor, transform: `translate(${text.shadowX / quality * 100}cqw,${text.shadowY / quality * 100}cqw)`, filter: text.shadowBlur > 0 ? `blur(${text.shadowBlur / quality * 100}cqw)` : 'none' }}>{text.text}</span>}
             <span className="composition-text-fill">{text.text}</span>
           </div>;

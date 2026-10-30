@@ -20,6 +20,8 @@ pub struct Gameplay {
     pub scale: f64,
     pub x: f64,
     pub y: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub shadow: bool,
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -114,6 +116,7 @@ impl Default for Preset {
                 scale: 1.,
                 x: 0.5,
                 y: 0.5,
+                shadow: false,
             },
             boost: Boost {
                 enabled: true,
@@ -281,6 +284,7 @@ impl SfxTrack {
 pub enum EffectKind {
     Flash,
     DarkGray,
+    Raggeo,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]

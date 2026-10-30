@@ -500,6 +500,7 @@ h1 {
   pointer-events:none
 }
 .composition .composition-output { display:block; width:100%; height:100%; object-fit:contain; }
+.gameplay-frame-shadow { position:absolute; z-index:3; pointer-events:none; border-radius:1px; box-shadow:0 0 1.5cqw .55cqw rgb(0 0 0 / 72%),inset 0 0 .65cqw rgb(0 0 0 / 48%) }
 .composition.background-selected {
   box-shadow:0 0 0 2px #9c72d2,0 8px 50px #0008
 }
@@ -2186,6 +2187,7 @@ progress::-moz-progress-bar {
 .track-label.effects .layer-kind svg { color:#c48ec6 }
 .timeline-effect { position:absolute; z-index:3; top:3px; height:29px; min-width:13px; overflow:hidden; border:1px solid #855f87; border-radius:4px; background:linear-gradient(90deg,#593d5d,#3d2d43); color:#f1d9f1; cursor:grab; touch-action:none }
 .timeline-effect.dark-gray { border-color:#6f6b78; background:linear-gradient(90deg,#494751,#302f36); color:#e0dde5 }
+.timeline-effect.raggeo { border-color:#387f94; background:linear-gradient(90deg,#215b70,#173d52); color:#c8f5ff }
 .timeline-effect.selected { z-index:4; border-color:#e0a9e2; box-shadow:inset 0 0 0 1px #e0a9e244,0 0 8px #bc77bd33 }
 .timeline-effect>span { position:absolute; inset:0 7px; display:flex; align-items:center; gap:5px; overflow:hidden; white-space:nowrap; pointer-events:none }
 .timeline-effect b { overflow:hidden; font-size:8px; font-weight:600; text-overflow:ellipsis }
@@ -2204,6 +2206,7 @@ progress::-moz-progress-bar {
 .flash-hero small { display:flex; align-items:center; gap:4px; color:#887e8e; font-size:8px }
 .flash-hero>button { width:29px; height:29px; padding:0; display:grid; place-items:center; border:1px solid #4b3b54; border-radius:6px; color:#d5b5df; background:#261d2b }
 .flash-kind,.flash-presets { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; padding:3px; border:1px solid #302936; border-radius:7px; background:#100e13 }
+.flash-kind.effect-types { grid-template-columns:repeat(3,minmax(0,1fr)) }
 .flash-presets { grid-template-columns:repeat(3,minmax(0,1fr)) }
 .flash-kind button,.flash-presets button { min-height:29px; padding:4px 6px; border:0; border-radius:5px; color:#8e8494; background:transparent; font-size:8px }
 .flash-kind button.active,.flash-presets button.active { color:#e9d8ed; background:#422f4a; box-shadow:inset 0 0 0 1px #6a4d75 }

@@ -51,7 +51,7 @@ test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () 
 test('timeline effects expose fast placement and contextual controls', () => {
   const effect = { id:'fx', kind:'darkGray', timing:'duration', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
   const inspector = renderToStaticMarkup(createElement(FlashInspector, { value:effect, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
-  for (const label of ['Black &amp; white','Impact flash','Timeline range','Whole clip','Resize the effect directly on the timeline','Layer scope','All layers','Remove effect']) assert.match(inspector, new RegExp(label));
+  for (const label of ['Black &amp; white','Impact flash','Raggeo','Timeline range','Whole clip','Resize the effect directly on the timeline','Layer placement','Top · include text','Remove effect']) assert.match(inspector, new RegExp(label));
 });
 
 test('music library exposes native YouTube search and saved views', () => {
@@ -64,8 +64,16 @@ test('black-and-white preview filters rendered video without backdrop filters', 
   const html = renderToStaticMarkup(createElement(Composition, {
     video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[{id:'gray',kind:'darkGray',timing:'duration',scope:'all',time:0,duration:1,intensity:1,color:'#fff',easing:'ease'}], texts:[], preview:null, preset:classic, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
   }));
-  assert.match(html, /filter:grayscale\(1\) brightness\(0\.72\) contrast\(1\.22\)/);
+  assert.match(html, /filter:grayscale\(1\) brightness\(0\.6\) contrast\(1\.35\)/);
   assert.doesNotMatch(html, /backdrop-filter/);
+});
+
+test('raggeo grading and gameplay separation shadow render in the live composition', () => {
+  const html = renderToStaticMarkup(createElement(Composition, {
+    video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[{id:'raggeo',kind:'raggeo',timing:'duration',scope:'video',time:0,duration:1,intensity:1,color:'#fff',easing:'ease'}], texts:[], preview:null, preset:{...classic,gameplay:{...classic.gameplay,shadow:true}}, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
+  }));
+  assert.match(html, /brightness\(0\.88\) contrast\(1\.32\) saturate\(1\.78\) hue-rotate\(-8deg\)/);
+  assert.match(html, /gameplay-frame-shadow/);
 });
 
 test('project cards expose a duplicate action', () => {

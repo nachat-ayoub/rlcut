@@ -38,7 +38,7 @@ const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | n
   music: Array.isArray(value?.music) ? value.music.filter(Number.isFinite) : Number.isFinite(value?.music) ? [value!.music as number] : [],
 });
 const normalizeFlash = (value: Partial<FlashEffect>): FlashEffect => ({
-  id: value.id || crypto.randomUUID(), trackId: value.trackId || '', kind: value.kind === 'darkGray' ? 'darkGray' : 'flash', timing: value.timing === 'clip' ? 'clip' : 'duration', scope: value.scope === 'video' ? 'video' : 'all', time: Number.isFinite(value.time) ? Math.max(0, value.time!) : 0,
+  id: value.id || crypto.randomUUID(), trackId: value.trackId || '', kind: value.kind === 'darkGray' || value.kind === 'raggeo' ? value.kind : 'flash', timing: value.timing === 'clip' ? 'clip' : 'duration', scope: value.scope === 'video' ? 'video' : 'all', time: Number.isFinite(value.time) ? Math.max(0, value.time!) : 0,
   duration: Number.isFinite(value.duration) ? Math.max(.08, value.duration!) : .45,
   intensity: Number.isFinite(value.intensity) ? Math.max(.05, Math.min(1, value.intensity!)) : .82,
   color: /^#[0-9a-f]{6}$/i.test(value.color ?? '') ? value.color! : '#ffffff', easing: value.easing ?? 'easeOut',
@@ -749,7 +749,7 @@ export default function App() {
   };
   let selectedSource: Video | null = null, sourceOffset = 0;
   if (selectedVideoSegment) for (const source of videoSources) { if (selectedVideoSegment.start >= sourceOffset && selectedVideoSegment.start < sourceOffset + source.duration) { selectedSource = source; break; } sourceOffset += source.duration; }
-  const inspectorTitle = selectedEffect ? selectedEffect.kind === 'darkGray' ? 'Black & white' : 'Impact flash' : selectedText ? 'Text' : layer === 'background' ? 'Background' : layer === 'gameplay' ? 'Gameplay' : layer === 'boost' ? 'Boost HUD' : selectedVideoSegment ? 'Video clip' : selectedMusicSegment ? 'Music clip' : 'Inspector';
+  const inspectorTitle = selectedEffect ? selectedEffect.kind === 'darkGray' ? 'Black & white' : selectedEffect.kind === 'raggeo' ? 'Raggeo' : 'Impact flash' : selectedText ? 'Text' : layer === 'background' ? 'Background' : layer === 'gameplay' ? 'Gameplay' : layer === 'boost' ? 'Boost HUD' : selectedVideoSegment ? 'Video clip' : selectedMusicSegment ? 'Music clip' : 'Inspector';
   if (!ready)
     return <div className="boot">
       <img className="boot-logo" src="/branding/logo.png" alt="rlcut" />
@@ -896,6 +896,7 @@ export default function App() {
             <Slider label="Brightness" value={preset.background.brightness} min={-.5} max={.5} defaultValue={classic.background.brightness} onChange={brightness => edit('background', { brightness })} />
           </Section>}
           {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
+            <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add depth between gameplay and the blurred backdrop.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
             <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
             <div className="two-controls">
               <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />

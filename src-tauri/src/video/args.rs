@@ -5,6 +5,67 @@ use crate::model::{
 };
 use std::path::Path;
 
+fn multiply_color_matrices(left: [[f64; 3]; 3], right: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    let mut output = [[0.; 3]; 3];
+    for row in 0..3 {
+        for column in 0..3 {
+            output[row][column] = (0..3)
+                .map(|index| left[row][index] * right[index][column])
+                .sum();
+        }
+    }
+    output
+}
+
+fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], f64) {
+    let brightness = 1. - amount * 0.12;
+    let contrast = 1. + amount * 0.32;
+    let saturation = 1. + amount * 0.78;
+    let angle = (-8. * amount).to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let saturated = [
+        [
+            0.213 + 0.787 * saturation,
+            0.715 - 0.715 * saturation,
+            0.072 - 0.072 * saturation,
+        ],
+        [
+            0.213 - 0.213 * saturation,
+            0.715 + 0.285 * saturation,
+            0.072 - 0.072 * saturation,
+        ],
+        [
+            0.213 - 0.213 * saturation,
+            0.715 - 0.715 * saturation,
+            0.072 + 0.928 * saturation,
+        ],
+    ];
+    let hue = [
+        [
+            0.213 + 0.787 * cos - 0.213 * sin,
+            0.715 - 0.715 * cos - 0.715 * sin,
+            0.072 - 0.072 * cos + 0.928 * sin,
+        ],
+        [
+            0.213 - 0.213 * cos + 0.143 * sin,
+            0.715 + 0.285 * cos + 0.140 * sin,
+            0.072 - 0.072 * cos - 0.283 * sin,
+        ],
+        [
+            0.213 - 0.213 * cos - 0.787 * sin,
+            0.715 - 0.715 * cos + 0.715 * sin,
+            0.072 + 0.928 * cos + 0.072 * sin,
+        ],
+    ];
+    let mut matrix = multiply_color_matrices(hue, saturated);
+    for row in &mut matrix {
+        for value in row {
+            *value *= brightness * contrast;
+        }
+    }
+    (matrix, 0.5 * (1. - contrast))
+}
+
 fn append_effect_filters(
     graph: &mut String,
     video_output: &mut String,
@@ -69,8 +130,8 @@ fn append_effect_filters(
                 let inverse = 1. - amount;
                 // A stronger cinematic grade: full intensity is deliberately
                 // darker and punchier instead of looking pale/washed out.
-                let brightness = 1. - amount * 0.28;
-                let contrast = 1. + 0.22 * effect.intensity;
+                let brightness = 1. - amount * 0.4;
+                let contrast = 1. + 0.35 * amount;
                 let gain = brightness * contrast;
                 let offset = 0.5 * (1. - contrast);
                 let rr = gain * (0.2126 + 0.7874 * inverse);
@@ -84,6 +145,18 @@ fn append_effect_filters(
                 let bb = gain * (0.0722 + 0.9278 * inverse);
                 graph.push_str(&format!(
                     ";[{video_output}]colorchannelmixer=rr={rr:.6}:rg={rg:.6}:rb={rb:.6}:ra={offset:.6}:gr={gr:.6}:gg={gg:.6}:gb={gb:.6}:ga={offset:.6}:br={br:.6}:bg={bg:.6}:bb={bb:.6}:ba={offset:.6}:enable='{enabled}'[{next}]"
+                ));
+            }
+            EffectKind::Raggeo => {
+                let enabled = format!(
+                    "between(t\\,{:.6}\\,{:.6})",
+                    effect.time,
+                    effect.time + effect.duration
+                );
+                let (matrix, offset) = raggeo_matrix(effect.intensity);
+                graph.push_str(&format!(
+                    ";[{video_output}]colorchannelmixer=rr={:.6}:rg={:.6}:rb={:.6}:ra={offset:.6}:gr={:.6}:gg={:.6}:gb={:.6}:ga={offset:.6}:br={:.6}:bg={:.6}:bb={:.6}:ba={offset:.6}:enable='{enabled}'[{next}]",
+                    matrix[0][0], matrix[0][1], matrix[0][2], matrix[1][0], matrix[1][1], matrix[1][2], matrix[2][0], matrix[2][1], matrix[2][2]
                 ));
             }
         }

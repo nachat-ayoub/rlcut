@@ -110,7 +110,12 @@ fn filter_graph_with_input(
     let gp = g.gameplay;
     let b = g.boost;
     let c = g.crop;
-    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=4,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[base]",input,video.width,video.height,if p.boost.enabled{
+    let base_output = if p.gameplay.shadow {
+        "base_unshadowed"
+    } else {
+        "base"
+    };
+    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=4,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[{base_output}]",input,video.width,video.height,if p.boost.enabled{
         3
     }
     else{
@@ -121,6 +126,13 @@ fn filter_graph_with_input(
     else{
         ""
     },bg.width,bg.height,w,h,bg.x,bg.y,p.background.blur*w as f64/1080.,p.background.brightness,gp.width,gp.height,gp.x,gp.y);
+    if p.gameplay.shadow {
+        let thickness = ((w as f64 * 0.012).round() as u32).max(2);
+        graph.push_str(&format!(
+            ";[base_unshadowed]drawbox=x={}:y={}:w={}:h={}:color=black@0.72:t={thickness}[base]",
+            gp.x, gp.y, gp.width, gp.height
+        ));
+    }
     if p.boost.enabled {
         let radius = b.width.min(b.height) as f64 / 2.;
         let distance = match p.boost.shape {
