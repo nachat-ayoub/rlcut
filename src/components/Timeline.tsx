@@ -37,7 +37,7 @@ const waveformPath = (samples: number[], start: number, end: number, duration: n
   return `M 0 12 L ${peaks.map((peak, index) => point(index, peak)).join(' L ')} L ${[...peaks].reverse().map((peak, reverseIndex) => point(peaks.length - reverseIndex - 1, peak, true)).join(' L ')} Z`;
 };
 
-export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, sfxTracks, markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, initialZoom = 64, onZoomChange, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic, onImportSfx, onSfxEdit, onSfxDelete }: {
+export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, sfxTracks = [], markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, initialZoom = 64, onZoomChange, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic, onImportSfx, onSfxEdit, onSfxDelete }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
