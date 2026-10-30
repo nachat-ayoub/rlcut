@@ -719,7 +719,7 @@ export default function App() {
   const addEffect = useCallback((at: number, requestedTrackId?: string, kind: FlashEffect['kind'] = 'flash') => {
     const total = editedDuration(segments); if (total < .08) return;
     undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
-    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', kind, time: at, duration: kind === 'flash' ? .45 : Math.min(3, Math.max(.08, total - at)), strength: kind === 'flash' ? 1 : .8 }), total);
+    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', kind, time: at, duration: kind === 'flash' ? .45 : Math.min(3, Math.max(.08, total - at)), intensity: kind === 'flash' ? 1 : .8 }), total);
     const isFree = (track: EffectTrack) => !effects.some(effect => effect.trackId === track.id && overlaps(candidate.time, candidate.time + candidate.duration, effect.time, effect.time + effect.duration));
     const requested = requestedTrackId ? effectTracks.find(track => track.id === requestedTrackId) : undefined;
     const freeTrack = requested && isFree(requested) ? requested : [...effectTracks].reverse().find(isFree);
