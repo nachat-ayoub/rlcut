@@ -244,6 +244,37 @@ impl MusicTrack {
         Ok(())
     }
 }
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
+pub struct SfxTrack {
+    pub id: String,
+    pub path: String,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub name: String,
+    pub duration: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub waveform: Vec<f32>,
+    pub segments: Vec<Segment>,
+    pub timeline_start: f64,
+}
+impl SfxTrack {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.id.is_empty()
+            || !self.timeline_start.is_finite()
+            || self.timeline_start < 0.
+            || !self.duration.is_finite()
+            || self.duration <= 0.
+            || !std::path::Path::new(&self.path).is_file()
+        {
+            return Err("Sound effect file or timeline position is invalid".into());
+        }
+        Segment::validate_all(&self.segments, self.duration)
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serialization", serde(rename_all = "camelCase"))]

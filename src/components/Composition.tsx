@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent, type RefObject } from 'react';
 import { Dropdown } from './Dropdown';
 import { LoaderCircle, Move, Scan, Video as VideoIcon } from 'lucide-react';
-import type { FlashEffect, Layer, Preset, Preview, Video, Segment, MusicTrack, TextOverlay } from '../types';
+import type { FlashEffect, Layer, Preset, Preview, Video, Segment, MusicTrack, SfxTrack, TextOverlay } from '../types';
 import { clamp } from '../lib/presets';
 import { NativePlayback } from '../lib/native-playback';
 import { Compositor, type CompositionCanvas } from '../lib/compositor';
@@ -31,7 +31,7 @@ function PreviewPerformance({ canvas, playing }: { canvas: RefObject<HTMLCanvasE
   }, [canvas, playing]);
   return <small className="preview-performance">{playing && sample ? `${sample.fps} FPS · ${sample.backend} preview` : 'Preview'}</small>;
 }
-export function Composition({ video, sourceVersion = 0, softwareRendering = false, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, musicFadeOut = null, effects = [], texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
+export function Composition({ video, sourceVersion = 0, softwareRendering = false, playbackPath, proxyPreparing, preparation = null, segments = [], music = null, sfxTracks = [], musicFadeOut = null, effects = [], texts = [], selectedTextId = null, onTextSelect, onTextChange, preview, preset, before, colorPreviewBefore = false, guides, layer, setLayer, change, importVideo, quality, playing, timestamp, onTimestamp, onPlayingChange, onPlaybackError, onSourceFrame }: {
   video: Video | null;
   sourceVersion?: number;
   softwareRendering?: boolean;
@@ -40,6 +40,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   preparation?: { percent: number; elapsed: number; remaining: number | null } | null;
   segments?: Segment[];
   music?: MusicTrack | null;
+  sfxTracks?: SfxTrack[];
   musicFadeOut?: number | null;
   effects?: FlashEffect[];
   texts?: TextOverlay[];
@@ -141,7 +142,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); setPlaybackFailed(true); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
-    }, video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 440 : 540);
+    }, /Windows/i.test(navigator.userAgent) ? 30 : video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 440 : 540);
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.
@@ -150,6 +151,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   useEffect(() => {
     player.current?.control({ music: music ? { ...music, fadeOut: musicFadeOut } : { path: '', name: '', duration: 1, waveform: [], segments: [], fadeOut: null } });
   }, [music, musicFadeOut, playbackPath, sourceVersion, playbackAttempt]);
+  useEffect(() => { player.current?.control({ sfx: sfxTracks }); }, [sfxTracks, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);
   useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments, effects]);

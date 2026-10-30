@@ -1,7 +1,7 @@
 use super::geometry::{color_filter, filter_graph_normalized};
 use crate::model::{
     BoostEasing, EffectKind, EffectScope, ExportOptions, FlashEffect, MusicTrack, Preset, Segment,
-    TextOverlay, Video,
+    SfxTrack, TextOverlay, Video,
 };
 use std::path::Path;
 
@@ -114,7 +114,7 @@ pub fn export_args_segments(
     o: &ExportOptions,
     out: &Path,
 ) -> Result<Vec<String>, String> {
-    export_args_timeline(v, p, segments, o, out, None, None, &[])
+    export_args_timeline(v, p, segments, o, out, None, None, &[], &[])
 }
 #[allow(clippy::too_many_arguments)] // Export graph inputs intentionally stay explicit at this boundary.
 pub fn export_args_timeline(
@@ -125,6 +125,7 @@ pub fn export_args_timeline(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: &[SfxTrack],
     texts: &[TextOverlay],
 ) -> Result<Vec<String>, String> {
     export_args_timeline_sources(
@@ -135,6 +136,7 @@ pub fn export_args_timeline(
         out,
         music,
         music_fade_out,
+        sfx,
         texts,
     )
 }
@@ -147,6 +149,7 @@ pub fn export_args_timeline_sources(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: &[SfxTrack],
     texts: &[TextOverlay],
 ) -> Result<Vec<String>, String> {
     export_args_impl(
@@ -157,6 +160,7 @@ pub fn export_args_timeline_sources(
         out,
         music,
         music_fade_out,
+        sfx,
         texts,
         None,
     )
@@ -170,6 +174,7 @@ pub fn finish_ai_args(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: &[SfxTrack],
     texts: &[TextOverlay],
     enhanced: &Path,
 ) -> Result<Vec<String>, String> {
@@ -181,6 +186,7 @@ pub fn finish_ai_args(
         out,
         music,
         music_fade_out,
+        sfx,
         texts,
         Some(enhanced),
     )
@@ -194,6 +200,7 @@ fn export_args_impl(
     out: &Path,
     music: Option<&MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: &[SfxTrack],
     texts: &[TextOverlay],
     enhanced: Option<&Path>,
 ) -> Result<Vec<String>, String> {
@@ -306,7 +313,7 @@ fn export_args_impl(
         ));
     }
     let mut composition = if enhanced.is_some() {
-        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty()));
+        let index = videos.len() + usize::from(music.is_some_and(|m| !m.segments.is_empty())) + sfx.len();
         let mut value = format!("[{index}:v:0]setpts=PTS-STARTPTS[base]");
         if p.boost.enabled {
             let g = super::geometry::geometry(&v, p, w, h)?;
@@ -377,6 +384,7 @@ fn export_args_impl(
         if text.rendered_path.is_some() {
             let image_index = videos.len()
                 + usize::from(music.is_some_and(|m| !m.segments.is_empty()))
+                + sfx.len()
                 + usize::from(enhanced.is_some())
                 + texts[..index]
                     .iter()
@@ -604,11 +612,37 @@ fn export_args_impl(
             fade.map(|(start, duration)| format!(",afade=t=out:st={start:.6}:d={duration:.6}"))
                 .unwrap_or_default()
         ));
-        if v.has_audio {
-            graph.push_str(";[audio_edit][music_edit]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]");
-        } else {
-            graph.push_str(";[music_edit]alimiter=limit=0.95:level=0:attack=1[audio_mix]");
+    }
+    let music_input_count = usize::from(music.is_some());
+    for (track_index, track) in sfx.iter().enumerate() {
+        track.validate()?;
+        let input_index = videos.len() + music_input_count + track_index;
+        let outputs = (0..track.segments.len()).map(|i| format!("[s{track_index}s{i}]")).collect::<String>();
+        graph.push_str(&format!(";[{input_index}:a:0]asplit={}{outputs}", track.segments.len()));
+        for (segment_index, segment) in track.segments.iter().enumerate() {
+            graph.push_str(&format!(
+                ";[s{track_index}s{segment_index}]atrim=start={:.6}:end={:.6},asetpts=PTS-STARTPTS,volume={:.4}[s{track_index}t{segment_index}]",
+                segment.start, segment.end, segment.volume
+            ));
         }
+        let inputs = (0..track.segments.len()).map(|i| format!("[s{track_index}t{i}]")).collect::<String>();
+        let delay = (track.timeline_start * 1000.).round() as u64;
+        graph.push_str(&format!(
+            ";{inputs}concat=n={}:v=0:a=1,adelay={delay}|{delay},apad[sfx_edit{track_index}]",
+            track.segments.len()
+        ));
+    }
+    let mut mix_inputs = Vec::new();
+    if v.has_audio { mix_inputs.push("[audio_edit]".to_string()); }
+    if music.is_some() { mix_inputs.push("[music_edit]".to_string()); }
+    mix_inputs.extend((0..sfx.len()).map(|index| format!("[sfx_edit{index}]")));
+    if mix_inputs.len() > 1 {
+        graph.push_str(&format!(
+            ";{}amix=inputs={}:duration=longest:normalize=0,alimiter=limit=0.95:level=0:attack=1[audio_mix]",
+            mix_inputs.join(""), mix_inputs.len()
+        ));
+    } else if let Some(input) = mix_inputs.first() {
+        graph.push_str(&format!(";{input}alimiter=limit=0.95:level=0:attack=1[audio_mix]"));
     }
     let mut args = vec![
         "-hide_banner".into(),
@@ -627,6 +661,10 @@ fn export_args_impl(
     }
     if let Some(music) = music {
         args.extend(["-i".into(), music.path.clone()]);
+    }
+    for track in sfx {
+        track.validate()?;
+        args.extend(["-i".into(), track.path.clone()]);
     }
     if let Some(enhanced) = enhanced {
         args.extend(["-i".into(), enhanced.to_string_lossy().into_owned()]);
@@ -647,15 +685,11 @@ fn export_args_impl(
         "-map".into(),
         format!("[{video_output}]"),
     ]);
-    if v.has_audio || music.is_some() {
+    if v.has_audio || music.is_some() || !sfx.is_empty() {
         args.extend(
             [
                 "-map",
-                if music.is_some() {
-                    "[audio_mix]"
-                } else {
-                    "[audio_edit]"
-                },
+                "[audio_mix]",
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -820,6 +854,7 @@ mod tests {
             Path::new("/tmp/out.mp4"),
             None,
             None,
+            &[],
             &[text(shadow_enabled)],
         )
         .unwrap();

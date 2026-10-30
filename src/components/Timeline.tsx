@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
-import type { EffectTrack, FlashEffect, MusicTrack, Segment, TextOverlay, TextTrack, TrackMarkers } from '../types';
+import type { EffectTrack, FlashEffect, MusicTrack, Segment, SfxTrack, TextOverlay, TextTrack, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
 
@@ -37,13 +37,14 @@ const waveformPath = (samples: number[], start: number, end: number, duration: n
   return `M 0 12 L ${peaks.map((peak, index) => point(index, peak)).join(' L ')} L ${[...peaks].reverse().map((peak, reverseIndex) => point(peaks.length - reverseIndex - 1, peak, true)).join(' L ')} Z`;
 };
 
-export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, initialZoom = 64, onZoomChange, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic }: {
+export function Timeline({ duration, sourceDurations, timestamp, playheadRef, segments, music, sfxTracks, markers, effects = [], effectTracks = [], selectedEffectId = null, texts, textTracks, selectedTextId, initialZoom = 64, onZoomChange, playing, playbackReady, canUndo, canRedo, onSeek, onPlay, onEdit, onTextEdit, onTextSplit, onTextDelete, onTextSelect, onAddText, onAddTextTrack, onDeleteTextTrack, onEffectAdd, onEffectEdit, onEffectDelete, onEffectSelect, onAddEffectTrack, onDeleteEffectTrack, onMarker, onSelectionChange, onUndo, onRedo, onImportVideo, onImportMusic, onImportSfx, onSfxEdit, onSfxDelete }: {
   duration: number;
   sourceDurations: number[];
   timestamp: number;
   playheadRef?: { current: number };
   segments: Segment[];
   music: MusicTrack | null;
+  sfxTracks: SfxTrack[];
   markers: TrackMarkers;
   effects: FlashEffect[];
   effectTracks: EffectTrack[];
@@ -79,6 +80,9 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   onRedo: () => void;
   onImportVideo: () => void;
   onImportMusic: () => void;
+  onImportSfx: () => void;
+  onSfxEdit: (track: SfxTrack) => void;
+  onSfxDelete: (id: string) => void;
 }) {
   const cursor = useRef<HTMLElement>(null), clock = useRef<HTMLSpanElement>(null);
   const [pixelsPerSecond, setPixelsPerSecond] = useState(() => Math.max(20, Math.min(240, initialZoom)));
@@ -92,6 +96,8 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   const [effectPreview, setEffectPreview] = useState<FlashEffect | null>(null);
   const textGesture = useRef<{ pointer: number; x: number; y: number; value: TextOverlay; edge: 'start' | 'end' | 'move' } | null>(null);
   const effectGesture = useRef<EffectGesture | null>(null);
+  const sfxGesture = useRef<{ pointer: number; x: number; value: SfxTrack; mode: 'move' | 'start' | 'end' } | null>(null);
+  const [sfxPreview, setSfxPreview] = useState<SfxTrack | null>(null);
   const effectPreviewRef = useRef<FlashEffect | null>(null);
   const gesture = useRef<ClipGesture | null>(null), markerGesture = useRef<MarkerGesture | null>(null), scroll = useRef<HTMLDivElement>(null), trackLabels = useRef<HTMLDivElement>(null), volumePopover = useRef<HTMLDivElement>(null), volumeDirty = useRef(false), rulerDragging = useRef(false), lastRulerSeek = useRef<number | null>(null);
   const musicSegments = music?.segments ?? [], videoOffsets = offsetsOf(segments), musicOffsets = offsetsOf(musicSegments);
@@ -125,7 +131,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   const selectedText = texts.find(text => text.id === selectedTextId), canCutText = Boolean(selectedText && editedTimestamp > selectedText.start + MIN_CLIP && editedTimestamp < selectedText.end - MIN_CLIP);
   const selectedEffect = effects.find(effect => effect.id === selectedEffectId) ?? null;
   const tickEvery = pixelsPerSecond >= 160 ? .5 : pixelsPerSecond >= 80 ? 1 : pixelsPerSecond >= 40 ? 2 : pixelsPerSecond >= 20 ? 5 : 10;
-  const timelineDuration = Math.max(durationOf(displayLanes.video), durationOf(displayLanes.music), ...texts.map(text => text.end), ...effects.map(effect => effect.time + effect.duration));
+  const timelineDuration = Math.max(durationOf(displayLanes.video), durationOf(displayLanes.music), ...sfxTracks.map(track => track.timelineStart + durationOf(track.segments)), ...texts.map(text => text.end), ...effects.map(effect => effect.time + effect.duration));
   const ticks = Array.from({ length: Math.floor(timelineDuration / tickEvery) + 1 }, (_, index) => index * tickEvery);
   useEffect(() => {
     if (!segments.some(s => selection.track === 'video' && s.id === selection.id) && !musicSegments.some(s => selection.track === 'music' && s.id === selection.id)) setSelection({ track: 'video', id: segments[0]?.id ?? '' });
@@ -427,7 +433,36 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       {shown.timing === 'duration' && <button className="effect-duration-handle end" aria-label="Resize effect from end" onPointerDown={event => beginEffect(event, effect, 'end')} onPointerMove={moveEffect} onPointerUp={finishEffect} onPointerCancel={() => { effectGesture.current = null; setEffectPreview(null); }} />}
     </div>;
   });
-  const effectRows = effectTracks.map(() => '35px').join(' '), textRows = textTracks.map(() => '39px').join(' '), contentHeight = 103 + effectTracks.length * 35 + textTracks.length * 39, editorHeight = Math.min(344, 118 + effectTracks.length * 35 + textTracks.length * 39);
+  const beginSfx = (event: PointerEvent<HTMLElement>, track: SfxTrack, mode: 'move' | 'start' | 'end') => {
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
+    sfxGesture.current = { pointer: event.pointerId, x: event.clientX, value: structuredClone(track), mode }; setSfxPreview(track);
+  };
+  const moveSfx = (event: PointerEvent<HTMLElement>) => {
+    const state = sfxGesture.current; if (!state || state.pointer !== event.pointerId) return;
+    const delta = (event.clientX - state.x) / pixelsPerSecond, next = structuredClone(state.value);
+    const first = next.segments[0], last = next.segments[next.segments.length - 1]; if (!first || !last) return;
+    if (state.mode === 'move') next.timelineStart = Math.max(0, state.value.timelineStart + delta);
+    else if (state.mode === 'start') { const change = Math.max(-first.start, Math.min(first.end - first.start - MIN_CLIP, delta)); first.start += change; next.timelineStart = Math.max(0, state.value.timelineStart + change); }
+    else last.end = Math.max(last.start + MIN_CLIP, Math.min(next.duration, last.end + delta));
+    if (!event.altKey) {
+      const length = durationOf(next.segments), edge = state.mode === 'end' ? next.timelineStart + length : next.timelineStart;
+      const candidates = unique([cursorTime(), ...clipEdges('video'), ...clipEdges('music'), ...sfxTracks.filter(item => item.id !== next.id).flatMap(item => [item.timelineStart, item.timelineStart + durationOf(item.segments)])]);
+      const snapped = nearest(edge, candidates);
+      if (snapped != null) {
+        if (state.mode === 'move') next.timelineStart = Math.max(0, next.timelineStart + snapped - edge);
+        else if (state.mode === 'start') { const shift = snapped - edge; first.start = Math.max(0, Math.min(first.end - MIN_CLIP, first.start + shift)); next.timelineStart = snapped; }
+        else last.end = Math.max(last.start + MIN_CLIP, Math.min(next.duration, last.end + snapped - edge));
+      }
+    }
+    setSfxPreview(next);
+  };
+  const finishSfx = (event: PointerEvent<HTMLElement>) => { const state = sfxGesture.current; if (!state || state.pointer !== event.pointerId) return; const next = sfxPreview; sfxGesture.current = null; setSfxPreview(null); if (next) onSfxEdit(next); };
+  const renderSfx = (track: SfxTrack) => {
+    const shown = sfxPreview?.id === track.id ? sfxPreview : track, first = shown.segments[0], last = shown.segments[shown.segments.length - 1]; if (!first || !last) return null;
+    const wave = waveformPath(shown.waveform, first.start, last.end, shown.duration);
+    return <div className="timeline-segment sfx-segment" style={{ left: `${shown.timelineStart * pixelsPerSecond}px`, width: `${durationOf(shown.segments) * pixelsPerSecond}px` }} onPointerDown={event => beginSfx(event, track, 'move')} onPointerMove={moveSfx} onPointerUp={finishSfx} onPointerCancel={() => { sfxGesture.current = null; setSfxPreview(null); }}><button className="trim-handle start" onPointerDown={event => beginSfx(event, track, 'start')} onPointerMove={moveSfx} onPointerUp={finishSfx} />{wave && <svg className="music-waveform" viewBox="0 0 100 24" preserveAspectRatio="none"><path d={wave} /></svg>}<span className="clip-fill"><Music2 size={12} /><b>{shown.name}</b></span><button className="trim-handle end" onPointerDown={event => beginSfx(event, track, 'end')} onPointerMove={moveSfx} onPointerUp={finishSfx} /></div>;
+  };
+  const effectRows = effectTracks.map(() => '35px').join(' '), textRows = textTracks.map(() => '39px').join(' '), sfxRows = sfxTracks.map(() => '39px').join(' '), contentHeight = 103 + effectTracks.length * 35 + textTracks.length * 39 + sfxTracks.length * 39, editorHeight = Math.min(344, 118 + effectTracks.length * 35 + textTracks.length * 39 + sfxTracks.length * 39);
   const addPosition = (track: Track) => {
     const preview = trimPreview?.track === track ? lanes[track].find(clip => clip.id === trimPreview.id) : null;
     const delta = preview && trimPreview ? (trimPreview.edge === 'start' ? preview.start - trimPreview.value : trimPreview.value - preview.end) : 0;
@@ -455,13 +490,14 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <label className="volume-value"><input aria-label="Volume percent" type="number" min="0" max="200" step="1" value={Math.round(volume * 100)} onChange={event => { const raw = Math.max(0, Math.min(200, event.target.valueAsNumber || 0)) / 100; volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .02 ? 1 : raw); }} onKeyDown={event => { if (event.key === 'Enter') { commitVolume(); event.currentTarget.blur(); } }} onBlur={commitVolume} /><span>%</span></label>
     </div>}
     <div className="timeline-editor" style={{ height: `${editorHeight}px` }}>
-      <div className="track-labels" ref={trackLabels} style={{ gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px 15px` }}><div className="ruler-corner"><button className="add-layer effect" onClick={onAddEffectTrack} title="Add effects layer" aria-label="Add effects layer"><Sparkles size={11} /><span>FX</span><Plus size={9} /></button><button className="add-layer text" onClick={onAddTextTrack} title="Add text layer" aria-label="Add text layer"><Type size={11} /><span>Text</span><Plus size={9} /></button></div>{effectTracks.map(track => <div key={track.id} className="track-label effects layer-track-label" title={track.name}><span className="layer-kind"><Sparkles size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteEffectTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}{textTracks.map(track => <div key={track.id} className="track-label text layer-track-label" title={track.name}><span className="layer-kind"><Type size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteTextTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}<div className="track-label base-track"><Film size={14} /><small>Video</small></div><div className="track-label music base-track"><Music2 size={14} /><small>Music</small></div></div>
-      <div className="timeline-scroll" ref={scroll} onScroll={event => { if (trackLabels.current) trackLabels.current.scrollTop = event.currentTarget.scrollTop; }}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px`, height: `${contentHeight}px`, gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px` }}>
+      <div className="track-labels" ref={trackLabels} style={{ gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px ${sfxRows} 15px` }}><div className="ruler-corner"><button className="add-layer effect" onClick={onAddEffectTrack} title="Add effects layer" aria-label="Add effects layer"><Sparkles size={11} /><span>FX</span><Plus size={9} /></button><button className="add-layer text" onClick={onAddTextTrack} title="Add text layer" aria-label="Add text layer"><Type size={11} /><span>Text</span><Plus size={9} /></button><button className="add-layer sfx" onClick={onImportSfx} title="Add SFX track" aria-label="Add SFX track"><Music2 size={11} /><span>SFX</span><Plus size={9} /></button></div>{effectTracks.map(track => <div key={track.id} className="track-label effects layer-track-label" title={track.name}><span className="layer-kind"><Sparkles size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteEffectTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}{textTracks.map(track => <div key={track.id} className="track-label text layer-track-label" title={track.name}><span className="layer-kind"><Type size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteTextTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}<div className="track-label base-track"><Film size={14} /><small>Video</small></div><div className="track-label music base-track"><Music2 size={14} /><small>Music</small></div>{sfxTracks.map((track, index) => <div key={track.id} className="track-label sfx base-track"><Music2 size={13} /><small>SFX {index + 1}</small><button className="layer-delete" onClick={() => onSfxDelete(track.id)} title={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}</div>
+      <div className="timeline-scroll" ref={scroll} onScroll={event => { if (trackLabels.current) trackLabels.current.scrollTop = event.currentTarget.scrollTop; }}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px`, height: `${contentHeight}px`, gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px ${sfxRows}` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
         {effectTracks.map(track => <div key={track.id} className={`effects-track ${effectGesture.current && effectPreview?.trackId === track.id && effectGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-effect-track={track.id}>{renderEffects(track.id)}<button className="track-add effect" style={{ left: `${Math.max(0, ...effects.filter(effect => (effectPreview?.id === effect.id ? effectPreview.trackId : effect.trackId) === track.id).map(effect => effectPreview?.id === effect.id ? effectPreview.time + effectPreview.duration : effect.time + effect.duration)) * pixelsPerSecond + 9}px` }} title={`Add impact flash to ${track.name}`} aria-label={`Add impact flash to ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={() => onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)), track.id)}><Plus size={15} /></button></div>)}
         {textTracks.map(track => <div key={track.id} className={`text-track ${textGesture.current && textPreview?.trackId === track.id && textGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-text-track={track.id}>{renderTexts(track.id)}<button className="track-add text" style={{ left: `${Math.max(0, ...texts.filter(text => (textPreview?.id === text.id ? textPreview.trackId : text.trackId) === track.id).map(text => textPreview?.id === text.id ? textPreview.end : text.end)) * pixelsPerSecond + 9}px` }} title={`Add text to ${track.name}`} aria-label={`Add text to ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={() => onAddText(track.id)}><Plus size={16} /></button></div>)}
         <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarkers('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
         <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarkers('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
+        {sfxTracks.map(track => <div key={track.id} className="sfx-track">{renderSfx(track)}</div>)}
         <i ref={cursor} className={`playhead ${trimPreview?.snapped || markerPreview?.snapped ? 'snapped' : ''}`} style={{ left: 0, transform: `translateX(${editedTimestamp * pixelsPerSecond}px)` }}><span /></i>
       </div></div>
     </div>

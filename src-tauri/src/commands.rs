@@ -1,5 +1,5 @@
 use crate::{
-    model::{ExportOptions, MusicFile, MusicTrack, Preset, Segment, Video},
+    model::{ExportOptions, MusicFile, MusicTrack, Preset, Segment, SfxTrack, Video},
     presets,
     settings::{self, LibrarySong, Store},
     video::{
@@ -479,6 +479,12 @@ async fn download_youtube_audio_with_ytdlp(
                 "--no-cache-dir",
                 "--quiet",
                 "--no-warnings",
+                "--extractor-args",
+                "youtube:player_client=web_safari,android_vr,web",
+                "--retries",
+                "5",
+                "--fragment-retries",
+                "5",
                 "--format",
                 "bestaudio/best",
                 "--output",
@@ -1082,12 +1088,14 @@ pub fn start_export(
     options: ExportOptions,
     texts: Vec<crate::model::TextOverlay>,
     music: Option<MusicTrack>,
+    sfx: Vec<crate::model::SfxTrack>,
     music_fade_out: Option<f64>,
     overwrite: bool,
 ) -> Result<Progress, String> {
     if let Some(m) = &music {
         m.validate()?;
     }
+    for track in &sfx { track.validate()?; }
     preset.validate()?;
     if let Some(duration) = music_fade_out {
         if !duration.is_finite() || !(0.1..=10.).contains(&duration) {
@@ -1187,6 +1195,7 @@ pub fn start_export(
             job,
             music,
             music_fade_out,
+            sfx,
             texts,
         );
         for path in stamp_paths {
@@ -1494,6 +1503,7 @@ pub async fn playback_control(
     time: Option<f64>,
     segments: Option<Vec<Segment>>,
     music: Option<MusicTrack>,
+    sfx: Option<Vec<SfxTrack>>,
 ) -> Result<(), String> {
     if time.is_some_and(|t| !t.is_finite() || t < 0.) {
         return Err("Invalid playback position".into());
@@ -1511,6 +1521,7 @@ pub async fn playback_control(
             if let Some(music) = music {
                 p.music(music)?;
             }
+            if let Some(sfx) = sfx { p.sfx(sfx)?; }
             if let Some(segments) = segments {
                 p.segments(segments)?;
             }

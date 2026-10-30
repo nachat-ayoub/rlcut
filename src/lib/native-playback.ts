@@ -1,5 +1,5 @@
 import { invoke } from './native';
-import type { MusicTrack, Segment } from '../types';
+import type { MusicTrack, Segment, SfxTrack } from '../types';
 let nextSession = Date.now() * 1000;
 type Callbacks = {
   frame: (source: NativeFrame, time: number) => void;
@@ -75,7 +75,7 @@ export class NativePlayback {
     const delay = active ? changed ? Math.max(0, 1000 / this.fps - 3 - (performance.now() - started)) : 2 : this.waiting ? 8 : 80;
     if (!this.disposed) this.timer = window.setTimeout(() => void this.poll(), delay);
   }
-  control(values: { playing?: boolean; time?: number; segments?: Segment[]; music?: MusicTrack }) {
+  control(values: { playing?: boolean; time?: number; segments?: Segment[]; music?: MusicTrack; sfx?: SfxTrack[] }) {
     if (this.disposed) return;
     if (values.playing !== undefined) this.desiredPlaying = values.playing;
     this.commands = this.commands.then(async () => {

@@ -1,6 +1,6 @@
 //! Native-clock playback with a single bounded decoded-frame queue. The UI
 //! consumes binary RGBA packets and never starts a browser media decoder.
-use crate::model::{MusicTrack, Segment};
+use crate::model::{MusicTrack, Segment, SfxTrack};
 #[cfg(target_os = "linux")]
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::PathBuf;
@@ -51,6 +51,7 @@ pub struct Player {
     volume: f64,
     error: Option<String>,
     music: Option<MusicPlayer>,
+    sfx: Vec<MusicPlayer>,
 }
 #[cfg(target_os = "windows")]
 pub struct Player {
@@ -61,6 +62,7 @@ pub struct Player {
     frames: Option<BufReader<ChildStdout>>,
     audio: Option<Child>,
     music_audio: Option<Child>,
+    sfx_audio: Vec<Child>,
     width: u32,
     height: u32,
     playing: bool,
@@ -77,6 +79,7 @@ pub struct Player {
     next_frame: Instant,
     error: Option<String>,
     music: Option<MusicTrack>,
+    sfx: Vec<SfxTrack>,
 }
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub struct Player;
@@ -126,6 +129,7 @@ impl Player {
             volume: -1.,
             error: None,
             music: None,
+            sfx: Vec::new(),
         };
         player.seek(time)?;
         Ok(player)
@@ -147,15 +151,14 @@ impl Player {
                     .any(|(a, b)| a.start != b.start || a.end != b.end);
             music.track = track;
         } else {
-            self.music = Some(MusicPlayer::open(track)?);
+            self.music = Some(MusicPlayer::open(track, 0.)?);
         }
         self.sync_music(seek)
     }
     fn sync_music(&mut self, force_seek: bool) -> Result<(), String> {
-        if self
-            .music
-            .as_ref()
-            .is_none_or(|m| !force_seek && m.last_sync.elapsed().as_millis() < 50)
+        if (self.music.is_none() && self.sfx.is_empty())
+            || (!force_seek
+                && self.music.iter().chain(self.sfx.iter()).all(|player| player.last_sync.elapsed().as_millis() < 50))
         {
             return Ok(());
         }
@@ -169,8 +172,8 @@ impl Player {
             + self.segments.get(self.segment_index).map_or(0., |segment| {
                 (source - segment.start).clamp(0., segment.end - segment.start)
             });
+        let timeline_duration = self.segments.iter().map(|s| s.end - s.start).sum();
         if let Some(music) = self.music.as_mut() {
-            let timeline_duration = self.segments.iter().map(|s| s.end - s.start).sum();
             music.sync(
                 edited,
                 timeline_duration,
@@ -178,7 +181,20 @@ impl Player {
                 force_seek,
             )?;
         }
+        for effect in &mut self.sfx {
+            effect.sync(edited, timeline_duration, self.playing && self.seeking.is_none(), force_seek)?;
+        }
         Ok(())
+    }
+    pub fn sfx(&mut self, tracks: Vec<SfxTrack>) -> Result<(), String> {
+        let mut players = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            track.validate()?;
+            let music = MusicTrack { path: track.path, name: track.name, duration: track.duration, waveform: track.waveform, segments: track.segments, fade_out: None };
+            players.push(MusicPlayer::open(music, track.timeline_start)?);
+        }
+        self.sfx = players;
+        self.sync_music(true)
     }
     pub fn play(&mut self, playing: bool) -> Result<(), String> {
         if unsafe { rl_player_play(self.handle, playing as c_int) } == 0 {
@@ -355,7 +371,9 @@ impl Player {
 }
 #[cfg(target_os = "windows")]
 impl Player {
-    const FPS: f64 = 60.;
+    // A 30 FPS edit proxy keeps Windows redraw/seek latency low. Export FPS is
+    // independent, so 60/120 FPS delivery remains unchanged.
+    const FPS: f64 = 30.;
 
     pub fn open(
         path: &str,
@@ -377,6 +395,7 @@ impl Player {
             frames: None,
             audio: None,
             music_audio: None,
+            sfx_audio: Vec::new(),
             width,
             height,
             playing: false,
@@ -393,6 +412,7 @@ impl Player {
             next_frame: Instant::now(),
             error: None,
             music: None,
+            sfx: Vec::new(),
         };
         player.seek(time)?;
         player.tick()?;
@@ -452,6 +472,8 @@ impl Player {
     fn restart_audio(&mut self) {
         Self::stop(&mut self.audio);
         Self::stop(&mut self.music_audio);
+        for child in &mut self.sfx_audio { let _ = child.kill(); let _ = child.wait(); }
+        self.sfx_audio.clear();
         if !self.playing {
             return;
         }
@@ -509,6 +531,20 @@ impl Player {
                 self.music_audio = music.spawn().ok();
             }
         }
+        for track in &self.sfx {
+            let local = self.edited_time() - track.timeline_start;
+            if local < 0. { continue; }
+            let mut offset = 0.;
+            if let Some((time, gain)) = track.segments.iter().find_map(|segment| {
+                let duration = segment.end - segment.start;
+                let found = (local >= offset && local < offset + duration).then_some((segment.start + local - offset, segment.volume));
+                offset += duration; found
+            }) {
+                let mut effect = crate::video::binaries::command(ffplay);
+                effect.args(["-hide_banner", "-loglevel", "quiet", "-nodisp", "-autoexit", "-ss"]).arg(format!("{time:.6}")).args(["-volume", &format!("{:.0}", gain.clamp(0., 2.) * 100.)]).arg(&track.path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+                if let Ok(child) = effect.spawn() { self.sfx_audio.push(child); }
+            }
+        }
     }
 
     pub fn music(&mut self, track: MusicTrack) -> Result<(), String> {
@@ -516,6 +552,10 @@ impl Player {
         self.music = (!track.segments.is_empty()).then_some(track);
         self.restart_audio();
         Ok(())
+    }
+    pub fn sfx(&mut self, tracks: Vec<SfxTrack>) -> Result<(), String> {
+        for track in &tracks { track.validate()?; }
+        self.sfx = tracks; self.restart_audio(); Ok(())
     }
 
     pub fn play(&mut self, playing: bool) -> Result<(), String> {
@@ -643,6 +683,7 @@ impl Drop for Player {
         Self::stop(&mut self.decoder);
         Self::stop(&mut self.audio);
         Self::stop(&mut self.music_audio);
+        for child in &mut self.sfx_audio { let _ = child.kill(); let _ = child.wait(); }
     }
 }
 #[cfg(target_os = "linux")]
@@ -652,10 +693,11 @@ struct MusicPlayer {
     playing: bool,
     last_sync: std::time::Instant,
     segment: Option<usize>,
+    timeline_start: f64,
 }
 #[cfg(target_os = "linux")]
 impl MusicPlayer {
-    fn open(track: MusicTrack) -> Result<Self, String> {
+    fn open(track: MusicTrack, timeline_start: f64) -> Result<Self, String> {
         let file = CString::new(track.path.as_str()).map_err(|_| "Invalid music path")?;
         let mut error = [0i8; 1024];
         let handle =
@@ -671,6 +713,7 @@ impl MusicPlayer {
             playing: false,
             segment: None,
             last_sync: std::time::Instant::now() - std::time::Duration::from_secs(1),
+            timeline_start,
         })
     }
     fn sync(
@@ -681,6 +724,7 @@ impl MusicPlayer {
         force: bool,
     ) -> Result<(), String> {
         self.last_sync = std::time::Instant::now();
+        let edited = edited - self.timeline_start;
         let mut offset = 0.;
         let target = self
             .track
@@ -754,6 +798,7 @@ impl Player {
     pub fn music(&mut self, _: MusicTrack) -> Result<(), String> {
         Err("Native playback unavailable".into())
     }
+    pub fn sfx(&mut self, _: Vec<SfxTrack>) -> Result<(), String> { Err("Native playback unavailable".into()) }
     pub fn open(
         _: &str,
         _: u32,

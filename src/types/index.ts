@@ -111,6 +111,7 @@ export type MusicLibrarySong = {
   localName?: string;
 };
 export type MusicTrack = MusicFile & { segments: Segment[]; fadeOut?: number | null };
+export type SfxTrack = MusicTrack & { id: string; timelineStart: number };
 export type TrackMarkers = {
   video: number[];
   music: number[];
@@ -183,6 +184,7 @@ export type Project = {
   videoPaths: string[];
   segments: Segment[];
   music: MusicTrack | null;
+  sfxTracks?: SfxTrack[];
   markers: TrackMarkers;
   effects?: FlashEffect[];
   effectTracks?: EffectTrack[];

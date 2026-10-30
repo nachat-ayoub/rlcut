@@ -99,6 +99,9 @@ jobs:
             Write-Host "::error title=Windows video tools failed::$detail"
             exit 1
           }
+      - name: Prepare verified Windows YouTube audio helper
+        shell: pwsh
+        run: ./scripts/prepare-windows-ytdlp.ps1
       - name: Build and stage the Windows NCNN AI engine
         shell: pwsh
         run: |
@@ -132,6 +135,7 @@ jobs:
           Copy-Item $app (Join-Path $stage 'rlcut.exe') -Force
           Copy-Item '.runtime/windows/tools/ffmpeg.exe', '.runtime/windows/tools/ffprobe.exe', '.runtime/windows/tools/ffplay.exe' (Join-Path $stage 'resources/ffmpeg') -Force
           Copy-Item '.runtime/windows/tools/notices' (Join-Path $stage 'resources/ffmpeg/notices') -Recurse -Force
+          Copy-Item '.runtime/windows/yt-dlp/yt-dlp.exe' (Join-Path $stage 'yt-dlp.exe') -Force
           Copy-Item '.runtime/windows/ai/*' (Join-Path $stage 'rlcut-ai') -Recurse -Force
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $archive = 'dist/rlcut-Windows-x86_64-portable.zip'

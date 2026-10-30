@@ -2,7 +2,7 @@ use super::{
     args::{export_args_timeline_sources, progress_seconds},
     binaries::{command, Binaries},
 };
-use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, SfxTrack, TextOverlay, Video};
 #[cfg(feature = "serialization")]
 use serde::Serialize;
 use std::{
@@ -121,7 +121,7 @@ pub fn run_segments(
     o: ExportOptions,
     job: Arc<Job>,
 ) {
-    run_timeline(b, v, p, segments, o, job, None, None, Vec::new())
+    run_timeline(b, v, p, segments, o, job, None, None, Vec::new(), Vec::new())
 }
 #[allow(clippy::too_many_arguments)] // Worker entry point carries the complete export snapshot.
 pub fn run_timeline(
@@ -133,6 +133,7 @@ pub fn run_timeline(
     job: Arc<Job>,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: Vec<SfxTrack>,
     texts: Vec<TextOverlay>,
 ) {
     run_timeline_sources(
@@ -144,6 +145,7 @@ pub fn run_timeline(
         job,
         music,
         music_fade_out,
+        sfx,
         texts,
     )
 }
@@ -157,6 +159,7 @@ pub fn run_timeline_sources(
     job: Arc<Job>,
     music: Option<MusicTrack>,
     music_fade_out: Option<f64>,
+    sfx: Vec<SfxTrack>,
     texts: Vec<TextOverlay>,
 ) {
     let start = Instant::now();
@@ -190,6 +193,7 @@ pub fn run_timeline_sources(
                 job.clone(),
                 music.as_ref(),
                 music_fade_out,
+                &sfx,
                 &texts,
                 start,
                 &log,
@@ -206,6 +210,7 @@ pub fn run_timeline_sources(
                     &partial,
                     music.as_ref(),
                     music_fade_out,
+                    &sfx,
                     &texts,
                 )?,
                 &log,
@@ -230,6 +235,7 @@ pub fn run_timeline_sources(
                     &partial,
                     music.as_ref(),
                     music_fade_out,
+                    &sfx,
                     &texts,
                 )?,
                 &log,

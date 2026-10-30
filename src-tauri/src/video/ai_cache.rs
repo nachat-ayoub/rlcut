@@ -5,7 +5,7 @@ use super::{
     export::{self, Job},
 };
 use super::{enhance, metadata};
-use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
+use crate::model::{ExportOptions, MusicTrack, Preset, Segment, SfxTrack, TextOverlay, Video};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -210,6 +210,7 @@ pub fn run(
     job: Arc<Job>,
     music: Option<&MusicTrack>,
     fade: Option<f64>,
+    sfx: &[SfxTrack],
     texts: &[TextOverlay],
     start: Instant,
     log: &Path,
@@ -320,6 +321,7 @@ pub fn run(
                 None,
                 None,
                 &[],
+                &[],
             )?;
             export::execute(
                 b,
@@ -406,7 +408,7 @@ pub fn run(
             progress.stage = Some("Finishing boost, text and audio · AI already prepared".into());
         }
         let mut finish = args::safe_ai_render_args(args::finish_ai_args(
-            videos, p, segments, o, out, music, fade, texts, &ai_video,
+            videos, p, segments, o, out, music, fade, sfx, texts, &ai_video,
         )?);
         for i in 0..finish.len().saturating_sub(1) {
             if finish[i] == "-crf" {

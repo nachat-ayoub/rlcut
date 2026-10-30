@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowRight, Check, CheckCircle2, Circle, Copy, Download, Eye, Film, FolderOpen, Gauge, Home, Keyboard, Layers3, LayoutTemplate, LoaderCircle, Maximize2, Minimize2, Music2, Palette, Pencil, Plus, Save, ScanLine, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Upload, X } from 'lucide-react';
-import type { EffectTrack, FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, Store, TextOverlay, TextTrack, TrackMarkers, Video } from './types';
+import type { EffectTrack, FlashEffect, FontOption, Init, Layer, MusicFile, MusicLibrarySong, MusicTrack, Preset, Preview, Progress, Project, Segment, SfxTrack, Store, TextOverlay, TextTrack, TrackMarkers, Video } from './types';
 import { classic, clamp, copyPreset, filename, initialStore, duration } from './lib/presets';
 import { fileUrl, invoke, isDesktop, message, onDrop } from './lib/native';
 import { Dropdown } from './components/Dropdown';
@@ -82,7 +82,7 @@ const normalizeText = (value: Partial<TextOverlay>): TextOverlay => ({
   shadowEnabled: value.shadowEnabled ?? true, shadowColor: value.shadowColor || '#000000', shadowBlur: value.shadowBlur ?? 8, shadowX: value.shadowX ?? 0,
   shadowY: value.shadowY ?? 6, fadeIn: value.fadeIn ?? null, fadeOut: value.fadeOut ?? null,
 });
-type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; markers: TrackMarkers; effects: FlashEffect[]; effectTracks: EffectTrack[]; texts: TextOverlay[]; textTracks: TextTrack[] };
+type EditorSnapshot = { preset: Preset; segments: Segment[]; music: MusicTrack | null; sfxTracks: SfxTrack[]; markers: TrackMarkers; effects: FlashEffect[]; effectTracks: EffectTrack[]; texts: TextOverlay[]; textTracks: TextTrack[] };
 const migratePresetNames = (store: Store): Store => {
   const renamed: Preset[] = [];
   for (const preset of store.presets) {
@@ -119,7 +119,7 @@ export default function App() {
   const [timelineZoom, setTimelineZoom] = useState(64);
   const [saved, setSaved] = useState(true);
   const [segments, setSegments] = useState<Segment[]>([]), [playing, setPlaying] = useState(false);
-  const [music, setMusic] = useState<MusicTrack | null>(null);
+  const [music, setMusic] = useState<MusicTrack | null>(null), [sfxTracks, setSfxTracks] = useState<SfxTrack[]>([]);
   const [markers, setMarkers] = useState<TrackMarkers>({ video: [], music: [] });
   const [effects, setEffects] = useState<FlashEffect[]>([]), [effectTracks, setEffectTracks] = useState<EffectTrack[]>([]), [selectedEffectId, setSelectedEffectId] = useState<string | null>(null);
   const [texts, setTexts] = useState<TextOverlay[]>([]), [textTracks, setTextTracks] = useState<TextTrack[]>([]), [selectedTextId, setSelectedTextId] = useState<string | null>(null), [fonts, setFonts] = useState<FontOption[]>([]);
@@ -135,7 +135,7 @@ export default function App() {
   const preset = store.activePreset === 'classic' ? classic : store.presets.find(p => p.id === store.activePreset) ?? classic;
   const allPresets = [classic, ...store.presets];
   const exporting = progress?.phase === 'running';
-  const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks) }), [preset, segments, music, markers, effects, effectTracks, texts, textTracks]);
+  const snapshot = useCallback((): EditorSnapshot => ({ preset: structuredClone(preset), segments: structuredClone(segments), music: structuredClone(music), sfxTracks: structuredClone(sfxTracks), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks) }), [preset, segments, music, sfxTracks, markers, effects, effectTracks, texts, textTracks]);
   const report = useCallback((e: unknown) => setError(message(e)), []);
   useEffect(() => {
     if (initialized.current)
@@ -197,6 +197,7 @@ export default function App() {
     replacePreset(snapshot.preset);
     setSegments(structuredClone(snapshot.segments));
     setMusic(structuredClone(snapshot.music));
+    setSfxTracks(structuredClone(snapshot.sfxTracks));
     setMarkers(structuredClone(snapshot.markers));
     setEffects(structuredClone(snapshot.effects));
     setEffectTracks(structuredClone(snapshot.effectTracks));
@@ -267,7 +268,7 @@ export default function App() {
           return segment;
         });
         setSegments(initial); setSelectedClip({ track: 'video', id: initial[0].id });
-        setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null);
+        setMusic(null); setSfxTracks([]); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null);
         undoStack.current = []; redoStack.current = []; lastPresetEdit.current = 0;
         playhead.current = 0; setTimestamp(0); setBefore(false);
         setOutputName(`${filename(imported[0].path).replace(/\.[^.]+$/, '')}-edit.mp4`);
@@ -314,6 +315,16 @@ export default function App() {
     }
     return null;
   }, [applyMusic, report]);
+  const importSfx = useCallback(async () => {
+    try {
+      const selected = await invoke<MusicFile | null>('pick_music');
+      if (!selected) return;
+      undoStack.current.push(snapshot()); redoStack.current = [];
+      const clipId = crypto.randomUUID();
+      const track: SfxTrack = { ...selected, id: crypto.randomUUID(), timelineStart: sourceToEdited(segments, playhead.current), segments: [{ id: clipId, start: 0, end: selected.duration, volume: 1, colorFix: 0 }] };
+      setSfxTracks(current => [...current, track]); setPlaying(false); setSelectedClip(null);
+    } catch (error) { report(error); }
+  }, [report, segments, snapshot]);
   const useInstalledMusic = useCallback(async (path: string): Promise<boolean> => {
     try { const selected = await invoke<MusicFile>('import_music_path', { path }); applyMusic(selected); return true; }
     catch (error) { report(error); return false; }
@@ -473,7 +484,7 @@ export default function App() {
       const exportEffects = [...effects]
         .sort((a, b) => (effectOrder.get(b.trackId) ?? -1) - (effectOrder.get(a.trackId) ?? -1) || a.time - b.time)
         .map(({ trackId, ...effect }) => { void trackId; return effect; });
-      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, effects: exportEffects, folder, filename: outputName } };
+      const payload = { paths: videoSources.map(source => source.path), preset, segments, texts: exportTexts, music, sfx: sfxTracks, musicFadeOut: music && store.settings.musicFadeOut ? store.settings.musicFadeDuration : null, options: { quality, fps, aiEnhance, aiUpscale, aiUpscaleLite, aiKeepResolution, effects: exportEffects, folder, filename: outputName } };
       let p: Progress;
       try {
         p = await invoke<Progress>('start_export', { ...payload, overwrite: false });
@@ -562,10 +573,10 @@ export default function App() {
   }
   function finishSetup(custom = false) { setStore(s => { const p = custom ? copyPreset(classic, customPresetName(s.presets)) : null; return { ...s, setupComplete: true, activePreset: p?.id ?? 'classic', presets: p ? [...s.presets, p] : s.presets, settings: { ...s.settings, defaultPreset: p?.id ?? 'classic' } }; }); }
   function resetProject() {
-    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); setTimelineZoom(64); playhead.current = 0; undoStack.current = []; redoStack.current = [];
+    importRevision.current++; setPlaying(false); setVideo(null); setVideoSources([]); setProxyPath(''); setPreview(null); setSegments([]); setMusic(null); setSfxTracks([]); setMarkers({ video: [], music: [] }); setEffects([]); setEffectTracks([]); setSelectedEffectId(null); setTexts([]); setTextTracks([]); setSelectedTextId(null); setSelectedClip(null); setCurrentProjectId(null); setProgress(null); setPreparation(null); setProxyPreparing(false); setTimestamp(0); setTimelineZoom(64); playhead.current = 0; undoStack.current = []; redoStack.current = [];
   }
   function projectSnapshot(id: string, name: string, createdAt: number): Project {
-    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps: fps === 120 ? 60 : fps, outputFolder, outputName, timelineZoom };
+    return { version: 1, id, name, createdAt, updatedAt: Date.now(), videoPaths: videoSources.map(source => source.path), segments: structuredClone(segments), music: structuredClone(music), sfxTracks: structuredClone(sfxTracks), markers: structuredClone(markers), effects: structuredClone(effects), effectTracks: structuredClone(effectTracks), texts: structuredClone(texts), textTracks: structuredClone(textTracks), preset: structuredClone(preset), quality, fps: fps === 120 ? 60 : fps, outputFolder, outputName, timelineZoom };
   }
   function saveCurrentProject(showNotice = true) {
     if (!video || !videoSources.length) return;
@@ -583,7 +594,7 @@ export default function App() {
     const timer = setTimeout(() => saveCurrentProject(false), 650);
     return () => clearTimeout(timer);
     // Project edits are saved after a short idle period.
-  }, [currentProjectId, video, videoSources, segments, music, markers, effects, effectTracks, texts, textTracks, preset, quality, fps, outputFolder, outputName, timelineZoom, proxyPreparing]);
+  }, [currentProjectId, video, videoSources, segments, music, sfxTracks, markers, effects, effectTracks, texts, textTracks, preset, quality, fps, outputFolder, outputName, timelineZoom, proxyPreparing]);
   async function openProject(project: Project) {
     if (!project.videoPaths.length) { setError('This project has no video files.'); return; }
     const ticket = ++importRevision.current; setProjectLoading(true); setError(null); setPlaying(false);
@@ -604,6 +615,7 @@ export default function App() {
       });
       const sourceTexts = project.texts ?? [], restoredTracks = project.textTracks?.length ? project.textTracks : sourceTexts.length ? [{ id: crypto.randomUUID(), name: 'Text 1' }] : [];
       const sourceEffects = project.effects ?? [], restoredEffectTracks = project.effectTracks?.length ? project.effectTracks : sourceEffects.length ? [{ id: crypto.randomUUID(), name: 'Effects 1' }] : [];
+      setSfxTracks((project.sfxTracks ?? []).map(track => ({ ...track, id: track.id || crypto.randomUUID(), waveform: track.waveform ?? [], timelineStart: Math.max(0, track.timelineStart ?? 0), segments: track.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) })));
       setVideoSources(sources); setVideo({ ...sources[0], duration: total, hasAudio: sources.some(source => source.hasAudio) }); setProxyPath(proxy); setSourceVersion(version => version + 1); setSegments(restoredSegments); setMusic(project.music ? { ...project.music, waveform: project.music.waveform ?? [], segments: project.music.segments.map(segment => ({ ...segment, id: segment.id || crypto.randomUUID(), colorFix: 0 })) } : null); setMarkers(normalizeMarkers(project.markers as never)); setEffectTracks(restoredEffectTracks); setEffects(sourceEffects.map(effect => fitFlash(fitEffectToClip(normalizeFlash({ ...effect, trackId: effect.trackId || restoredEffectTracks[0]?.id }), restoredSegments), editedDuration(restoredSegments)))); setSelectedEffectId(null); setTextTracks(restoredTracks); setTexts(sourceTexts.map(text => normalizeText({ ...text, trackId: text.trackId || restoredTracks[0]?.id }))); setSelectedTextId(null); setAiEnhance(false); setAiUpscale(false); setQuality(project.quality); setFps(project.fps === 120 ? 60 : project.fps); setOutputFolder(project.outputFolder); setOutputName(project.outputName); setTimelineZoom(Math.max(20, Math.min(240, project.timelineZoom ?? 64))); setCurrentProjectId(project.id); setSelectedClip(restoredSegments[0] ? { track: 'video', id: restoredSegments[0].id } : null); setTimestamp(restoredSegments[0]?.start ?? 0); playhead.current = restoredSegments[0]?.start ?? 0; setHome(false); setPreview(null); undoStack.current = []; redoStack.current = [];
     } catch (error) { if (ticket === importRevision.current) report(error); }
     finally { if (ticket === importRevision.current) setProjectLoading(false); }
@@ -818,8 +830,8 @@ export default function App() {
           </button>
         </div>
       </div>}
-      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} effects={stackedEffects} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) { setSelectedTextId(null); setSelectedEffectId(null); setSelectedClip(null); } }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
-      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} markers={markers} effects={effects} effectTracks={effectTracks} selectedEffectId={selectedEffectId} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} initialZoom={timelineZoom} onZoomChange={setTimelineZoom} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} onEffectAdd={addEffect} onEffectEdit={editEffect} onEffectDelete={removeEffect} onAddEffectTrack={addEffectTrack} onDeleteEffectTrack={removeEffectTrack} onEffectSelect={id => { lastEffectEdit.current = 0; setSelectedEffectId(id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); }} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => { setPlaying(false); setModal('music'); }} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedEffectId(null); setLayer(null); setSelectedClip({ track, id }); }}
+      <Composition video={video} sourceVersion={sourceVersion} softwareRendering={init?.softwareRendering ?? false} playbackPath={proxyPath} proxyPreparing={proxyPreparing} preparation={preparation} segments={segments} music={music} sfxTracks={sfxTracks} musicFadeOut={store.settings.musicFadeOut ? store.settings.musicFadeDuration : null} effects={stackedEffects} texts={stackedTexts} selectedTextId={selectedTextId} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextChange={editText} preview={preview} preset={preset} before={before} colorPreviewBefore={colorPreviewBefore} guides={guides} layer={layer} setLayer={value => { setLayer(value); if (value) { setSelectedTextId(null); setSelectedEffectId(null); setSelectedClip(null); } }} change={change} importVideo={() => void importVideo()} quality={quality} playing={playing} timestamp={timestamp} onTimestamp={updatePlaybackTime} onPlayingChange={updatePlaying} onPlaybackError={report} onSourceFrame={source => setPreview({ source, composed: '', timestamp })} />
+      {video && <Timeline duration={video.duration} sourceDurations={videoSources.map(source => source.duration)} timestamp={timestamp} playheadRef={playhead} segments={segments} music={music} sfxTracks={sfxTracks} markers={markers} effects={effects} effectTracks={effectTracks} selectedEffectId={selectedEffectId} texts={texts} textTracks={textTracks} selectedTextId={selectedTextId} initialZoom={timelineZoom} onZoomChange={setTimelineZoom} onTextSelect={id => { lastTextEdit.current = 0; setSelectedTextId(id); setSelectedEffectId(null); setSelectedClip(null); setLayer(null); }} onTextEdit={editText} onTextSplit={splitText} onTextDelete={removeText} onAddText={addText} onAddTextTrack={addTextTrack} onDeleteTextTrack={removeTextTrack} onEffectAdd={addEffect} onEffectEdit={editEffect} onEffectDelete={removeEffect} onAddEffectTrack={addEffectTrack} onDeleteEffectTrack={removeEffectTrack} onEffectSelect={id => { lastEffectEdit.current = 0; setSelectedEffectId(id); setSelectedTextId(null); setSelectedClip(null); setLayer(null); }} playing={playing} playbackReady={Boolean(proxyPath && segments.length)} canUndo={undoStack.current.length > 0} canRedo={redoStack.current.length > 0} onSeek={value => { manualSeekUntil.current = performance.now() + 220; const next = clamp(value, 0, video.duration); playhead.current = next; setPlaying(false); setTimestamp(next); }} onPlay={togglePlayback} onUndo={undo} onRedo={redo} onImportVideo={() => void importVideo()} onImportMusic={() => { setPlaying(false); setModal('music'); }} onImportSfx={() => void importSfx()} onSfxEdit={track => { undoStack.current.push(snapshot()); redoStack.current = []; setSfxTracks(current => current.map(item => item.id === track.id ? track : item)); setPlaying(false); }} onSfxDelete={id => { undoStack.current.push(snapshot()); redoStack.current = []; setSfxTracks(current => current.filter(track => track.id !== id)); }} onSelectionChange={(track, id) => { setSelectedTextId(null); setSelectedEffectId(null); setLayer(null); setSelectedClip({ track, id }); }}
         onMarker={(track, values) => {
           if (markers[track].length === values.length && markers[track].every((value, index) => Math.abs(value - values[index]) < .0001)) return;
           undoStack.current.push(snapshot());
