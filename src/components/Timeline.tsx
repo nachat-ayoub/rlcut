@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import { CircleHalf, Diamond, Film, Music2, Palette, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
+import { Contrast, Diamond, Film, Music2, Palette, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
 import type { EffectTrack, FlashEffect, MusicTrack, Segment, SfxTrack, TextOverlay, TextTrack, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
@@ -512,7 +512,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     {effectMenu && <div className="effect-create-menu" style={{ left: effectMenu.left, top: effectMenu.top }} role="menu" aria-label="Choose an effect">
       <header><span>ADD EFFECT</span><small>Starts at the playhead</small></header>
       <button role="menuitem" onClick={() => createEffect('flash')}><i className="flash"><Sparkles size={15} /></i><span><strong>Impact flash</strong><small>Bright hit for peak moments</small></span></button>
-      <button role="menuitem" onClick={() => createEffect('darkGray')}><i className="mono"><CircleHalf size={15} /></i><span><strong>Black &amp; white</strong><small>Cinematic monochrome grade</small></span></button>
+      <button role="menuitem" onClick={() => createEffect('darkGray')}><i className="mono"><Contrast size={15} /></i><span><strong>Black &amp; white</strong><small>Cinematic monochrome grade</small></span></button>
       <button role="menuitem" onClick={() => createEffect('raggeo')}><i className="raggeo"><Palette size={15} /></i><span><strong>Raggeo grade</strong><small>Deep contrast and vivid blues</small></span></button>
     </div>}
     {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>
