@@ -5,8 +5,7 @@
       "../.runtime/windows/tools/ffmpeg.exe": "resources/ffmpeg/ffmpeg.exe",
       "../.runtime/windows/tools/ffprobe.exe": "resources/ffmpeg/ffprobe.exe",
       "../.runtime/windows/tools/ffplay.exe": "resources/ffmpeg/ffplay.exe",
-      "../.runtime/windows/tools/notices/": "resources/ffmpeg/notices/",
-      "../.runtime/windows/ai/": "rlcut-ai/"
+      "../.runtime/windows/tools/notices/": "resources/ffmpeg/notices/"
     },
     "windows": {
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
