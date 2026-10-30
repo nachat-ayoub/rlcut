@@ -38,6 +38,7 @@ cmake -S (Join-Path $project 'native/ai-gpu') -B $build `
     "-DNCNN_SOURCE=$ncnnSource" `
     -DRLCUT_AI_VULKAN=OFF `
     "-DCMAKE_TOOLCHAIN_FILE=$toolchain" `
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 `
     -DVCPKG_TARGET_TRIPLET=x64-windows-static `
     -DBUILD_TESTING=OFF
 if ($LASTEXITCODE -ne 0) { throw 'Could not configure the Windows NCNN worker' }
