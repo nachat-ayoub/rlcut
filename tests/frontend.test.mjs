@@ -79,12 +79,14 @@ test('black-and-white preview filters rendered video without backdrop filters', 
   assert.doesNotMatch(html, /backdrop-filter/);
 });
 
-test('raggeo grading and gameplay separation shadow render in the live composition', () => {
+test('raggeo grading stays in the compositor and the separation shadow renders', async () => {
   const html = renderToStaticMarkup(createElement(Composition, {
     video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[{id:'raggeo',kind:'raggeo',timing:'duration',scope:'video',time:0,duration:1,intensity:1,color:'#fff',easing:'ease'}], texts:[], preview:null, preset:{...classic,gameplay:{...classic.gameplay,shadow:true}}, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
   }));
-  assert.match(html, /brightness\(0\.94\) contrast\(1\.28\) saturate\(1\.52\)/);
-  assert.doesNotMatch(html, /hue-rotate/);
+  const shader = await readFile(new URL('../src/lib/gpu-compositor.ts', import.meta.url), 'utf8');
+  assert.match(shader, /uniform float raggeo/);
+  assert.match(shader, /vec3 coldGrade/);
+  assert.doesNotMatch(html, /composition-output[^>]+filter:/);
   assert.match(html, /gameplay-frame-shadow/);
 });
 

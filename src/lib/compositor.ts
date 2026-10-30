@@ -89,7 +89,7 @@ class CPUCompositor {
     this.ctx = ctx;
     this.frameContext = this.frame.getContext('2d', { alpha: false })!;
   }
-  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0, raggeo = 0) {
     const width = playing ? this.playbackWidth : Math.min(720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
     const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
     if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
@@ -124,7 +124,14 @@ class CPUCompositor {
     source = this.frame;
     const ctx = this.ctx;
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = playing ? 'low' : 'high';
+    ctx.filter = 'none';
     if (before) { ctx.drawImage(source, 0, 0, width, height); return; }
+    ctx.filter = raggeo > .0001 ? `brightness(${1 - raggeo * .05}) contrast(${1 + raggeo * .24}) saturate(${1 + raggeo * .42}) hue-rotate(${5 * raggeo}deg)` : 'none';
+    const finishGrade = () => {
+      ctx.filter = 'none';
+      if (raggeo <= .0001) return;
+      ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = `rgba(4,22,48,${.08 * raggeo})`; ctx.fillRect(0, 0, width, height); ctx.restore();
+    };
     const plan = scene(video, preset, width, height), bg = plan.background;
     // Keep enough source detail for a smooth Gaussian-like falloff instead of
     // the blocky low-resolution blur used by the earlier preview path.
@@ -157,9 +164,9 @@ class CPUCompositor {
     ctx.drawImage(this.background, 0, 0, width, height);
     const gp = plan.gameplay;
     ctx.drawImage(source, gp.x, gp.y, gp.width, gp.height);
-    if (!preset.boost.enabled) return;
+    if (!preset.boost.enabled) { finishGrade(); return; }
     const b = plan.boost, crop = plan.crop;
-    if (crop.width < 2 || crop.height < 2) return;
+    if (crop.width < 2 || crop.height < 2) { finishGrade(); return; }
     if (this.hud.width !== b.width || this.hud.height !== b.height) { this.hud.width = b.width; this.hud.height = b.height; }
     const hud = this.hud.getContext('2d')!;
     hud.clearRect(0, 0, b.width, b.height);
@@ -182,6 +189,7 @@ class CPUCompositor {
     hud.save(); hud.globalCompositeOperation = 'destination-in';
     hud.drawImage(this.hudMask, 0, 0); hud.restore();
     ctx.drawImage(this.hud, b.x, b.y);
+    finishGrade();
   }
 }
 
@@ -201,7 +209,7 @@ export class Compositor {
   private cpu: CPUCompositor | null = null;
   private stats: CompositionStats;
   private slowFrames = 0;
-  private lastDraw: { source: CompositionSource; preset: Preset; video: Pick<Video, 'width' | 'height'>; quality: number; before: boolean; playing: boolean; colorFix: number; width: number } | null = null;
+  private lastDraw: { source: CompositionSource; preset: Preset; video: Pick<Video, 'width' | 'height'>; quality: number; before: boolean; playing: boolean; colorFix: number; raggeo: number; width: number } | null = null;
   get backend() { return this.stats.backend; }
   feedback(ms: number) { this.cpu?.feedback(ms); }
   constructor(private canvas: HTMLCanvasElement, forceCPU = false, forceGPU = false) {
@@ -211,17 +219,17 @@ export class Compositor {
     this.stats = { frames: 0, presented: 0, costs: [], backend: gl ? 'gpu' : 'cpu' };
     (canvas as CompositionCanvas).compositionStats = this.stats;
   }
-  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0) {
+  draw(source: CompositionSource, sourceWidth: number, sourceHeight: number, video: Pick<Video, 'width' | 'height'>, preset: Preset, quality: number, before = false, playing = false, colorFix = 0, raggeo = 0) {
     const previous = this.lastDraw, clientWidth = this.canvas.clientWidth;
-    if ('pixels' in source && 'sequence' in source && previous && previous.source === source && previous.preset === preset && previous.video === video && previous.quality === quality && previous.before === before && previous.playing === playing && previous.colorFix === colorFix && previous.width === clientWidth) return;
+    if ('pixels' in source && 'sequence' in source && previous && previous.source === source && previous.preset === preset && previous.video === video && previous.quality === quality && previous.before === before && previous.playing === playing && previous.colorFix === colorFix && previous.raggeo === raggeo && previous.width === clientWidth) return;
     if (!previous || previous.source !== source) this.stats.presented++;
-    this.lastDraw = { source, preset, video, quality, before, playing, colorFix, width: clientWidth };
+    this.lastDraw = { source, preset, video, quality, before, playing, colorFix, raggeo, width: clientWidth };
     const start = performance.now();
     if (this.gpu) {
       const width = Math.min(playing ? 540 : 720, Math.max(480, Math.round((this.canvas.clientWidth || 480) / 2) * 2));
       const height = before ? even(width * video.height / video.width) : even(width * (quality === 480 ? 854 / 480 : 16 / 9));
-      this.gpu.draw(source, video, preset, scene(video, preset, width, height), before, colorFix);
-    } else this.cpu!.draw(source, sourceWidth, sourceHeight, video, preset, quality, before, playing, colorFix);
+      this.gpu.draw(source, video, preset, scene(video, preset, width, height), before, colorFix, raggeo);
+    } else this.cpu!.draw(source, sourceWidth, sourceHeight, video, preset, quality, before, playing, colorFix, raggeo);
     this.stats.frames++;
     if (this.stats.costs.length === 120) this.stats.costs.shift();
     const cost = performance.now() - start;

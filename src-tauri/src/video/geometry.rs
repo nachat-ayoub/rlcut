@@ -127,10 +127,20 @@ fn filter_graph_with_input(
         ""
     },bg.width,bg.height,w,h,bg.x,bg.y,p.background.blur*w as f64/1080.,p.background.brightness,gp.width,gp.height,gp.x,gp.y);
     if p.gameplay.shadow {
-        let thickness = ((w as f64 * 0.012).round() as u32).max(2);
+        let edge = ((h as f64 * 0.004).round() as u32).max(2);
+        let mid = ((h as f64 * 0.012).round() as u32).max(edge + 1);
+        let soft = ((h as f64 * 0.025).round() as u32).max(mid + 1);
+        let bottom_edge = gp.y + gp.height as i32 - edge as i32;
+        let bottom_mid = gp.y + gp.height as i32 - mid as i32;
+        let bottom_soft = gp.y + gp.height as i32 - soft as i32;
         graph.push_str(&format!(
-            ";[base_unshadowed]drawbox=x={}:y={}:w={}:h={}:color=black@0.72:t={thickness}[base]",
-            gp.x, gp.y, gp.width, gp.height
+            ";[base_unshadowed]drawbox=x={}:y={}:w={}:h={soft}:color=black@0.12:t=fill,drawbox=x={}:y={bottom_soft}:w={}:h={soft}:color=black@0.12:t=fill,drawbox=x={}:y={}:w={}:h={mid}:color=black@0.28:t=fill,drawbox=x={}:y={bottom_mid}:w={}:h={mid}:color=black@0.28:t=fill,drawbox=x={}:y={}:w={}:h={edge}:color=black@0.68:t=fill,drawbox=x={}:y={bottom_edge}:w={}:h={edge}:color=black@0.68:t=fill[base]",
+            gp.x, gp.y, gp.width,
+            gp.x, gp.width,
+            gp.x, gp.y, gp.width,
+            gp.x, gp.width,
+            gp.x, gp.y, gp.width,
+            gp.x, gp.width,
         ));
     }
     if p.boost.enabled {

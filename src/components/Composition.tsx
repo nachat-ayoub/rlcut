@@ -103,7 +103,8 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
           drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
         }
         const activeClip = current.segments.find(segment => playbackTimestamp.current >= segment.start - .001 && playbackTimestamp.current <= segment.end + .001);
-        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0);
+        const raggeo = current.before ? 0 : Math.min(1, current.effects.filter(effect => effect.kind === 'raggeo' && editedTime >= effect.time && editedTime < effect.time + effect.duration).reduce((amount, effect) => amount + effect.intensity, 0));
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0, raggeo);
       }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
@@ -260,9 +261,10 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
     const filters = activeEffects.flatMap(({ effect, amount }) => {
       if (effect.kind === 'flash' || (target === 'all' && effect.scope !== 'all')) return [];
       if (effect.kind === 'darkGray') return [`grayscale(${amount}) brightness(${1 - amount * .4}) contrast(${1 + amount * .35})`];
-      // Keep team hues recognizable: denser cool shadows, vivid electric blues,
-      // and brighter orange/yellow without rotating either team toward red.
-      return [`brightness(${1 - amount * .06}) contrast(${1 + amount * .28}) saturate(${1 + amount * .52})`];
+      // Gameplay is graded inside the compositor. Only repeat the lightweight
+      // filter here when the effect intentionally includes text/overlays.
+      if (target === 'video' || effect.scope !== 'all') return [];
+      return [`brightness(${1 - amount * .05}) contrast(${1 + amount * .24}) saturate(${1 + amount * .42}) hue-rotate(${5 * amount}deg)`];
     });
     return filters.length ? filters.join(' ') : undefined;
   };
