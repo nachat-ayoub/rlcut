@@ -5,65 +5,34 @@ use crate::model::{
 };
 use std::path::Path;
 
-fn multiply_color_matrices(left: [[f64; 3]; 3], right: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
-    let mut output = [[0.; 3]; 3];
+fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], [f64; 3]) {
+    let amount = amount.clamp(0., 1.);
+    let brightness = 1. - amount * 0.06;
+    let contrast = 1. + amount * 0.28;
+    let gain = brightness * contrast;
+    // Selective channel grade rather than a global hue rotation. This keeps
+    // orange/yellow team colors warm while pushing blue toward electric cyan.
+    let look = [
+        [1.08, -0.02, -0.02],
+        [-0.01, 1.08, -0.01],
+        [-0.03, 0.02, 1.18],
+    ];
+    let mut matrix = [[0.; 3]; 3];
     for row in 0..3 {
         for column in 0..3 {
-            output[row][column] = (0..3)
-                .map(|index| left[row][index] * right[index][column])
-                .sum();
+            let identity = if row == column { 1. } else { 0. };
+            matrix[row][column] = (identity + (look[row][column] - identity) * amount) * gain;
         }
     }
-    output
-}
-
-fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], f64) {
-    let brightness = 1. - amount * 0.12;
-    let contrast = 1. + amount * 0.32;
-    let saturation = 1. + amount * 0.78;
-    let angle = (-8. * amount).to_radians();
-    let (sin, cos) = angle.sin_cos();
-    let saturated = [
+    let contrast_offset = 0.5 * (1. - contrast);
+    (
+        matrix,
         [
-            0.213 + 0.787 * saturation,
-            0.715 - 0.715 * saturation,
-            0.072 - 0.072 * saturation,
+            contrast_offset - 0.018 * amount,
+            contrast_offset - 0.005 * amount,
+            contrast_offset + 0.012 * amount,
         ],
-        [
-            0.213 - 0.213 * saturation,
-            0.715 + 0.285 * saturation,
-            0.072 - 0.072 * saturation,
-        ],
-        [
-            0.213 - 0.213 * saturation,
-            0.715 - 0.715 * saturation,
-            0.072 + 0.928 * saturation,
-        ],
-    ];
-    let hue = [
-        [
-            0.213 + 0.787 * cos - 0.213 * sin,
-            0.715 - 0.715 * cos - 0.715 * sin,
-            0.072 - 0.072 * cos + 0.928 * sin,
-        ],
-        [
-            0.213 - 0.213 * cos + 0.143 * sin,
-            0.715 + 0.285 * cos + 0.140 * sin,
-            0.072 - 0.072 * cos - 0.283 * sin,
-        ],
-        [
-            0.213 - 0.213 * cos - 0.787 * sin,
-            0.715 - 0.715 * cos + 0.715 * sin,
-            0.072 + 0.928 * cos + 0.072 * sin,
-        ],
-    ];
-    let mut matrix = multiply_color_matrices(hue, saturated);
-    for row in &mut matrix {
-        for value in row {
-            *value *= brightness * contrast;
-        }
-    }
-    (matrix, 0.5 * (1. - contrast))
+    )
 }
 
 fn append_effect_filters(
@@ -155,8 +124,10 @@ fn append_effect_filters(
                 );
                 let (matrix, offset) = raggeo_matrix(effect.intensity);
                 graph.push_str(&format!(
-                    ";[{video_output}]colorchannelmixer=rr={:.6}:rg={:.6}:rb={:.6}:ra={offset:.6}:gr={:.6}:gg={:.6}:gb={:.6}:ga={offset:.6}:br={:.6}:bg={:.6}:bb={:.6}:ba={offset:.6}:enable='{enabled}'[{next}]",
-                    matrix[0][0], matrix[0][1], matrix[0][2], matrix[1][0], matrix[1][1], matrix[1][2], matrix[2][0], matrix[2][1], matrix[2][2]
+                    ";[{video_output}]colorchannelmixer=rr={:.6}:rg={:.6}:rb={:.6}:ra={:.6}:gr={:.6}:gg={:.6}:gb={:.6}:ga={:.6}:br={:.6}:bg={:.6}:bb={:.6}:ba={:.6}:enable='{enabled}'[{next}]",
+                    matrix[0][0], matrix[0][1], matrix[0][2], offset[0],
+                    matrix[1][0], matrix[1][1], matrix[1][2], offset[1],
+                    matrix[2][0], matrix[2][1], matrix[2][2], offset[2]
                 ));
             }
         }

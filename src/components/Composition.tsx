@@ -260,7 +260,9 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
     const filters = activeEffects.flatMap(({ effect, amount }) => {
       if (effect.kind === 'flash' || (target === 'all' && effect.scope !== 'all')) return [];
       if (effect.kind === 'darkGray') return [`grayscale(${amount}) brightness(${1 - amount * .4}) contrast(${1 + amount * .35})`];
-      return [`brightness(${1 - amount * .12}) contrast(${1 + amount * .32}) saturate(${1 + amount * .78}) hue-rotate(${-8 * amount}deg)`];
+      // Keep team hues recognizable: denser cool shadows, vivid electric blues,
+      // and brighter orange/yellow without rotating either team toward red.
+      return [`brightness(${1 - amount * .06}) contrast(${1 + amount * .28}) saturate(${1 + amount * .52})`];
     });
     return filters.length ? filters.join(' ') : undefined;
   };

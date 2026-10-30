@@ -167,6 +167,30 @@ async fn blocking<T: Send + 'static>(
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[cfg(target_os = "linux")]
+fn launch_desktop_command(program: &str, args: &[std::ffi::OsString]) -> bool {
+    let mut command = std::process::Command::new(program);
+    command.args(args);
+    // AppImage runtime library paths can break host GTK/GIO applications.
+    // Restore the host environment before launching the desktop file manager.
+    if let Some(original) = std::env::var_os("APPIMAGE_ORIGINAL_LD_LIBRARY_PATH") {
+        command.env("LD_LIBRARY_PATH", original);
+    } else {
+        command.env_remove("LD_LIBRARY_PATH");
+    }
+    for variable in [
+        "LD_PRELOAD",
+        "GTK_PATH",
+        "GTK_EXE_PREFIX",
+        "GTK_DATA_PREFIX",
+        "GIO_EXTRA_MODULES",
+        "GDK_PIXBUF_MODULE_FILE",
+    ] {
+        command.env_remove(variable);
+    }
+    command.status().is_ok_and(|status| status.success())
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Init {
@@ -1585,7 +1609,7 @@ pub async fn open_export(state: State<'_, AppState>, folder: bool) -> Result<(),
         let mut c = {
             let mut command = std::process::Command::new("explorer.exe");
             if folder {
-                command.arg("/select,").arg(&path);
+                command.arg(format!("/select,{}", path.display()));
             } else {
                 command.arg(&path);
             }
@@ -1601,27 +1625,42 @@ pub async fn open_export(state: State<'_, AppState>, folder: bool) -> Result<(),
             command
         };
         #[cfg(target_os = "linux")]
-        if folder
-            && std::process::Command::new("nautilus")
-                .arg("--select")
-                .arg(&path)
-                .spawn()
-                .is_ok()
         {
-            return Ok(());
-        }
-        #[cfg(target_os = "linux")]
-        let mut c = {
-            let mut command = std::process::Command::new("xdg-open");
-            command.arg(if folder {
+            let target = if folder {
                 path.parent().ok_or("Output folder missing")?
             } else {
                 &path
-            });
-            command
-        };
-        c.spawn().map_err(|e| e.to_string())?;
-        Ok(())
+            };
+            if folder {
+                for (program, flag) in [("nautilus", "--select"), ("dolphin", "--select")] {
+                    if launch_desktop_command(
+                        program,
+                        &[std::ffi::OsString::from(flag), path.as_os_str().to_owned()],
+                    ) {
+                        return Ok(());
+                    }
+                }
+            }
+            for program in ["gio", "xdg-open"] {
+                let args = if program == "gio" {
+                    vec![
+                        std::ffi::OsString::from("open"),
+                        target.as_os_str().to_owned(),
+                    ]
+                } else {
+                    vec![target.as_os_str().to_owned()]
+                };
+                if launch_desktop_command(program, &args) {
+                    return Ok(());
+                }
+            }
+            Err("Could not open the export folder with the system file manager".into())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            c.spawn().map_err(|e| e.to_string())?;
+            Ok(())
+        }
     })
     .await
 }
