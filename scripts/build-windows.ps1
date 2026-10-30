@@ -6,11 +6,6 @@ Set-Location $project
 & npm run desktop:build:native -- --no-bundle --config src-tauri/tauri.windows.conf.json
 if ($LASTEXITCODE -ne 0) { throw 'Windows application build failed' }
 
-$sevenZip = 'C:\Program Files\7-Zip\7z.exe'
-$sfx = 'C:\Program Files\7-Zip\7z.sfx'
-if (!(Test-Path $sevenZip) -or !(Test-Path $sfx)) {
-    throw 'Install 7-Zip before creating the portable Windows executable'
-}
 $work = Join-Path ([IO.Path]::GetTempPath()) "rlcut-portable-$PID"
 $stage = Join-Path $work 'app'
 New-Item -ItemType Directory -Force -Path (Join-Path $stage 'resources/ffmpeg'), (Join-Path $stage 'rlcut-ai'), (Join-Path $project 'dist') | Out-Null
@@ -19,14 +14,10 @@ try {
     Copy-Item '.runtime/windows/tools/ffmpeg.exe', '.runtime/windows/tools/ffprobe.exe', '.runtime/windows/tools/ffplay.exe' (Join-Path $stage 'resources/ffmpeg') -Force
     Copy-Item '.runtime/windows/tools/notices' (Join-Path $stage 'resources/ffmpeg/notices') -Recurse -Force
     Copy-Item '.runtime/windows/ai/*' (Join-Path $stage 'rlcut-ai') -Recurse -Force
-    $archive = Join-Path $work 'payload.7z'
-    & $sevenZip a -t7z -mx=7 $archive "$stage\*"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create portable payload' }
-    $config = Join-Path $work 'sfx.txt'
-    [IO.File]::WriteAllText($config, ";!@Install@!UTF-8!`nTitle=`"rlcut`"`nRunProgram=`"rlcut.exe`"`nGUIMode=`"2`"`n;!@InstallEnd@!`n", [Text.UTF8Encoding]::new($false))
-    cmd /c copy /b `"$sfx`"+`"$config`"+`"$archive`" `"dist\rlcut-Windows-x86_64-portable.exe`"
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create portable executable' }
+    $archive = Join-Path $project 'dist/rlcut-Windows-x86_64-portable.zip'
+    Compress-Archive -Path "$stage\*" -DestinationPath $archive -CompressionLevel Optimal -Force
+    if (!(Test-Path $archive) -or (Get-Item $archive).Length -eq 0) { throw 'Could not create portable ZIP' }
 } finally {
     if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 }
-Write-Host 'Portable Windows app saved to dist/rlcut-Windows-x86_64-portable.exe.'
+Write-Host 'Portable Windows app saved to dist/rlcut-Windows-x86_64-portable.zip.'

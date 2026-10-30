@@ -8,7 +8,7 @@ watermarks or subscriptions.
 
 Linux: double-click the exported `dist/rlcut` executable. The entire app and its video tools are inside this one file; no terminal command, Docker, FFmpeg installation, or FUSE setup is required.
 
-Windows: download `rlcut-Windows-x86_64-portable.exe` and open it directly. It is a self-extracting portable application with FFmpeg, FFprobe and FFplay included; it does not install files or require FFmpeg on `PATH`. Windows 10 systems without WebView2 must install Microsoft's WebView2 runtime once.
+Windows: download and extract `rlcut-Windows-x86_64-portable.zip`, keep its files together, then run `rlcut.exe`. FFmpeg and the NCNN AI assets are included, so it does not install files or require FFmpeg on `PATH`. Windows 10 systems without WebView2 must install Microsoft's WebView2 runtime once.
 
 ## Features
 

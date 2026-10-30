@@ -111,7 +111,7 @@ jobs:
             Write-Host "::error title=Windows NCNN AI build failed::$detail"
             exit 1
           }
-      - name: Build portable Windows executable
+      - name: Build portable Windows ZIP
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'windows-portable.log'
@@ -127,27 +127,20 @@ jobs:
             Write-Host "::error title=Windows executable missing::The Tauri build did not produce rlcut.exe."
             exit 1
           }
-          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
-          $sfx = 'C:\Program Files\7-Zip\7z.sfx'
-          if (!(Test-Path $sevenZip) -or !(Test-Path $sfx)) { throw 'GitHub runner is missing the 7-Zip SFX tools' }
           $stage = Join-Path $env:RUNNER_TEMP 'rlcut-portable'
           New-Item -ItemType Directory -Force -Path (Join-Path $stage 'resources/ffmpeg'), (Join-Path $stage 'rlcut-ai') | Out-Null
           Copy-Item $app (Join-Path $stage 'rlcut.exe') -Force
           Copy-Item '.runtime/windows/tools/ffmpeg.exe', '.runtime/windows/tools/ffprobe.exe', '.runtime/windows/tools/ffplay.exe' (Join-Path $stage 'resources/ffmpeg') -Force
           Copy-Item '.runtime/windows/tools/notices' (Join-Path $stage 'resources/ffmpeg/notices') -Recurse -Force
           Copy-Item '.runtime/windows/ai/*' (Join-Path $stage 'rlcut-ai') -Recurse -Force
-          $archive = Join-Path $env:RUNNER_TEMP 'rlcut-portable.7z'
-          & $sevenZip a -t7z -mx=7 $archive "$stage\*"
-          if ($LASTEXITCODE -ne 0) { throw 'Could not create portable payload' }
-          $config = Join-Path $env:RUNNER_TEMP 'rlcut-sfx.txt'
-          [IO.File]::WriteAllText($config, ";!@Install@!UTF-8!`nTitle=`"rlcut`"`nRunProgram=`"rlcut.exe`"`nGUIMode=`"2`"`n;!@InstallEnd@!`n", [Text.UTF8Encoding]::new($false))
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          cmd /c copy /b `"$sfx`"+`"$config`"+`"$archive`" `"dist\rlcut-Windows-x86_64-portable.exe`"
-          if ($LASTEXITCODE -ne 0 -or !(Test-Path 'dist/rlcut-Windows-x86_64-portable.exe')) { throw 'Could not create portable executable' }
+          $archive = 'dist/rlcut-Windows-x86_64-portable.zip'
+          Compress-Archive -Path "$stage\*" -DestinationPath $archive -CompressionLevel Optimal -Force
+          if (!(Test-Path $archive) -or (Get-Item $archive).Length -eq 0) { throw 'Could not create portable ZIP' }
       - uses: actions/upload-artifact@v4
         with:
           name: rlcut-Windows-x86_64
-          path: dist/rlcut-Windows-x86_64-portable.exe
+          path: dist/rlcut-Windows-x86_64-portable.zip
           if-no-files-found: error
 
   publish:
@@ -167,7 +160,7 @@ jobs:
         working-directory: dist
         run: |
           test -s rlcut-Linux-x86_64.AppImage
-          test -s rlcut-Windows-x86_64-portable.exe
+          test -s rlcut-Windows-x86_64-portable.zip
           sha256sum rlcut-* > SHA256SUMS
           sha256sum --check SHA256SUMS
       - name: Publish all native downloads
@@ -176,7 +169,7 @@ jobs:
           Native rlcut downloads for Linux and Windows.
 
           - Linux: `rlcut-Linux-x86_64.AppImage`.
-          - Windows 10/11 x64: `rlcut-Windows-x86_64-portable.exe`; no installation is required. FFmpeg, FFprobe and FFplay are bundled. Windows 10 may require the Microsoft WebView2 runtime.
+          - Windows 10/11 x64: extract `rlcut-Windows-x86_64-portable.zip`, keep the extracted files together, then run `rlcut.exe`. FFmpeg and the NCNN AI assets are included. Windows 10 may require the Microsoft WebView2 runtime.
           - Linux and Windows use the same bundled NCNN RIFE and Real-ESRGAN/Upscayl neural models. Windows currently runs the portable CPU inference worker; no model is replaced with an FFmpeg approximation.
 
           Verify downloads with `SHA256SUMS`.
