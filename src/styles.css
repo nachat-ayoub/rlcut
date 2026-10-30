@@ -988,6 +988,19 @@ h1 {
   background:#211a29;
 }
 .track-add:hover { color:#e0ceff; border-color:#8f6cb1; background:#2c2238 }
+.effect-create-menu { position:fixed; z-index:120; width:216px; display:grid; gap:3px; padding:7px; border:1px solid #564265; border-radius:10px; background:#18131e; box-shadow:0 18px 50px #050307d9,0 0 0 1px #8f68b119; animation:effect-menu-in .12s ease-out }
+.effect-create-menu header { display:grid; gap:1px; padding:5px 7px 7px }
+.effect-create-menu header span { color:#cba9ea; font-size:7px; font-weight:800; letter-spacing:1.5px }
+.effect-create-menu header small { color:#776c7f; font-size:8px }
+.effect-create-menu>button { width:100%; min-height:42px; display:flex; align-items:center; gap:9px; padding:6px 7px; border:0; border-radius:7px; background:transparent; color:#d9d0df; text-align:left }
+.effect-create-menu>button:hover,.effect-create-menu>button:focus-visible { outline:0; background:#2b2233 }
+.effect-create-menu>button>i { width:29px; height:29px; flex:none; display:grid; place-items:center; border:1px solid #4e3d59; border-radius:7px; background:#241b2b; color:#cba5eb }
+.effect-create-menu>button>i.mono { color:#d2d3dc; background:#222229 }
+.effect-create-menu>button>i.raggeo { color:#75d4e5; border-color:#315c68; background:#152a30 }
+.effect-create-menu>button>span { min-width:0; display:grid; gap:2px }
+.effect-create-menu strong { color:#e6dde9; font-size:10px; font-weight:650 }
+.effect-create-menu small { color:#8e8297; font-size:8px }
+@keyframes effect-menu-in { from { opacity:0; transform:translateY(-3px) scale(.98) } }
 .track-add.music { top:5px; border-color:#484869; color:#9b9bc9; background:#1c1d2a }
 .track-add.music:hover { border-color:#6f70a0; color:#cecff5; background:#27283b }
 .timeline-segment {

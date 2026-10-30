@@ -716,11 +716,13 @@ export default function App() {
     setEffects(current => current.filter(effect => effect.trackId !== id));
     if (effects.some(effect => effect.id === selectedEffectId && effect.trackId === id)) setSelectedEffectId(null);
   }, [snapshot, effects, selectedEffectId]);
-  const addEffect = useCallback((at: number, requestedTrackId?: string) => {
+  const addEffect = useCallback((at: number, requestedTrackId?: string, kind: FlashEffect['kind'] = 'flash') => {
     const total = editedDuration(segments); if (total < .08) return;
     undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
-    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', time: at }), total);
-    const freeTrack = requestedTrackId ? effectTracks.find(track => track.id === requestedTrackId) : [...effectTracks].reverse().find(track => !effects.some(effect => effect.trackId === track.id && overlaps(candidate.time, candidate.time + candidate.duration, effect.time, effect.time + effect.duration)));
+    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', kind, time: at, duration: kind === 'flash' ? .45 : Math.min(3, Math.max(.08, total - at)), strength: kind === 'flash' ? 1 : .8 }), total);
+    const isFree = (track: EffectTrack) => !effects.some(effect => effect.trackId === track.id && overlaps(candidate.time, candidate.time + candidate.duration, effect.time, effect.time + effect.duration));
+    const requested = requestedTrackId ? effectTracks.find(track => track.id === requestedTrackId) : undefined;
+    const freeTrack = requested && isFree(requested) ? requested : [...effectTracks].reverse().find(isFree);
     const trackId = freeTrack?.id || crypto.randomUUID();
     if (!freeTrack) {
       const number = effectTracks.reduce((max, track) => Math.max(max, Number(track.name.match(/\d+$/)?.[0] ?? 0)), 0) + 1;
@@ -991,7 +993,8 @@ export default function App() {
             </div>
             {store.settings.musicFadeOut && <div className="music-fade-settings"><Slider label="Fade duration" value={store.settings.musicFadeDuration} min={.1} max={10} step={.1} defaultValue={.5} onChange={value => setStore(current => ({ ...current, settings: { ...current.settings, musicFadeDuration: value } }))} suffix="s" /></div>}
           </Section>}
-          {selectedVideoSegment && <Section title="Color correction" icon={<Palette size={16} />}>
+          {selectedVideoSegment && <Section title="Video look" icon={<Palette size={16} />}>
+            <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add a soft depth edge between gameplay and the blurred background.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
             <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
             <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .5 : 0); }} /></div>
             {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.5} onChange={setColorFix} suffix="×" /></>}

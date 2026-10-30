@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
-import { Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
+import { CircleHalf, Diamond, Film, Music2, Palette, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
 import type { EffectTrack, FlashEffect, MusicTrack, Segment, SfxTrack, TextOverlay, TextTrack, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
@@ -68,7 +68,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   onAddText: (trackId: string) => void;
   onAddTextTrack: () => void;
   onDeleteTextTrack: (id: string) => void;
-  onEffectAdd: (time: number, trackId?: string) => void;
+  onEffectAdd: (time: number, trackId?: string, kind?: FlashEffect['kind']) => void;
   onEffectEdit: (effect: FlashEffect) => void;
   onEffectDelete: (id: string) => void;
   onEffectSelect: (id: string) => void;
@@ -94,6 +94,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   const [volumeOpen, setVolumeOpen] = useState(false);
   const [textPreview, setTextPreview] = useState<TextOverlay | null>(null);
   const [effectPreview, setEffectPreview] = useState<FlashEffect | null>(null);
+  const [effectMenu, setEffectMenu] = useState<{ time: number; trackId?: string; left: number; top: number } | null>(null);
   const textGesture = useRef<{ pointer: number; x: number; y: number; value: TextOverlay; edge: 'start' | 'end' | 'move' } | null>(null);
   const effectGesture = useRef<EffectGesture | null>(null);
   const sfxGesture = useRef<{ pointer: number; x: number; value: SfxTrack; mode: 'move' | 'start' | 'end' } | null>(null);
@@ -148,6 +149,14 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     window.addEventListener('pointerdown', close);
     return () => window.removeEventListener('pointerdown', close);
   }, [volumeOpen]);
+  useEffect(() => {
+    if (!effectMenu) return;
+    const close = (event: globalThis.PointerEvent) => {
+      if (!(event.target as HTMLElement).closest('.effect-create-menu,.effect-create-trigger')) setEffectMenu(null);
+    };
+    window.addEventListener('pointerdown', close);
+    return () => window.removeEventListener('pointerdown', close);
+  }, [effectMenu]);
   useEffect(() => {
     if (!playing || !playheadRef) return;
     let frame = 0;
@@ -281,7 +290,22 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
     if (existing >= 0) onMarker(track, markers[track].filter((_, index) => index !== existing));
     else onMarker(track, [...markers[track], editedToSource(lanes[track], edited)].sort((a, b) => a - b));
   };
-  const addEffectAtCursor = () => onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)));
+  const addEffectAtCursor = () => onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)), undefined, 'flash');
+  const openEffectMenu = (event: MouseEvent<HTMLElement>, trackId?: string) => {
+    event.stopPropagation();
+    const width = 216, height = 172;
+    setEffectMenu({
+      time: Math.min(cursorTime(), Math.max(0, editedDuration - .08)),
+      trackId,
+      left: Math.max(10, Math.min(window.innerWidth - width - 10, event.clientX - 12)),
+      top: Math.max(10, Math.min(window.innerHeight - height - 10, event.clientY + 10)),
+    });
+  };
+  const createEffect = (kind: FlashEffect['kind']) => {
+    if (!effectMenu) return;
+    onEffectAdd(effectMenu.time, effectMenu.trackId, kind);
+    setEffectMenu(null);
+  };
   const beginEffect = (event: PointerEvent<HTMLElement>, effect: FlashEffect, mode: EffectGesture['mode']) => {
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId);
     onEffectSelect(effect.id); effectPreviewRef.current = effect; setEffectPreview(effect);
@@ -479,12 +503,18 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <button className="editor-tool" onClick={() => cut('split')} disabled={Boolean(selectedEffect) || (selectedText ? !canCutText : !canCut)} title="Split at playhead (Ctrl+K)" aria-label="Split selected clip at playhead"><SplitIcon /></button>
       <button className="editor-tool" onClick={() => cut('end')} disabled={Boolean(selectedEffect) || (selectedText ? !canCutText : !canCut)} title="Trim end to playhead (W)" aria-label="Trim selected clip end to playhead"><TrimEndIcon /></button>
       <button className="editor-tool" onClick={() => selectedEffect ? onEffectDelete(selectedEffect.id) : selectedText ? onTextDelete(selectedText.id) : selected && onEdit(selection.track, clips.filter(segment => segment.id !== selected.id))} disabled={!selectedEffect && !selectedText && !selected} title="Delete selection (Delete)" aria-label="Delete selection"><Trash2 size={16} /></button>
-      <button className="editor-tool flash-action" onClick={addEffectAtCursor} disabled={editedDuration < .08} title="Add impact flash at playhead (F)" aria-label="Add effect at playhead"><Sparkles size={15} /></button>
+      <button className="editor-tool flash-action effect-create-trigger" onClick={event => openEffectMenu(event)} disabled={editedDuration < .08} title="Add effect at playhead" aria-label="Choose effect to add at playhead"><Sparkles size={15} /></button>
       <button className={`editor-tool marker-action ${!selectedEffect && !selectedText && selected && storedMarkersEdited(selection.track).some(value => Math.abs(value - editedTimestamp) * pixelsPerSecond <= SNAP_PIXELS) ? 'active' : ''}`} disabled={Boolean(selectedEffect || selectedText) || !selected} onClick={() => setMarkerAtCursor(selection.track)} title={selected ? `Add or remove a ${selection.track} marker at the playhead` : 'Select a clip to add a marker'} aria-label={selected ? `Toggle ${selection.track} marker at playhead` : 'Toggle marker'}><MarkerIcon /></button>
       <span className="timeline-divider" /><button onClick={onUndo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={15} /></button><button onClick={onRedo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={15} /></button><span className="transport-spacer" />
       <button onClick={() => zoom(pixelsPerSecond / 1.35)} disabled={pixelsPerSecond <= 20} aria-label="Zoom timeline out"><ZoomOut size={15} /></button><span className="timeline-zoom-wrap"><input className="timeline-zoom" aria-label="Timeline zoom" type="range" min="20" max="240" step="4" value={pixelsPerSecond} style={{ '--range-fill': `${(pixelsPerSecond - 20) / 220 * 100}%` } as React.CSSProperties} onChange={event => zoom(Number(event.target.value))} /><i /></span><button onClick={() => zoom(pixelsPerSecond * 1.35)} disabled={pixelsPerSecond >= 240} aria-label="Zoom timeline in"><ZoomIn size={15} /></button>
       <button className={volumeOpen ? 'active volume-action' : 'volume-action'} disabled={Boolean(selectedEffect || selectedText) || !selected} onClick={() => setVolumeOpen(value => !value)} title="Selected clip volume" aria-label="Show selected clip volume">{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
     </div>
+    {effectMenu && <div className="effect-create-menu" style={{ left: effectMenu.left, top: effectMenu.top }} role="menu" aria-label="Choose an effect">
+      <header><span>ADD EFFECT</span><small>Starts at the playhead</small></header>
+      <button role="menuitem" onClick={() => createEffect('flash')}><i className="flash"><Sparkles size={15} /></i><span><strong>Impact flash</strong><small>Bright hit for peak moments</small></span></button>
+      <button role="menuitem" onClick={() => createEffect('darkGray')}><i className="mono"><CircleHalf size={15} /></i><span><strong>Black &amp; white</strong><small>Cinematic monochrome grade</small></span></button>
+      <button role="menuitem" onClick={() => createEffect('raggeo')}><i className="raggeo"><Palette size={15} /></i><span><strong>Raggeo grade</strong><small>Deep contrast and vivid blues</small></span></button>
+    </div>}
     {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>
       <button onClick={() => { const next = volume > 0 ? 0 : 1; volumeDirty.current = false; setVolume(next); setGain(next); }} aria-label={volume > 0 ? 'Mute selected clip' : 'Unmute selected clip'}>{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>
       <div className="volume-range"><input aria-label="Volume" type="range" min="0" max="2" step=".01" value={volume} style={{ '--range-fill': `${volume / 2 * 100}%` } as React.CSSProperties} onChange={event => { const raw = Number(event.target.value); volumeDirty.current = true; setVolume(Math.abs(raw - 1) <= .06 ? 1 : raw); }} onPointerUp={commitVolume} onKeyUp={commitVolume} onBlur={commitVolume} /><i /></div>
@@ -494,7 +524,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <div className="track-labels" ref={trackLabels} style={{ gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px ${sfxRows} 15px` }}><div className="ruler-corner"><button className="add-layer effect" onClick={onAddEffectTrack} title="Add effects layer" aria-label="Add effects layer"><Sparkles size={11} /><span>FX</span><Plus size={9} /></button><button className="add-layer text" onClick={onAddTextTrack} title="Add text layer" aria-label="Add text layer"><Type size={11} /><span>Text</span><Plus size={9} /></button><button className="add-layer sfx" onClick={onImportSfx} title="Add SFX track" aria-label="Add SFX track"><Music2 size={11} /><span>SFX</span><Plus size={9} /></button></div>{effectTracks.map(track => <div key={track.id} className="track-label effects layer-track-label" title={track.name}><span className="layer-kind"><Sparkles size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteEffectTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}{textTracks.map(track => <div key={track.id} className="track-label text layer-track-label" title={track.name}><span className="layer-kind"><Type size={13} /><small>{track.name}</small></span><button className="layer-delete" onClick={() => onDeleteTextTrack(track.id)} title={`Delete ${track.name}`} aria-label={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}<div className="track-label base-track"><Film size={14} /><small>Video</small></div><div className="track-label music base-track"><Music2 size={14} /><small>Music</small></div>{sfxTracks.map((track, index) => <div key={track.id} className="track-label sfx base-track"><Music2 size={13} /><small>SFX {index + 1}</small><button className="layer-delete" onClick={() => onSfxDelete(track.id)} title={`Delete ${track.name}`}><Trash2 size={12} /></button></div>)}</div>
       <div className="timeline-scroll" ref={scroll} onScroll={event => { if (trackLabels.current) trackLabels.current.scrollTop = event.currentTarget.scrollTop; }}><div className="timeline-content" style={{ width: `${Math.max(1, timelineDuration * pixelsPerSecond + 64)}px`, height: `${contentHeight}px`, gridTemplateRows: `22px ${effectRows} ${textRows} 42px 39px ${sfxRows}` }}>
         <div className="time-ruler" onPointerDown={event => { rulerDragging.current = true; lastRulerSeek.current = null; event.currentTarget.setPointerCapture(event.pointerId); dragSeek(event.currentTarget, event.clientX); }} onPointerMove={event => { if (rulerDragging.current && event.currentTarget.hasPointerCapture(event.pointerId)) dragSeek(event.currentTarget, event.clientX); }} onPointerUp={event => { dragSeek(event.currentTarget, event.clientX); rulerDragging.current = false; lastRulerSeek.current = null; }} onPointerCancel={() => { rulerDragging.current = false; lastRulerSeek.current = null; }} onLostPointerCapture={() => { rulerDragging.current = false; lastRulerSeek.current = null; }}>{ticks.map(value => <span key={value} className={Number.isInteger(value) ? '' : 'minor'} style={{ left: `${value * pixelsPerSecond}px` }}><i />{Number.isInteger(value) && <small>{time(value)}</small>}</span>)}</div>
-        {effectTracks.map(track => <div key={track.id} className={`effects-track ${effectGesture.current && effectPreview?.trackId === track.id && effectGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-effect-track={track.id}>{renderEffects(track.id)}<button className="track-add effect" style={{ left: `${Math.max(0, ...effects.filter(effect => (effectPreview?.id === effect.id ? effectPreview.trackId : effect.trackId) === track.id).map(effect => effectPreview?.id === effect.id ? effectPreview.time + effectPreview.duration : effect.time + effect.duration)) * pixelsPerSecond + 9}px` }} title={`Add impact flash to ${track.name}`} aria-label={`Add impact flash to ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={() => onEffectAdd(Math.min(cursorTime(), Math.max(0, editedDuration - .08)), track.id)}><Plus size={15} /></button></div>)}
+        {effectTracks.map(track => <div key={track.id} className={`effects-track ${effectGesture.current && effectPreview?.trackId === track.id && effectGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-effect-track={track.id}>{renderEffects(track.id)}<button className="track-add effect effect-create-trigger" style={{ left: `${Math.max(0, ...effects.filter(effect => (effectPreview?.id === effect.id ? effectPreview.trackId : effect.trackId) === track.id).map(effect => effectPreview?.id === effect.id ? effectPreview.time + effectPreview.duration : effect.time + effect.duration)) * pixelsPerSecond + 9}px` }} title={`Add effect to ${track.name}`} aria-label={`Choose effect for ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={event => openEffectMenu(event, track.id)}><Plus size={15} /></button></div>)}
         {textTracks.map(track => <div key={track.id} className={`text-track ${textGesture.current && textPreview?.trackId === track.id && textGesture.current.value.trackId !== track.id ? 'drop-target' : ''}`} data-text-track={track.id}>{renderTexts(track.id)}<button className="track-add text" style={{ left: `${Math.max(0, ...texts.filter(text => (textPreview?.id === text.id ? textPreview.trackId : text.trackId) === track.id).map(text => textPreview?.id === text.id ? textPreview.end : text.end)) * pixelsPerSecond + 9}px` }} title={`Add text to ${track.name}`} aria-label={`Add text to ${track.name}`} onPointerDown={event => event.stopPropagation()} onClick={() => onAddText(track.id)}><Plus size={16} /></button></div>)}
         <div className="video-track">{renderClips('video')}{renderReorderGhost('video')}{renderMarkers('video')}<button className="track-add" style={{ left: `${addPosition('video')}px` }} title="Append video" aria-label="Append video" onPointerDown={event => event.stopPropagation()} onClick={onImportVideo}><Plus size={16} /></button></div>
         <div className="music-track">{renderClips('music')}{renderReorderGhost('music')}{renderMarkers('music')}<button className="track-add music" style={{ left: `${addPosition('music')}px` }} title={musicSegments.length ? 'Replace music' : 'Add music'} aria-label={musicSegments.length ? 'Replace music' : 'Add music'} onPointerDown={event => event.stopPropagation()} onClick={onImportMusic}><Plus size={16} /></button></div>
