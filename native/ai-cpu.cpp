@@ -11,9 +11,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <cerrno>
 #include <cstdlib>
 #include <iostream>
 #include <memory>

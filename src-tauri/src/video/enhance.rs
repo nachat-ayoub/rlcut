@@ -31,11 +31,10 @@ pub fn installation() -> Option<(PathBuf, PathBuf)> {
             .join("../.runtime/ai"),
     );
     folders.into_iter().find_map(|dir| {
-        let binary = dir.join("rife-ncnn-vulkan");
+        let suffix = if cfg!(windows) { ".exe" } else { "" };
+        let binary = dir.join(format!("rlcut-ai-cpu{suffix}"));
         let model = dir.join("rife-v4.6");
-        (cfg!(target_os = "linux")
-            && binary.is_file()
-            && dir.join("rlcut-ai-cpu").is_file()
+        (binary.is_file()
             && dir.join("realesr-animevideov3-x2.param").is_file()
             && dir.join("realesr-animevideov3-x2.bin").is_file()
             && dir.join("upscayl-lite-4x.param").is_file()
@@ -47,7 +46,7 @@ pub fn installation() -> Option<(PathBuf, PathBuf)> {
 }
 
 pub fn available() -> bool {
-    cfg!(target_os = "windows") || installation().is_some()
+    installation().is_some()
 }
 
 fn ai_threads() -> usize {
@@ -284,7 +283,10 @@ fn nonblocking<T: std::os::fd::AsRawFd>(pipe: &T) -> Result<(), String> {
 }
 #[cfg(not(target_os = "linux"))]
 fn nonblocking<T>(_: &T) -> Result<(), String> {
-    Err("AI export is currently available on Linux only".into())
+    // Windows anonymous pipes do not expose Unix O_NONBLOCK. The frame pipes
+    // are continuously drained by FFmpeg and the tiny worker command pipe is
+    // bounded to one request, so blocking I/O remains safe here.
+    Ok(())
 }
 fn read_exact(r: &mut impl Read, mut bytes: &mut [u8], job: &Job) -> Result<(), String> {
     while !bytes.is_empty() {
@@ -692,7 +694,8 @@ pub fn run(
         );
         p.remaining = None;
     }
-    let (binary, _model) = installation().ok_or("AI engine is missing. Install the Linux AI-enabled AppImage, or run scripts/prepare-ai.py for a development checkout.")?;
+    let (binary, _model) = installation()
+        .ok_or("AI engine is missing. Reinstall the complete AI-enabled rlcut package.")?;
     let (width, height) = o.ai_input_resolution()?;
     let upscale_tiles = tile_count(width, height, UPSCALE_CORE);
     let rife_tiles = tile_count(width, height, RIFE_STEP);

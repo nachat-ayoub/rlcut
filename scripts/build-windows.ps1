@@ -2,6 +2,7 @@ $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $project
 & "$PSScriptRoot/prepare-windows-tools.ps1"
+& "$PSScriptRoot/prepare-windows-ai.ps1"
 & npm run desktop:build:native -- --no-bundle --config src-tauri/tauri.windows.conf.json
 if ($LASTEXITCODE -ne 0) { throw 'Windows application build failed' }
 
@@ -12,11 +13,12 @@ if (!(Test-Path $sevenZip) -or !(Test-Path $sfx)) {
 }
 $work = Join-Path ([IO.Path]::GetTempPath()) "rlcut-portable-$PID"
 $stage = Join-Path $work 'app'
-New-Item -ItemType Directory -Force -Path (Join-Path $stage 'resources/ffmpeg'), (Join-Path $project 'dist') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stage 'resources/ffmpeg'), (Join-Path $stage 'rlcut-ai'), (Join-Path $project 'dist') | Out-Null
 try {
     Copy-Item 'src-tauri/target/release/rlcut.exe' (Join-Path $stage 'rlcut.exe') -Force
     Copy-Item '.runtime/windows/tools/ffmpeg.exe', '.runtime/windows/tools/ffprobe.exe', '.runtime/windows/tools/ffplay.exe' (Join-Path $stage 'resources/ffmpeg') -Force
     Copy-Item '.runtime/windows/tools/notices' (Join-Path $stage 'resources/ffmpeg/notices') -Recurse -Force
+    Copy-Item '.runtime/windows/ai/*' (Join-Path $stage 'rlcut-ai') -Recurse -Force
     $archive = Join-Path $work 'payload.7z'
     & $sevenZip a -t7z -mx=7 $archive "$stage\*"
     if ($LASTEXITCODE -ne 0) { throw 'Could not create portable payload' }

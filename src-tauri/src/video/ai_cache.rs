@@ -4,10 +4,8 @@ use super::{
     binaries::Binaries,
     export::{self, Job},
 };
-#[cfg(not(target_os = "windows"))]
 use super::{enhance, metadata};
 use crate::model::{ExportOptions, MusicTrack, Preset, Segment, TextOverlay, Video};
-#[cfg(not(target_os = "windows"))]
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -20,16 +18,16 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-#[cfg(not(target_os = "windows"))]
 const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub fn root() -> Result<PathBuf, String> {
     let base = std::env::var_os("XDG_CACHE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".cache")))
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+        .or_else(|| std::env::var_os("TEMP").map(PathBuf::from))
         .ok_or("Cannot locate AI cache directory")?;
     Ok(base.join("io.rlcut.desktop/ai-exports-v4"))
 }
-#[cfg(not(target_os = "windows"))]
 fn fingerprint(path: &Path) -> Result<serde_json::Value, String> {
     let p = path
         .canonicalize()
@@ -44,7 +42,6 @@ fn fingerprint(path: &Path) -> Result<serde_json::Value, String> {
             .map(|d| d.as_nanos().to_string())
     ]))
 }
-#[cfg(not(target_os = "windows"))]
 fn model_identity(path: &Path) -> Result<serde_json::Value, String> {
     let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut hash = 0xcbf29ce484222325u64;
@@ -66,7 +63,6 @@ fn model_identity(path: &Path) -> Result<serde_json::Value, String> {
         format!("{hash:016x}")
     ]))
 }
-#[cfg(not(target_os = "windows"))]
 fn compatible(old: &serde_json::Value, current: &serde_json::Value) -> bool {
     if old == current {
         return true;
@@ -121,7 +117,6 @@ fn compatible(old: &serde_json::Value, current: &serde_json::Value) -> bool {
                 .any(|old| old[0] == model[0] && old[1] == model[1])
     })
 }
-#[cfg(not(target_os = "windows"))]
 fn cache_warning(job: &Job) {
     if let Ok(mut p) = job.progress.lock() {
         let warning = "AI video could not be cached. Future exports will repeat AI processing; check free disk space and cache permissions.";
@@ -131,7 +126,6 @@ fn cache_warning(job: &Job) {
         ));
     }
 }
-#[cfg(not(target_os = "windows"))]
 fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
     let Ok(v) = metadata::probe(b, path) else {
         return false;
@@ -144,7 +138,6 @@ fn valid(b: &Binaries, path: &Path, o: &ExportOptions, duration: f64) -> bool {
         && (v.duration - duration).abs() < 0.15
         && (v.fps - o.fps as f64).abs() < 0.1
 }
-#[cfg(not(target_os = "windows"))]
 fn directory_size(path: &Path) -> u64 {
     let Ok(entries) = fs::read_dir(path) else {
         return 0;
@@ -163,7 +156,6 @@ fn directory_size(path: &Path) -> u64 {
         })
         .sum()
 }
-#[cfg(not(target_os = "windows"))]
 fn prune(root: &Path, keep: &Path) {
     let Ok(dirs) = fs::read_dir(root) else {
         return;
@@ -223,11 +215,6 @@ pub fn run(
     log: &Path,
 ) -> Result<(), String> {
     let duration: f64 = segments.iter().map(|s| s.end - s.start).sum();
-    #[cfg(target_os = "windows")]
-    return run_windows(
-        b, videos, p, segments, o, out, job, music, fade, texts, start, log, duration,
-    );
-    #[cfg(not(target_os = "windows"))]
     {
         let (_, model) = enhance::installation().ok_or("AI components unavailable")?;
         let folder = model.parent().ok_or("Missing AI directory")?;
@@ -428,113 +415,4 @@ pub fn run(
         }
         export::execute(b, finish, log, duration, job, start, 90., 9.9, true)
     }
-}
-
-#[cfg(target_os = "windows")]
-#[allow(clippy::too_many_arguments)]
-fn run_windows(
-    b: &Binaries,
-    videos: &[Video],
-    p: &Preset,
-    segments: &[Segment],
-    o: &ExportOptions,
-    out: &Path,
-    job: Arc<Job>,
-    music: Option<&MusicTrack>,
-    fade: Option<f64>,
-    texts: &[TextOverlay],
-    start: Instant,
-    log: &Path,
-    duration: f64,
-) -> Result<(), String> {
-    let intermediate = out.with_extension("windows-ai-base.mp4");
-    let _cleanup = Temporary(intermediate.clone());
-    let mut base = o.clone();
-    base.ai_enhance = false;
-    base.ai_upscale = false;
-    base.ai_upscale_lite = false;
-    base.ai_keep_resolution = false;
-    if o.ai_enhance {
-        base.fps = (o.fps / 2).max(30);
-    }
-    if let Ok(mut progress) = job.progress.lock() {
-        progress.stage = Some("Preparing the edited timeline for Windows enhancement".into());
-    }
-    export::execute(
-        b,
-        args::export_args_timeline_sources(
-            videos,
-            p,
-            segments,
-            &base,
-            &intermediate,
-            music,
-            fade,
-            texts,
-        )?,
-        log,
-        duration,
-        job.clone(),
-        start,
-        0.,
-        55.,
-        true,
-    )?;
-    let (width, height) = o.output_resolution()?;
-    let mut filters = Vec::new();
-    if o.ai_enhance {
-        filters.push(format!(
-            "minterpolate=fps={}:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1",
-            o.fps
-        ));
-    }
-    if o.ai_upscale {
-        filters.push(format!("scale={width}:{height}:flags=lanczos"));
-        filters.push("unsharp=5:5:0.35:5:5:0".into());
-    }
-    if filters.is_empty() {
-        filters.push("null".into());
-    }
-    if let Ok(mut progress) = job.progress.lock() {
-        progress.stage = Some(
-            match (o.ai_enhance, o.ai_upscale) {
-                (true, true) => "Windows smoothing + high-quality upscaling",
-                (true, false) => "Windows motion-compensated smoothing",
-                _ => "Windows high-quality upscaling",
-            }
-            .into(),
-        );
-        progress.warning = Some("Windows currently uses FFmpeg motion compensation and Lanczos enhancement; Linux releases use the bundled NCNN neural models.".into());
-    }
-    let arguments = vec![
-        "-hide_banner".into(),
-        "-loglevel".into(),
-        "error".into(),
-        "-nostdin".into(),
-        "-y".into(),
-        "-i".into(),
-        intermediate.to_string_lossy().into_owned(),
-        "-map".into(),
-        "0:v:0".into(),
-        "-map".into(),
-        "0:a?".into(),
-        "-vf".into(),
-        filters.join(","),
-        "-c:v".into(),
-        "libx264".into(),
-        "-preset".into(),
-        "medium".into(),
-        "-crf".into(),
-        "16".into(),
-        "-pix_fmt".into(),
-        "yuv420p".into(),
-        "-c:a".into(),
-        "copy".into(),
-        "-movflags".into(),
-        "+faststart".into(),
-        "-progress".into(),
-        "pipe:1".into(),
-        out.to_string_lossy().into_owned(),
-    ];
-    export::execute(b, arguments, log, duration, job, start, 55., 44.9, true)
 }
