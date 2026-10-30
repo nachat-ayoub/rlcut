@@ -9,6 +9,7 @@ fn main() {
     let binaries = Binaries {
         ffmpeg: Some(root.join("usr/bin/ffmpeg")),
         ffprobe: Some(root.join("usr/bin/ffprobe")),
+        ffplay: None,
     };
     let video = metadata::probe(&binaries, &PathBuf::from(&arguments[2])).unwrap();
     let epoch = Arc::new(AtomicU64::new(1));

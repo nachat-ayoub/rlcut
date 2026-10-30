@@ -345,6 +345,7 @@ mod tests {
         let binaries = Binaries {
             ffmpeg: Some(executable),
             ffprobe: None,
+            ffplay: None,
         };
         let epoch = Arc::new(AtomicU64::new(1));
         let cancelled = epoch.clone();

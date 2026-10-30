@@ -10,6 +10,7 @@ use std::{
 pub struct Binaries {
     pub ffmpeg: Option<PathBuf>,
     pub ffprobe: Option<PathBuf>,
+    pub ffplay: Option<PathBuf>,
 }
 pub fn command(path: &Path) -> Command {
     #[allow(unused_mut)]
@@ -68,6 +69,7 @@ impl Binaries {
         Self {
             ffmpeg: find("ffmpeg", resource),
             ffprobe: find("ffprobe", resource),
+            ffplay: find("ffplay", resource),
         }
     }
     pub fn ffmpeg(&self) -> Result<&Path, String> {
@@ -80,6 +82,9 @@ impl Binaries {
             "Video information could not be read. Reinstall the complete rlcut app package.".into()
         })
     }
+    pub fn ffplay(&self) -> Option<&Path> {
+        self.ffplay.as_deref()
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -89,6 +94,7 @@ mod tests {
         let b = Binaries {
             ffmpeg: None,
             ffprobe: None,
+            ffplay: None,
         };
         assert!(b.ffmpeg().unwrap_err().contains("Reinstall the complete"));
         assert!(b.ffprobe().is_err());

@@ -8,7 +8,7 @@ watermarks or subscriptions.
 
 Linux: double-click the exported `dist/rlcut` executable. The entire app and its video tools are inside this one file; no terminal command, Docker, FFmpeg installation, or FUSE setup is required.
 
-Windows: the installer packaging command produces `dist/rlcut-setup.exe`, including video tools and the offline WebView2 installer. Install once, then launch from the Start menu. Windows builds require a Windows packaging machine; the Windows installer workflow is configured but has not been run in this Linux session.
+Windows: download `rlcut-Windows-x86_64-portable.exe` and open it directly. It is a self-extracting portable application with FFmpeg, FFprobe and FFplay included; it does not install files or require FFmpeg on `PATH`. Windows 10 systems without WebView2 must install Microsoft's WebView2 runtime once.
 
 ## Features
 
@@ -170,11 +170,11 @@ Linux playback now uses an app-owned GStreamer decoder/audio clock and bounded
 binary frames, with live GPU/software composition. Scene edits do not transcode
 or restart playback. Import shows measured preparation progress and supports
 cancellation. See [editor architecture](docs/EDITOR_ARCHITECTURE.md).
-Windows/macOS native engine packaging is pending; the earlier installer instructions
-only describe the packaging infrastructure, not a working native preview there.
+Windows preview uses the bundled FFmpeg/FFplay backend. Linux uses the native
+GStreamer backend. macOS native playback packaging remains pending.
 
 ## Optional AI smooth export (Linux)
 
 The Linux AI AppImage includes optional RIFE smoothing and two upscaling models: compact Real-ESRGAN video and Upscayl Lite. AI processes gameplay/background before boost, text and audio, checkpointing every completed frame so a canceled or interrupted export continues instead of restarting. Boost, text, font, music, volume and output-path edits reuse that AI work. Keep selected size mode reduces AI input dimensions by half (540 × 960 for 1080 × 1920 output); ×2 enlargement remains available. Upscayl Lite runs through the bounded AI helper. Every requested frame is processed without a timed quality downgrade or cutoff; runtime is hardware-dependent. Select 60 FPS for 30 FPS footage or 120 FPS for 60 FPS footage when smoothing. These models can introduce artifacts and may not improve already sharp 4K sources. See [AI export](docs/AI_EXPORT.md).
 
-Download the Linux AppImage from [GitHub Releases](https://github.com/nachat-ayoub/rlcut/releases). Version tags build the Linux AppImage and Windows installer in one release workflow, then attach both files and their checksums.
+Download releases from [GitHub Releases](https://github.com/nachat-ayoub/rlcut/releases). Version tags build the Linux AppImage and portable Windows executable in one workflow, then attach both files and their checksums.

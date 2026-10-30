@@ -1,0 +1,55 @@
+name: Validate Windows portable app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/windows-portable-runtime
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/cache@v4
+        with:
+          path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
+          key: windows-ffmpeg-8.1.2-db580001
+      - run: npm ci
+      - name: Prepare verified Windows media tools
+        shell: pwsh
+        run: ./scripts/prepare-windows-tools.ps1
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm test
+      - name: Compile and lint Windows runtime
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'windows-clippy.log'
+          & cargo clippy --manifest-path src-tauri/Cargo.toml --features desktop --all-targets -- -D warnings 2>&1 | Tee-Object -FilePath $log
+          $exit = $LASTEXITCODE
+          if ($exit -ne 0) {
+            $detail = ((Get-Content $log -Tail 80) -join ' | ').Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            Write-Host "::error title=Windows Rust compilation failed::$detail"
+            exit $exit
+          }
+      - name: Build portable Windows executable
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rlcut-Windows-x86_64-portable-validation
+          path: dist/rlcut-Windows-x86_64-portable.exe
+          if-no-files-found: error
