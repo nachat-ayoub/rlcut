@@ -7,15 +7,16 @@ use std::path::Path;
 
 fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], [f64; 3]) {
     let amount = amount.clamp(0., 1.);
-    let brightness = 1. - amount * 0.05;
-    let contrast = 1. + amount * 0.24;
+    let brightness = 1. - amount * 0.015;
+    let contrast = 1. + amount * 0.18;
     let gain = brightness * contrast;
-    // Selective channel grade rather than a global hue rotation. This keeps
-    // orange/yellow team colors warm while pushing blue toward electric cyan.
+    // Opposing channel shifts cannot be reproduced by a global hue rotation:
+    // feed red into green so orange moves toward yellow, and blue into red so
+    // Rocket League blues move toward violet. Keep neutrals crisp and cool.
     let look = [
-        [1.02, -0.03, -0.03],
-        [0.05, 1.04, 0.08],
-        [-0.06, 0.02, 1.20],
+        [1.04, -0.04, 0.20],
+        [0.14, 1.02, -0.10],
+        [-0.08, 0.01, 1.12],
     ];
     let mut matrix = [[0.; 3]; 3];
     for row in 0..3 {
@@ -28,9 +29,9 @@ fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], [f64; 3]) {
     (
         matrix,
         [
-            contrast_offset - 0.02 * amount,
+            contrast_offset - 0.012 * amount,
             contrast_offset,
-            contrast_offset + 0.018 * amount,
+            contrast_offset + 0.016 * amount,
         ],
     )
 }

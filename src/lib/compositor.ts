@@ -126,11 +126,13 @@ class CPUCompositor {
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = playing ? 'low' : 'high';
     ctx.filter = 'none';
     if (before) { ctx.drawImage(source, 0, 0, width, height); return; }
-    ctx.filter = raggeo > .0001 ? `brightness(${1 - raggeo * .05}) contrast(${1 + raggeo * .24}) saturate(${1 + raggeo * .42}) hue-rotate(${5 * raggeo}deg)` : 'none';
+    // Canvas2D is only the compatibility fallback. Approximate the opposing
+    // orange→yellow / blue→violet channel grade used by WebGL and export.
+    ctx.filter = raggeo > .0001 ? `brightness(${1 - raggeo * .015}) contrast(${1 + raggeo * .18}) saturate(${1 + raggeo * .34}) hue-rotate(${-4 * raggeo}deg)` : 'none';
     const finishGrade = () => {
       ctx.filter = 'none';
       if (raggeo <= .0001) return;
-      ctx.save(); ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = `rgba(4,22,48,${.08 * raggeo})`; ctx.fillRect(0, 0, width, height); ctx.restore();
+      ctx.save(); ctx.globalCompositeOperation = 'screen'; ctx.fillStyle = `rgba(42,16,72,${.035 * raggeo})`; ctx.fillRect(0, 0, width, height); ctx.restore();
     };
     const plan = scene(video, preset, width, height), bg = plan.background;
     // Keep enough source detail for a smooth Gaussian-like falloff instead of

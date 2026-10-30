@@ -86,6 +86,7 @@ test('raggeo grading stays in the compositor and the separation shadow renders',
   const shader = await readFile(new URL('../src/lib/gpu-compositor.ts', import.meta.url), 'utf8');
   assert.match(shader, /uniform float raggeo/);
   assert.match(shader, /vec3 coldGrade/);
+  assert.match(shader, /mat3\(1\.04,\.14,-\.08,-\.04,1\.02,\.01,\.20,-\.10,1\.12\)/);
   assert.doesNotMatch(html, /composition-output[^>]+filter:/);
   assert.match(html, /gameplay-frame-shadow/);
 });
