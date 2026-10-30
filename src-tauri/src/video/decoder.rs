@@ -57,7 +57,7 @@ pub fn prepare_progress(
     fs::create_dir_all(cache).map_err(|e| format!("Cannot create decoder cache: {e}"))?;
     let metadata = fs::metadata(&video.path).map_err(|e| format!("Cannot open recording: {e}"))?;
     let mut hash = DefaultHasher::new();
-    "decoder-v2-live-composition-audio".hash(&mut hash);
+    "decoder-v3-30fps-low-latency-audio".hash(&mut hash);
     video.path.hash(&mut hash);
     metadata.len().hash(&mut hash);
     metadata.modified().ok().hash(&mut hash);
@@ -72,8 +72,7 @@ pub fn prepare_progress(
         progress: output.with_extension("progress"),
     };
     let stderr = fs::File::create(&partial.log).map_err(|e| e.to_string())?;
-    let fps = if video.fps >= 50. { 60 } else { 30 };
-    let filter=format!("{},scale=trunc(iw*sar/2)*2:ih,setsar=1,scale=960:960:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,fps={fps}",color_filter(video));
+    let filter=format!("{},scale=trunc(iw*sar/2)*2:ih,setsar=1,scale=960:960:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,fps=30",color_filter(video));
     let threads = std::thread::available_parallelism()
         .map(|value| value.get().min(12))
         .unwrap_or(2)

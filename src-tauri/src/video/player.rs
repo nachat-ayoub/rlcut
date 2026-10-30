@@ -162,7 +162,7 @@ impl Player {
                     .music
                     .iter()
                     .chain(self.sfx.iter())
-                    .all(|player| player.last_sync.elapsed().as_millis() < 50))
+                    .all(|player| player.last_sync.elapsed().as_millis() < 250))
         {
             return Ok(());
         }
@@ -816,7 +816,8 @@ impl MusicPlayer {
                 rl_player_volume(self.handle, volume * fade_gain);
             }
             let current = unsafe { rl_player_position(self.handle) };
-            if (force || self.segment != Some(index) || (current - time).abs() > 0.15)
+            let drift = (current - time).abs();
+            if (self.segment != Some(index) || drift > 0.45 || (force && drift > 0.08))
                 && unsafe { rl_player_seek(self.handle, time) } == 0
             {
                 return Err("Could not seek music".into());

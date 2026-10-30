@@ -76,18 +76,28 @@ Player *rl_player_open(const char *path, int width, int height, char *error, siz
     g_object_set(pipeline,"audio-sink",audio,NULL);
     gst_object_unref(audio);
   }
-  char *description = g_strdup_printf("videoscale ! videoconvert ! video/x-raw,format=RGBA,width=%d,height=%d,pixel-aspect-ratio=1/1 ! appsink name=frames sync=true max-buffers=1 drop=true wait-on-eos=false", width,height);
-  GstElement *video = gst_parse_bin_from_description(description, 1, &issue); g_free(description);
+  int audio_only = width <= 2 && height <= 2;
+  GstElement *video = NULL;
+  if (audio_only) {
+    video = gst_element_factory_make("fakesink", NULL);
+    if (video) g_object_set(video,"sync",0,NULL);
+  } else {
+    /* Limit legacy 60 FPS proxies before scaling/conversion. The bounded sink
+     * then carries one latest 30 FPS frame without ever stalling audio. */
+    char *description = g_strdup_printf("videorate drop-only=true ! video/x-raw,framerate=30/1 ! videoscale ! videoconvert ! video/x-raw,format=RGBA,width=%d,height=%d,pixel-aspect-ratio=1/1 ! appsink name=frames sync=true max-buffers=1 drop=true wait-on-eos=false", width,height);
+    video = gst_parse_bin_from_description(description, 1, &issue); g_free(description);
+  }
   if (!pipeline || !video || issue) {
     copy_error(error,size,issue ? issue->message : "Bundled native playback plugins are missing");
     if (issue) g_error_free(issue); if (video) gst_object_unref(video); if (pipeline) gst_object_unref(pipeline); g_free(uri); return NULL;
   }
   gst_object_ref_sink(video);
   gst_object_ref_sink(pipeline);
-  GstElement *sink = gst_bin_get_by_name(video, "frames");
+  GstElement *sink = audio_only ? (GstElement*)gst_object_ref_sink(video) : gst_bin_get_by_name(video, "frames");
   g_object_set(pipeline, "uri",uri,"video-sink",video,NULL); g_free(uri); gst_object_unref(video);
   Player *p = calloc(1,sizeof(Player)); p->pipeline=pipeline;p->sink=sink;p->bus=gst_element_get_bus(pipeline);
-  if (gst_element_set_state(pipeline,GST_STATE_PAUSED)==GST_STATE_CHANGE_FAILURE || gst_element_get_state(pipeline,NULL,NULL,5*GST_SECOND)==GST_STATE_CHANGE_FAILURE) {
+  GstClockTime ready_timeout = audio_only ? GST_SECOND/4 : GST_SECOND;
+  if (gst_element_set_state(pipeline,GST_STATE_PAUSED)==GST_STATE_CHANGE_FAILURE || gst_element_get_state(pipeline,NULL,NULL,ready_timeout)==GST_STATE_CHANGE_FAILURE) {
     GstMessage *m=gst_bus_pop_filtered(p->bus,GST_MESSAGE_ERROR);
     if(m){gst_message_parse_error(m,&issue,NULL);copy_error(error,size,issue->message);g_error_free(issue);gst_mini_object_unref(m);}else copy_error(error,size,"Cannot prepare native decoder");
     rl_player_free(p);return NULL;

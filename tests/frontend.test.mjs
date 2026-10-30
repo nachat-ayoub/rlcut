@@ -90,6 +90,20 @@ test('raggeo grading stays in the compositor and the separation shadow renders',
   assert.match(html, /gameplay-frame-shadow/);
 });
 
+test('low-end preview caps video work and keeps audio startup non-blocking', async () => {
+  const [composition, decoder, player, native] = await Promise.all([
+    readFile(new URL('../src/components/Composition.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/video/decoder.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/src/video/player.rs', import.meta.url), 'utf8'),
+    readFile(new URL('../src-tauri/native/player.c', import.meta.url), 'utf8'),
+  ]);
+  assert.match(composition, /\}, 30, renderer\.current\?\.backend === 'cpu' \? 320 : 420\)/);
+  assert.match(decoder, /fps=30/);
+  assert.match(player, /last_sync\.elapsed\(\)\.as_millis\(\) < 250/);
+  assert.match(native, /videorate drop-only=true/);
+  assert.doesNotMatch(native, /5\*GST_SECOND/);
+});
+
 test('project cards expose a duplicate action', () => {
   const project = {version:1,id:'p',name:'Edit',createdAt:1,updatedAt:1,videoPaths:[],segments:[],music:null,markers:{video:[],music:[]},preset:classic,quality:1080,fps:60,outputFolder:'',outputName:'edit.mp4'};
   const html = renderToStaticMarkup(createElement(ProjectHome, {projects:[project],busy:false,onDismissAlert:()=>{},onNew:()=>{},onOpen:()=>{},onDelete:()=>{},onDuplicate:()=>{},onImport:()=>{},onExport:()=>{},onRename:()=>{},onSettings:()=>{}}));
