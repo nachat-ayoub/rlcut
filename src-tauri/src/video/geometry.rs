@@ -189,7 +189,7 @@ fn filter_graph_with_input(
         // Match the preview's soft drop shadow. Keep the feather outside the
         // gameplay image so it separates the sharp frame from the blurred
         // backdrop without darkening gameplay or creating a solid black bar.
-        let extent = ((h as f64 * 0.008).round() as i32).clamp(6, 18);
+        let extent = ((h as f64 * 0.022).round() as i32).clamp(14, 48);
         let top_space = game_top.min(extent);
         let bottom_space = (h as i32 - game_bottom).max(0).min(extent);
         let mut shadow = Vec::new();
@@ -200,12 +200,12 @@ fn filter_graph_with_input(
             if space == 0 {
                 continue;
             }
-            for step in 0..8_i32 {
-                let near = space * step / 8;
-                let far = space * (step + 1) / 8;
+            for step in 0..12_i32 {
+                let near = space * step / 12;
+                let far = space * (step + 1) / 12;
                 let band = (far - near).max(1);
-                let distance = step as f64 / 7.;
-                let alpha = 0.03 + 0.31 * (1. - distance).powi(2);
+                let distance = step as f64 / 11.;
+                let alpha = 0.04 + 0.48 * (1. - distance).powi(2);
                 let y = if direction < 0 {
                     boundary - far
                 } else {
@@ -331,8 +331,8 @@ mod tests {
         p.gameplay.shadow = true;
         p.gameplay.scale = 2.36;
         let graph = filter_graph(&video(3840, 2160), &p, 1080, 1920).unwrap();
-        assert!(graph.contains("color=black@0.340"), "{graph}");
-        assert!(graph.contains("color=black@0.030"), "{graph}");
+        assert!(graph.contains("color=black@0.520"), "{graph}");
+        assert!(graph.contains("color=black@0.040"), "{graph}");
         assert!(!graph.contains("black@0.68"), "{graph}");
         assert!(!graph.contains("w=2548"), "{graph}");
     }
