@@ -186,21 +186,41 @@ fn filter_graph_with_input(
         ""
     });
     if p.gameplay.shadow {
-        let edge = ((h as f64 * 0.004).round() as u32).max(2);
-        let mid = ((h as f64 * 0.012).round() as u32).max(edge + 1);
-        let soft = ((h as f64 * 0.025).round() as u32).max(mid + 1);
-        let bottom_edge = gp.y + gp.height as i32 - edge as i32;
-        let bottom_mid = gp.y + gp.height as i32 - mid as i32;
-        let bottom_soft = gp.y + gp.height as i32 - soft as i32;
-        graph.push_str(&format!(
-            ";[base_unshadowed]drawbox=x={}:y={}:w={}:h={soft}:color=black@0.12:t=fill,drawbox=x={}:y={bottom_soft}:w={}:h={soft}:color=black@0.12:t=fill,drawbox=x={}:y={}:w={}:h={mid}:color=black@0.28:t=fill,drawbox=x={}:y={bottom_mid}:w={}:h={mid}:color=black@0.28:t=fill,drawbox=x={}:y={}:w={}:h={edge}:color=black@0.68:t=fill,drawbox=x={}:y={bottom_edge}:w={}:h={edge}:color=black@0.68:t=fill[base]",
-            gp.x, gp.y, gp.width,
-            gp.x, gp.width,
-            gp.x, gp.y, gp.width,
-            gp.x, gp.width,
-            gp.x, gp.y, gp.width,
-            gp.x, gp.width,
-        ));
+        // Match the preview's soft drop shadow. Keep the feather outside the
+        // gameplay image so it separates the sharp frame from the blurred
+        // backdrop without darkening gameplay or creating a solid black bar.
+        let extent = ((h as f64 * 0.008).round() as i32).clamp(6, 18);
+        let top_space = game_top.min(extent);
+        let bottom_space = (h as i32 - game_bottom).max(0).min(extent);
+        let mut shadow = Vec::new();
+        for (boundary, space, direction) in [
+            (game_top, top_space, -1_i32),
+            (game_bottom, bottom_space, 1_i32),
+        ] {
+            if space == 0 {
+                continue;
+            }
+            for step in 0..8_i32 {
+                let near = space * step / 8;
+                let far = space * (step + 1) / 8;
+                let band = (far - near).max(1);
+                let distance = step as f64 / 7.;
+                let alpha = 0.03 + 0.31 * (1. - distance).powi(2);
+                let y = if direction < 0 {
+                    boundary - far
+                } else {
+                    boundary + near
+                };
+                shadow.push(format!(
+                    "drawbox=x={game_left}:y={y}:w={game_width}:h={band}:color=black@{alpha:.3}:t=fill"
+                ));
+            }
+        }
+        if shadow.is_empty() {
+            graph.push_str(";[base_unshadowed]null[base]");
+        } else {
+            graph.push_str(&format!(";[base_unshadowed]{}[base]", shadow.join(",")));
+        }
     }
     if p.boost.enabled {
         let radius = b.width.min(b.height) as f64 / 2.;
@@ -304,6 +324,17 @@ mod tests {
             "{graph}"
         );
         assert!(!graph.contains("scale=2548:1434"));
+    }
+    #[test]
+    fn gameplay_shadow_is_soft_and_outside_the_visible_frame() {
+        let mut p = Preset::default();
+        p.gameplay.shadow = true;
+        p.gameplay.scale = 2.36;
+        let graph = filter_graph(&video(3840, 2160), &p, 1080, 1920).unwrap();
+        assert!(graph.contains("color=black@0.340"), "{graph}");
+        assert!(graph.contains("color=black@0.030"), "{graph}");
+        assert!(!graph.contains("black@0.68"), "{graph}");
+        assert!(!graph.contains("w=2548"), "{graph}");
     }
     #[test]
     fn ellipse_has_independent_axes() {
