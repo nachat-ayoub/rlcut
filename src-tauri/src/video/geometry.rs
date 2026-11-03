@@ -16,6 +16,9 @@ pub struct Geometry {
 fn even(v: f64) -> u32 {
     ((v / 2.).round().max(1.) * 2.) as u32
 }
+fn even_coordinate(v: f64) -> u32 {
+    ((v / 2.).round().max(0.) * 2.) as u32
+}
 pub fn geometry(video: &Video, preset: &Preset, w: u32, h: u32) -> Result<Geometry, String> {
     preset.validate()?;
     if video.width < 2 || video.height < 2 || w < 2 || h < 2 || w & 1 != 0 || h & 1 != 0 {
@@ -123,10 +126,11 @@ fn filter_graph_with_input(
         even(video.width as f64 * w as f64 / bg.width as f64).min(video.width / 2 * 2);
     let source_crop_height =
         even(video.height as f64 * h as f64 / bg.height as f64).min(video.height / 2 * 2);
-    let source_crop_x = even((video.width - source_crop_width) as f64 * p.background.x)
+    let source_crop_x = even_coordinate((video.width - source_crop_width) as f64 * p.background.x)
         .min(video.width - source_crop_width);
-    let source_crop_y = even((video.height - source_crop_height) as f64 * p.background.y)
-        .min(video.height - source_crop_height);
+    let source_crop_y =
+        even_coordinate((video.height - source_crop_height) as f64 * p.background.y)
+            .min(video.height - source_crop_height);
     let background = if p.background.blur > 0.001 {
         let divisor = if p.background.blur >= 20. {
             4
@@ -148,7 +152,29 @@ fn filter_graph_with_input(
             p.background.brightness
         )
     };
-    let mut graph=format!("[0:v:0]{input},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
+    // When gameplay is zoomed beyond the portrait frame, crop the invisible
+    // source region first. The previous graph scaled a 4K frame to e.g.
+    // 2548px wide even though only 1080px could reach the final canvas.
+    let game_left = gp.x.max(0);
+    let game_top = gp.y.max(0);
+    let game_right = (gp.x + gp.width as i32).min(w as i32);
+    let game_bottom = (gp.y + gp.height as i32).min(h as i32);
+    let game_width = even((game_right - game_left).max(2) as f64);
+    let game_height = even((game_bottom - game_top).max(2) as f64);
+    let game_source_x =
+        even_coordinate((game_left - gp.x) as f64 * video.width as f64 / gp.width as f64)
+            .min(video.width.saturating_sub(2));
+    let game_source_y =
+        even_coordinate((game_top - gp.y) as f64 * video.height as f64 / gp.height as f64)
+            .min(video.height.saturating_sub(2));
+    let game_source_width = even(game_width as f64 * video.width as f64 / gp.width as f64)
+        .min(video.width - game_source_x);
+    let game_source_height = even(game_height as f64 * video.height as f64 / gp.height as f64)
+        .min(video.height - game_source_y);
+    let gameplay = format!(
+        "crop={game_source_width}:{game_source_height}:{game_source_x}:{game_source_y},scale={game_width}:{game_height}:flags=lanczos"
+    );
+    let mut graph=format!("[0:v:0]{input},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]{gameplay}[game];[bg][game]overlay=x={game_left}:y={game_top}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
         3
     }
     else{
@@ -158,7 +184,7 @@ fn filter_graph_with_input(
     }
     else{
         ""
-    },gp.width,gp.height,gp.x,gp.y);
+    });
     if p.gameplay.shadow {
         let edge = ((h as f64 * 0.004).round() as u32).max(2);
         let mid = ((h as f64 * 0.012).round() as u32).max(edge + 1);
@@ -267,6 +293,17 @@ mod tests {
         let graph = filter_graph(&video(1920, 1080), &p, 1080, 1920).unwrap();
         assert!(!graph.contains("gblur="));
         assert!(graph.contains("crop=608:1080:656:0,scale=1080:1920:flags=lanczos"));
+    }
+    #[test]
+    fn zoomed_gameplay_crops_invisible_pixels_before_scaling() {
+        let mut p = Preset::default();
+        p.gameplay.scale = 2.36;
+        let graph = filter_graph(&video(3840, 2160), &p, 1080, 1920).unwrap();
+        assert!(
+            graph.contains("[gamesrc]crop=1628:2160:1106:0,scale=1080:1434:flags=lanczos"),
+            "{graph}"
+        );
+        assert!(!graph.contains("scale=2548:1434"));
     }
     #[test]
     fn ellipse_has_independent_axes() {

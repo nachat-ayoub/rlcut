@@ -43,7 +43,7 @@ fn append_effect_filters(
     scope: EffectScope,
     width: u32,
     height: u32,
-    timeline_duration: f64,
+    fps: u32,
 ) {
     for (index, effect) in effects
         .iter()
@@ -56,7 +56,7 @@ fn append_effect_filters(
         };
         let next = format!("{prefix}{index}");
         let alpha = if effect.kind == EffectKind::Flash {
-            let u = format!("((T-{:.6})/{:.6})", effect.time, effect.duration);
+            let u = format!("(T/{:.6})", effect.duration);
             let fade = match &effect.easing {
                 BoostEasing::Linear => format!("1-{u}"),
                 BoostEasing::Ease => format!("1-(pow({u},2)*(3-2*{u}))"),
@@ -66,12 +66,7 @@ fn append_effect_filters(
                     format!("if(lt({u},0.5),1-4*pow({u},3),pow(-2*{u}+2,3)/2)")
                 }
             };
-            format!(
-                "if(between(T,{:.6},{:.6}),{:.6}*({fade}),0)",
-                effect.time,
-                effect.time + effect.duration,
-                effect.intensity
-            )
+            format!("{:.6}*({fade})", effect.intensity)
         } else {
             String::new()
         }
@@ -79,10 +74,16 @@ fn append_effect_filters(
         match effect.kind {
             EffectKind::Flash => {
                 let styled = format!("{prefix}_styled{index}");
-                let input = format!("{prefix}_input{index}");
+                let color = effect.color.trim_start_matches('#');
+                let duration = effect.duration;
+                let time = effect.time;
+                let enabled = format!(
+                    "between(t\\,{:.6}\\,{:.6})",
+                    effect.time,
+                    effect.time + effect.duration
+                );
                 graph.push_str(&format!(
-                    ";color=c=0x{}:s={width}x{height}:d={timeline_duration:.6},format=yuv444p[{styled}];[{video_output}]format=yuv444p[{input}];[{input}][{styled}]blend=all_expr='A*(1-({alpha}))+B*({alpha})':shortest=1[{next}]",
-                    effect.color.trim_start_matches('#')
+                    ";color=c=0x{color}@0.0:s={width}x{height}:r={fps}:d={duration:.6},format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*({alpha})',setpts=PTS+{time:.6}/TB[{styled}];[{video_output}][{styled}]overlay=x=0:y=0:format=yuv420:eof_action=pass:repeatlast=0:shortest=0:enable='{enabled}'[{next}]"
                 ));
             }
             EffectKind::DarkGray => {
@@ -425,7 +426,7 @@ fn export_args_impl(
         EffectScope::Video,
         w,
         h,
-        edited_duration,
+        o.fps,
     );
     for (index, text) in texts.iter().enumerate() {
         let next = format!("text{index}");
@@ -582,7 +583,7 @@ fn export_args_impl(
         EffectScope::All,
         w,
         h,
-        edited_duration,
+        o.fps,
     );
     if v.has_audio {
         for (source, video) in videos.iter().enumerate() {
@@ -974,6 +975,10 @@ mod tests {
         let text = graph.find("drawtext=").unwrap();
         let all_effect = graph.find("[all_effect1]").unwrap();
         assert!(video_effect < text && text < all_effect);
+        assert!(graph.contains("d=0.400000,format=yuva420p"));
+        assert!(graph.contains("setpts=PTS+0.100000/TB"));
+        assert!(graph.contains("eof_action=pass:repeatlast=0"));
+        assert!(!graph.contains("blend=all_expr"));
         assert!(graph.contains("colorchannelmixer="));
         assert!(graph.contains(":enable='between(t\\,0.200000\\,0.600000)'"));
     }
