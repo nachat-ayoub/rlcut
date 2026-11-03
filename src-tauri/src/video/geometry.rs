@@ -115,7 +115,40 @@ fn filter_graph_with_input(
     } else {
         "base"
     };
-    let mut graph=format!("[0:v:0]{},scale={}:{}:flags=lanczos,setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]scale={}:{}:flags=lanczos,crop={}:{}:{}:{},gblur=sigma={:.6}:steps=4,eq=brightness={:.6}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[{base_output}]",input,video.width,video.height,if p.boost.enabled{
+    // Crop the source before scaling instead of scaling the entire landscape
+    // frame and discarding most of it for a portrait canvas. A blurred layer
+    // also carries no useful full-resolution detail, so blur it on an adaptive
+    // smaller buffer and upscale once. Gameplay, HUD, text and encoding stay native.
+    let source_crop_width =
+        even(video.width as f64 * w as f64 / bg.width as f64).min(video.width / 2 * 2);
+    let source_crop_height =
+        even(video.height as f64 * h as f64 / bg.height as f64).min(video.height / 2 * 2);
+    let source_crop_x = even((video.width - source_crop_width) as f64 * p.background.x)
+        .min(video.width - source_crop_width);
+    let source_crop_y = even((video.height - source_crop_height) as f64 * p.background.y)
+        .min(video.height - source_crop_height);
+    let background = if p.background.blur > 0.001 {
+        let divisor = if p.background.blur >= 20. {
+            4
+        } else if p.background.blur >= 8. {
+            2
+        } else {
+            1
+        };
+        let blur_width = (w / divisor).max(2) / 2 * 2;
+        let blur_height = (h / divisor).max(2) / 2 * 2;
+        let sigma = p.background.blur * blur_width as f64 / 1080.;
+        format!(
+            "crop={source_crop_width}:{source_crop_height}:{source_crop_x}:{source_crop_y},scale={blur_width}:{blur_height}:flags=bilinear,gblur=sigma={sigma:.6}:steps=2,scale={w}:{h}:flags=lanczos,eq=brightness={:.6}",
+            p.background.brightness
+        )
+    } else {
+        format!(
+            "crop={source_crop_width}:{source_crop_height}:{source_crop_x}:{source_crop_y},scale={w}:{h}:flags=lanczos,eq=brightness={:.6}",
+            p.background.brightness
+        )
+    };
+    let mut graph=format!("[0:v:0]{input},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]scale={}:{}:flags=lanczos[game];[bg][game]overlay=x={}:y={}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
         3
     }
     else{
@@ -125,7 +158,7 @@ fn filter_graph_with_input(
     }
     else{
         ""
-    },bg.width,bg.height,w,h,bg.x,bg.y,p.background.blur*w as f64/1080.,p.background.brightness,gp.width,gp.height,gp.x,gp.y);
+    },gp.width,gp.height,gp.x,gp.y);
     if p.gameplay.shadow {
         let edge = ((h as f64 * 0.004).round() as u32).max(2);
         let mid = ((h as f64 * 0.012).round() as u32).max(edge + 1);
@@ -218,12 +251,22 @@ mod tests {
             assert!((small.x * 3 - large.x).abs() <= 2);
             assert!((small.y * 3 - large.y).abs() <= 2);
         }
-        assert!(filter_graph(&v, &p, 360, 640)
-            .unwrap()
-            .contains("sigma=10.000000"));
-        assert!(filter_graph(&v, &p, 1080, 1920)
-            .unwrap()
-            .contains("sigma=30.000000"));
+        let preview_graph = filter_graph(&v, &p, 360, 640).unwrap();
+        assert!(preview_graph.contains("scale=90:160:flags=bilinear"));
+        assert!(preview_graph.contains("sigma=2.500000:steps=2,scale=360:640"));
+        let export_graph = filter_graph(&v, &p, 1080, 1920).unwrap();
+        assert!(export_graph.contains("crop=608:1080:656:0"));
+        assert!(export_graph.contains("scale=270:480:flags=bilinear"));
+        assert!(export_graph.contains("sigma=7.500000:steps=2,scale=1080:1920"));
+        assert!(!export_graph.contains("scale=1920:1080:flags=lanczos,setsar=1,split="));
+    }
+    #[test]
+    fn disabled_background_blur_skips_the_expensive_filter() {
+        let mut p = Preset::default();
+        p.background.blur = 0.;
+        let graph = filter_graph(&video(1920, 1080), &p, 1080, 1920).unwrap();
+        assert!(!graph.contains("gblur="));
+        assert!(graph.contains("crop=608:1080:656:0,scale=1080:1920:flags=lanczos"));
     }
     #[test]
     fn ellipse_has_independent_axes() {
