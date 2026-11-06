@@ -113,6 +113,7 @@ fn filter_graph_with_input(
     let gp = g.gameplay;
     let b = g.boost;
     let c = g.crop;
+    let saturation = p.gameplay.saturation;
     let base_output = if p.gameplay.shadow {
         "base_unshadowed"
     } else {
@@ -174,7 +175,7 @@ fn filter_graph_with_input(
     let gameplay = format!(
         "crop={game_source_width}:{game_source_height}:{game_source_x}:{game_source_y},scale={game_width}:{game_height}:flags=lanczos"
     );
-    let mut graph=format!("[0:v:0]{input},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]{gameplay}[game];[bg][game]overlay=x={game_left}:y={game_top}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
+    let mut graph=format!("[0:v:0]{input},eq=saturation={saturation:.6},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]{gameplay}[game];[bg][game]overlay=x={game_left}:y={game_top}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
         3
     }
     else{
@@ -189,7 +190,7 @@ fn filter_graph_with_input(
         // Match the preview's soft drop shadow. Keep the feather outside the
         // gameplay image so it separates the sharp frame from the blurred
         // backdrop without darkening gameplay or creating a solid black bar.
-        let extent = ((h as f64 * 0.022).round() as i32).clamp(14, 48);
+        let extent = (h as f64 * p.gameplay.shadow_height).round().max(2.) as i32;
         let top_space = game_top.min(extent);
         let bottom_space = (h as i32 - game_bottom).max(0).min(extent);
         let mut shadow = Vec::new();
@@ -200,12 +201,13 @@ fn filter_graph_with_input(
             if space == 0 {
                 continue;
             }
-            for step in 0..12_i32 {
-                let near = space * step / 12;
-                let far = space * (step + 1) / 12;
+            let steps = space.min(16);
+            for step in 0..steps {
+                let near = space * step / steps;
+                let far = space * (step + 1) / steps;
                 let band = (far - near).max(1);
-                let distance = step as f64 / 11.;
-                let alpha = 0.04 + 0.48 * (1. - distance).powi(2);
+                let distance = step as f64 / steps.max(1) as f64;
+                let alpha = 0.62 * (1. - distance).powf(1.35);
                 let y = if direction < 0 {
                     boundary - far
                 } else {
@@ -331,8 +333,9 @@ mod tests {
         p.gameplay.shadow = true;
         p.gameplay.scale = 2.36;
         let graph = filter_graph(&video(3840, 2160), &p, 1080, 1920).unwrap();
-        assert!(graph.contains("color=black@0.520"), "{graph}");
-        assert!(graph.contains("color=black@0.040"), "{graph}");
+        assert!(graph.contains("color=black@0.620"), "{graph}");
+        assert!(graph.contains("color=black@0.015"), "{graph}");
+        assert!(graph.contains("eq=saturation=1.000000"), "{graph}");
         assert!(!graph.contains("black@0.68"), "{graph}");
         assert!(!graph.contains("w=2548"), "{graph}");
     }

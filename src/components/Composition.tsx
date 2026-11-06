@@ -103,8 +103,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
           drawingPreset = { ...current.preset, boost: { ...boost, x: hidden + (boost.x - hidden) * progress } };
         }
         const activeClip = current.segments.find(segment => playbackTimestamp.current >= segment.start - .001 && playbackTimestamp.current <= segment.end + .001);
-        const raggeo = current.before ? 0 : Math.min(1, current.effects.filter(effect => effect.kind === 'raggeo' && editedTime >= effect.time && editedTime < effect.time + effect.duration).reduce((amount, effect) => amount + effect.intensity, 0));
-        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0, raggeo);
+        compositor.draw(source, source.width, source.height, current.video, drawingPreset, current.quality, current.before, current.playing, current.colorPreviewBefore ? 0 : activeClip?.colorFix ?? 0);
       }
       catch (error) { current.onPlayingChange(false); current.onPlaybackError?.(error); }
     };
@@ -261,10 +260,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
     const filters = activeEffects.flatMap(({ effect, amount }) => {
       if (effect.kind === 'flash' || (target === 'all' && effect.scope !== 'all')) return [];
       if (effect.kind === 'darkGray') return [`grayscale(${amount}) brightness(${1 - amount * .4}) contrast(${1 + amount * .35})`];
-      // Gameplay is graded inside the compositor. Only repeat the lightweight
-      // filter here when the effect intentionally includes text/overlays.
-      if (target === 'video' || effect.scope !== 'all') return [];
-      return [`brightness(${1 - amount * .05}) contrast(${1 + amount * .24}) saturate(${1 + amount * .42}) hue-rotate(${5 * amount}deg)`];
+      return [];
     });
     return filters.length ? filters.join(' ') : undefined;
   };
@@ -276,7 +272,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
         <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: videoGrade }} />
-        {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={rect('gameplay')} aria-hidden="true" />}
+        {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={{ ...rect('gameplay'), '--shadow-height': `${(preset.gameplay.shadowHeight ?? .035) * 100}cqh` } as CSSProperties} aria-hidden="true" />}
         {renderEffects('video')}
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
           const current = visualTime, local = current - text.start, remaining = text.end - current;

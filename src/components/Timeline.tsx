@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent, type WheelEvent } from 'react';
-import { Contrast, Diamond, Film, Music2, Palette, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
+import { Contrast, Diamond, Film, Music2, Pause, Play, Plus, Redo2, SkipBack, SkipForward, Sparkles, Trash2, Type, Undo2, Volume2, VolumeX, ZoomIn, ZoomOut } from 'lucide-react';
 import type { EffectTrack, FlashEffect, MusicTrack, Segment, SfxTrack, TextOverlay, TextTrack, TrackMarkers } from '../types';
 import { time } from '../lib/presets';
 import { editedDuration as durationOf, sourceToEdited, editedToSource, trimBounds } from '../lib/timeline';
@@ -451,10 +451,10 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
   const renderEffects = (trackId: string) => effects.filter(effect => effect.trackId === trackId).map(effect => {
     const shown = effectPreview?.id === effect.id ? effectPreview : effect;
     const width = shown.duration * pixelsPerSecond;
-    const name = shown.kind === 'flash' ? 'Impact flash' : shown.kind === 'raggeo' ? 'Raggeo' : 'Black & white';
-    return <div key={effect.id} className={`timeline-effect ${shown.kind === 'darkGray' ? 'dark-gray' : shown.kind === 'raggeo' ? 'raggeo' : ''} ${selectedEffectId === effect.id ? 'selected' : ''}`} style={{ left: `${shown.time * pixelsPerSecond}px`, width: `${width}px` }} title={`${name} · drag to move${shown.timing === 'duration' ? ', drag either edge to resize' : ''}, Alt for free movement`} onPointerDown={event => beginEffect(event, effect, 'move')} onPointerMove={moveEffect} onPointerUp={finishEffect} onPointerCancel={() => { effectGesture.current = null; setEffectPreview(null); }}>
+    const name = shown.kind === 'flash' ? 'Impact flash' : 'Black & white';
+    return <div key={effect.id} className={`timeline-effect ${shown.kind === 'darkGray' ? 'dark-gray' : ''} ${selectedEffectId === effect.id ? 'selected' : ''}`} style={{ left: `${shown.time * pixelsPerSecond}px`, width: `${width}px` }} title={`${name} · drag to move${shown.timing === 'duration' ? ', drag either edge to resize' : ''}, Alt for free movement`} onPointerDown={event => beginEffect(event, effect, 'move')} onPointerMove={moveEffect} onPointerUp={finishEffect} onPointerCancel={() => { effectGesture.current = null; setEffectPreview(null); }}>
       {shown.timing === 'duration' && <button className="effect-duration-handle start" aria-label="Resize effect from start" onPointerDown={event => beginEffect(event, effect, 'start')} onPointerMove={moveEffect} onPointerUp={finishEffect} onPointerCancel={() => { effectGesture.current = null; setEffectPreview(null); }} />}
-      <span><Sparkles size={12} /><b>{shown.kind === 'flash' ? 'Flash' : shown.kind === 'raggeo' ? 'Raggeo' : 'B&W'}</b></span>
+      <span><Sparkles size={12} /><b>{shown.kind === 'flash' ? 'Flash' : 'B&W'}</b></span>
       {shown.timing === 'duration' && <button className="effect-duration-handle end" aria-label="Resize effect from end" onPointerDown={event => beginEffect(event, effect, 'end')} onPointerMove={moveEffect} onPointerUp={finishEffect} onPointerCancel={() => { effectGesture.current = null; setEffectPreview(null); }} />}
     </div>;
   });
@@ -513,7 +513,6 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       <header><span>ADD EFFECT</span><small>Starts at the playhead</small></header>
       <button role="menuitem" onClick={() => createEffect('flash')}><i className="flash"><Sparkles size={15} /></i><span><strong>Impact flash</strong><small>Bright hit for peak moments</small></span></button>
       <button role="menuitem" onClick={() => createEffect('darkGray')}><i className="mono"><Contrast size={15} /></i><span><strong>Black &amp; white</strong><small>Cinematic monochrome grade</small></span></button>
-      <button role="menuitem" onClick={() => createEffect('raggeo')}><i className="raggeo"><Palette size={15} /></i><span><strong>Raggeo grade</strong><small>Deep contrast and vivid blues</small></span></button>
     </div>}
     {volumeOpen && selected && !selectedText && <div className="volume-popover" ref={volumePopover}>
       <button onClick={() => { const next = volume > 0 ? 0 : 1; volumeDirty.current = false; setVolume(next); setGain(next); }} aria-label={volume > 0 ? 'Mute selected clip' : 'Unmute selected clip'}>{volume > 0 ? <Volume2 size={14} /> : <VolumeX size={14} />}</button>

@@ -5,37 +5,6 @@ use crate::model::{
 };
 use std::path::Path;
 
-fn raggeo_matrix(amount: f64) -> ([[f64; 3]; 3], [f64; 3]) {
-    let amount = amount.clamp(0., 1.);
-    let brightness = 1. - amount * 0.015;
-    let contrast = 1. + amount * 0.18;
-    let gain = brightness * contrast;
-    // Opposing channel shifts cannot be reproduced by a global hue rotation:
-    // feed red into green so orange moves toward yellow, and blue into red so
-    // Rocket League blues move toward violet. Keep neutrals crisp and cool.
-    let look = [
-        [1.04, -0.04, 0.20],
-        [0.14, 1.02, -0.10],
-        [-0.08, 0.01, 1.12],
-    ];
-    let mut matrix = [[0.; 3]; 3];
-    for row in 0..3 {
-        for column in 0..3 {
-            let identity = if row == column { 1. } else { 0. };
-            matrix[row][column] = (identity + (look[row][column] - identity) * amount) * gain;
-        }
-    }
-    let contrast_offset = 0.5 * (1. - contrast);
-    (
-        matrix,
-        [
-            contrast_offset - 0.012 * amount,
-            contrast_offset,
-            contrast_offset + 0.016 * amount,
-        ],
-    )
-}
-
 fn append_effect_filters(
     graph: &mut String,
     video_output: &mut String,
@@ -119,18 +88,9 @@ fn append_effect_filters(
                 ));
             }
             EffectKind::Raggeo => {
-                let enabled = format!(
-                    "between(t\\,{:.6}\\,{:.6})",
-                    effect.time,
-                    effect.time + effect.duration
-                );
-                let (matrix, offset) = raggeo_matrix(effect.intensity);
-                graph.push_str(&format!(
-                    ";[{video_output}]colorchannelmixer=rr={:.6}:rg={:.6}:rb={:.6}:ra={:.6}:gr={:.6}:gg={:.6}:gb={:.6}:ga={:.6}:br={:.6}:bg={:.6}:bb={:.6}:ba={:.6}:enable='{enabled}'[{next}]",
-                    matrix[0][0], matrix[0][1], matrix[0][2], offset[0],
-                    matrix[1][0], matrix[1][1], matrix[1][2], offset[1],
-                    matrix[2][0], matrix[2][1], matrix[2][2], offset[2]
-                ));
+                // Accepted only so projects saved by older versions remain
+                // readable. The retired look is removed when a project opens.
+                continue;
             }
         }
         *video_output = next;

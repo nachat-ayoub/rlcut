@@ -22,6 +22,16 @@ pub struct Gameplay {
     pub y: f64,
     #[cfg_attr(feature = "serialization", serde(default))]
     pub shadow: bool,
+    #[cfg_attr(feature = "serialization", serde(default = "default_shadow_height"))]
+    pub shadow_height: f64,
+    #[cfg_attr(feature = "serialization", serde(default = "default_saturation"))]
+    pub saturation: f64,
+}
+fn default_shadow_height() -> f64 {
+    0.035
+}
+fn default_saturation() -> f64 {
+    1.
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -117,6 +127,8 @@ impl Default for Preset {
                 x: 0.5,
                 y: 0.5,
                 shadow: false,
+                shadow_height: default_shadow_height(),
+                saturation: default_saturation(),
             },
             boost: Boost {
                 enabled: true,
@@ -166,6 +178,13 @@ impl Preset {
         range(self.gameplay.scale, 0.2, 4., "Gameplay scale")?;
         range(self.gameplay.x, 0., 1., "Gameplay X")?;
         range(self.gameplay.y, 0., 1., "Gameplay Y")?;
+        range(
+            self.gameplay.shadow_height,
+            0.005,
+            0.12,
+            "Shadow gradient height",
+        )?;
+        range(self.gameplay.saturation, 0., 2., "Saturation")?;
         let h = &self.boost;
         range(h.scale, 0.25, 4., "Boost scale")?;
         range(h.width, 0.01, 1., "Boost width")?;
@@ -619,5 +638,16 @@ mod tests {
         let s = serde_json::to_string(&p).unwrap();
         assert_eq!(p, serde_json::from_str::<Preset>(&s).unwrap());
         assert!(serde_json::from_str::<Preset>("{}").is_err());
+    }
+    #[cfg(feature = "serialization")]
+    #[test]
+    fn legacy_presets_receive_visual_defaults() {
+        let mut value = serde_json::to_value(Preset::default()).unwrap();
+        let gameplay = value["gameplay"].as_object_mut().unwrap();
+        gameplay.remove("shadowHeight");
+        gameplay.remove("saturation");
+        let preset: Preset = serde_json::from_value(value).unwrap();
+        assert_eq!(preset.gameplay.shadow_height, default_shadow_height());
+        assert_eq!(preset.gameplay.saturation, default_saturation());
     }
 }

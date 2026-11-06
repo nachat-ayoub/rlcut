@@ -21,6 +21,8 @@ export type Preset = {
     x: number;
     y: number;
     shadow?: boolean;
+    shadowHeight?: number;
+    saturation?: number;
   };
   boost: {
     enabled: boolean;
@@ -120,7 +122,7 @@ export type TrackMarkers = {
 export type FlashEffect = {
   id: string;
   trackId: string;
-  kind: 'flash' | 'darkGray' | 'raggeo';
+  kind: 'flash' | 'darkGray';
   timing: 'duration' | 'clip';
   scope: 'video' | 'all';
   time: number;

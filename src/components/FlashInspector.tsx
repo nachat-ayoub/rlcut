@@ -16,7 +16,7 @@ export function FlashInspector({ value, onChange, onDelete, onPreview }: {
   onDelete: () => void;
   onPreview: () => void;
 }) {
-  const name = value.kind === 'flash' ? 'Impact flash' : value.kind === 'raggeo' ? 'Raggeo' : 'Black & white';
+  const name = value.kind === 'flash' ? 'Impact flash' : 'Black & white';
   return <div className="flash-inspector">
     <div className="flash-hero">
       <span className="flash-hero-icon"><Sparkles size={18} /></span>
@@ -27,7 +27,6 @@ export function FlashInspector({ value, onChange, onDelete, onPreview }: {
       <div className="flash-kind effect-types" role="group" aria-label="Effect type">
         <button className={value.kind === 'flash' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'flash', timing: 'duration', duration: Math.min(1.5, value.duration) })}>Impact flash</button>
         <button className={value.kind === 'darkGray' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'darkGray' })}>Black & white</button>
-        <button className={value.kind === 'raggeo' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'raggeo' })}>Raggeo</button>
       </div>
       {value.kind === 'flash' && <div className="flash-presets" role="group" aria-label="Effect style">
         {styles.map(style => <button key={style.label} className={Math.abs(value.intensity - style.intensity) < .01 && Math.abs(value.duration - style.duration) < .01 ? 'active' : ''} onClick={() => onChange({ ...value, intensity: style.intensity, duration: style.duration, easing: style.easing })}>{style.label}</button>)}
