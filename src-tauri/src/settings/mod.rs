@@ -54,6 +54,54 @@ fn default_wait_for_preview() -> bool {
 fn default_music_fade_duration() -> f64 {
     0.5
 }
+/// Upgrade pre-camelCase saves before they reach typed models or the webview.
+/// Projects are intentionally stored as JSON values, so doing this at the
+/// storage boundary also prevents old nested project presets from carrying a
+/// second spelling back into Tauri commands.
+pub fn migrate_legacy_names(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                migrate_legacy_names(item);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            let keys = object.keys().cloned().collect::<Vec<_>>();
+            for key in &keys {
+                if let Some(child) = object.get_mut(key) {
+                    migrate_legacy_names(child);
+                }
+            }
+            for key in keys {
+                if !key.contains('_') {
+                    continue;
+                }
+                let mut upper = false;
+                let canonical = key
+                    .chars()
+                    .filter_map(|character| {
+                        if character == '_' {
+                            upper = true;
+                            None
+                        } else if upper {
+                            upper = false;
+                            Some(character.to_ascii_uppercase())
+                        } else {
+                            Some(character)
+                        }
+                    })
+                    .collect::<String>();
+                if canonical != key {
+                    let legacy = object.remove(&key).expect("key collected from object");
+                    // A newer value is always authoritative when both spellings
+                    // exist, eliminating duplicate fields in later commands.
+                    object.entry(canonical).or_insert(legacy);
+                }
+            }
+        }
+        _ => {}
+    }
+}
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -184,7 +232,10 @@ pub fn load(path: &Path) -> Result<Store, String> {
         return Ok(Store::default());
     }
     let bytes = fs::read(path).map_err(|e| format!("Cannot read settings: {e}"))?;
-    let store: Store = serde_json::from_slice(&bytes)
+    let mut value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| format!("Cannot read settings JSON (original file retained): {e}"))?;
+    migrate_legacy_names(&mut value);
+    let store: Store = serde_json::from_value(value)
         .map_err(|e| format!("Cannot read settings JSON (original file retained): {e}"))?;
     store.validate()?;
     Ok(store)
@@ -195,7 +246,9 @@ pub fn save(path: &Path, store: &Store) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     let backup = path.with_extension("json.bak");
-    let data = serde_json::to_vec_pretty(store).map_err(|e| e.to_string())?;
+    let mut value = serde_json::to_value(store).map_err(|e| e.to_string())?;
+    migrate_legacy_names(&mut value);
+    let data = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
     let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
     f.write_all(&data)
         .and_then(|_| f.sync_all())
@@ -223,6 +276,22 @@ pub fn data_file(dir: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_snake_case_keys_upgrade_without_duplicates() {
+        let mut value = serde_json::json!({
+            "gameplay": {
+                "shadow_height": 0.08,
+                "shadowHeight": 0.05,
+                "fade_duration": 1.0
+            }
+        });
+        migrate_legacy_names(&mut value);
+        let gameplay = &value["gameplay"];
+        assert_eq!(gameplay["shadowHeight"], 0.05);
+        assert_eq!(gameplay["fadeDuration"], 1.0);
+        assert!(gameplay.get("shadow_height").is_none());
+        assert!(gameplay.get("fade_duration").is_none());
+    }
     #[test]
     fn cannot_mutate_builtin() {
         let mut s = Store::default();

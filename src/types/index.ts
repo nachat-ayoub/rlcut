@@ -23,6 +23,7 @@ export type Preset = {
     shadow?: boolean;
     shadowHeight?: number;
     saturation?: number;
+    hue?: number;
   };
   boost: {
     enabled: boolean;

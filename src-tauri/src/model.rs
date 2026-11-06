@@ -32,6 +32,8 @@ pub struct Gameplay {
     pub shadow_height: f64,
     #[cfg_attr(feature = "serialization", serde(default = "default_saturation"))]
     pub saturation: f64,
+    #[cfg_attr(feature = "serialization", serde(default))]
+    pub hue: f64,
 }
 fn default_shadow_height() -> f64 {
     0.035
@@ -135,6 +137,7 @@ impl Default for Preset {
                 shadow: false,
                 shadow_height: default_shadow_height(),
                 saturation: default_saturation(),
+                hue: 0.,
             },
             boost: Boost {
                 enabled: true,
@@ -191,6 +194,7 @@ impl Preset {
             "Shadow gradient height",
         )?;
         range(self.gameplay.saturation, 0., 2., "Saturation")?;
+        range(self.gameplay.hue, -180., 180., "Hue")?;
         let h = &self.boost;
         range(h.scale, 0.25, 4., "Boost scale")?;
         range(h.width, 0.01, 1., "Boost width")?;

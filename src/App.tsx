@@ -937,7 +937,10 @@ export default function App() {
           {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
             <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add depth between gameplay and the blurred backdrop.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
             {preset.gameplay.shadow && <Slider label="Shadow height" value={(preset.gameplay.shadowHeight ?? classic.gameplay.shadowHeight ?? .035) * 100} min={.5} max={12} step={.1} defaultValue={(classic.gameplay.shadowHeight ?? .035) * 100} onChange={shadowHeight => edit('gameplay', { shadowHeight: shadowHeight / 100 })} suffix="%" />}
-            <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
+            <div className="two-controls">
+              <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
+              <Slider label="Hue" value={preset.gameplay.hue ?? 0} min={-180} max={180} step={1} defaultValue={0} onChange={hue => edit('gameplay', { hue })} suffix="°" />
+            </div>
             <Slider label="Gameplay scale" value={preset.gameplay.scale} min={.2} max={4} defaultValue={classic.gameplay.scale} onChange={scale => edit('gameplay', { scale })} suffix="×" />
             <div className="two-controls">
               <Slider label="X position" value={preset.gameplay.x - .5} min={-.5} max={.5} defaultValue={classic.gameplay.x - .5} onChange={x => edit('gameplay', { x: x + .5 })} />
@@ -1000,7 +1003,10 @@ export default function App() {
           {selectedVideoSegment && <Section title="Video look" icon={<Palette size={16} />}>
             <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add a soft depth edge between gameplay and the blurred background.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
             {preset.gameplay.shadow && <Slider label="Shadow height" value={(preset.gameplay.shadowHeight ?? classic.gameplay.shadowHeight ?? .035) * 100} min={.5} max={12} step={.1} defaultValue={(classic.gameplay.shadowHeight ?? .035) * 100} onChange={shadowHeight => edit('gameplay', { shadowHeight: shadowHeight / 100 })} suffix="%" />}
-            <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
+            <div className="two-controls">
+              <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
+              <Slider label="Hue" value={preset.gameplay.hue ?? 0} min={-180} max={180} step={1} defaultValue={0} onChange={hue => edit('gameplay', { hue })} suffix="°" />
+            </div>
             <div className="color-scope" role="group" aria-label="Color correction scope"><button className={colorScope === 'clip' ? 'active' : ''} onClick={() => setColorScope('clip')}>This clip</button><button className={colorScope === 'all' ? 'active' : ''} onClick={() => setColorScope('all')}>All clips</button></div>
             <div className="setting-toggle compact"><div><strong>Recover washed colors</strong>{selectedSource && matchesHdr(selectedSource.colorTransfer) && <small>HDR source · automatic tone mapping is active</small>}</div><input className="switch" type="checkbox" aria-label="Recover washed colors" checked={colorFixValue > 0} onChange={event => { setColorPreviewBefore(false); setColorFix(event.target.checked ? .5 : 0); }} /></div>
             {colorFixValue > 0 && <><div className="color-preview-toggle"><span>Preview at playhead</span><div><button className={colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(true); }}>Before</button><button className={!colorPreviewBefore ? 'active' : ''} onClick={() => { setBefore(false); setColorPreviewBefore(false); }}>After</button></div></div><Slider label="Recovery strength" value={colorFixValue} min={.1} max={1} step={.05} defaultValue={.5} onChange={setColorFix} suffix="×" /></>}

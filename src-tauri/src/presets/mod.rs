@@ -18,8 +18,12 @@ pub fn import(path: &Path) -> Result<Preset, String> {
     if metadata.len() > 1_048_576 {
         return Err("Preset JSON is too large (maximum 1 MB)".into());
     }
-    let mut p: Preset = serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("Invalid preset JSON: {e}"))?;
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|e| format!("Invalid preset JSON: {e}"))?;
+    crate::settings::migrate_legacy_names(&mut value);
+    let mut p: Preset =
+        serde_json::from_value(value).map_err(|e| format!("Invalid preset JSON: {e}"))?;
     p.validate()?;
     p.id = id();
     Ok(p)

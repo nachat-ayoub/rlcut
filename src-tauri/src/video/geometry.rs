@@ -114,6 +114,7 @@ fn filter_graph_with_input(
     let b = g.boost;
     let c = g.crop;
     let saturation = p.gameplay.saturation;
+    let hue = p.gameplay.hue;
     let base_output = if p.gameplay.shadow {
         "base_unshadowed"
     } else {
@@ -175,7 +176,7 @@ fn filter_graph_with_input(
     let gameplay = format!(
         "crop={game_source_width}:{game_source_height}:{game_source_x}:{game_source_y},scale={game_width}:{game_height}:flags=lanczos"
     );
-    let mut graph=format!("[0:v:0]{input},eq=saturation={saturation:.6},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]{gameplay}[game];[bg][game]overlay=x={game_left}:y={game_top}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
+    let mut graph=format!("[0:v:0]{input},eq=saturation={saturation:.6},hue=h={hue:.6},setsar=1,split={}[bgsrc][gamesrc]{};[bgsrc]{background}[bg];[gamesrc]{gameplay}[game];[bg][game]overlay=x={game_left}:y={game_top}:eval=init:shortest=1[{base_output}]",if p.boost.enabled{
         3
     }
     else{
@@ -336,6 +337,7 @@ mod tests {
         assert!(graph.contains("color=black@0.620"), "{graph}");
         assert!(graph.contains("color=black@0.015"), "{graph}");
         assert!(graph.contains("eq=saturation=1.000000"), "{graph}");
+        assert!(graph.contains("hue=h=0.000000"), "{graph}");
         assert!(!graph.contains("black@0.68"), "{graph}");
         assert!(!graph.contains("w=2548"), "{graph}");
     }

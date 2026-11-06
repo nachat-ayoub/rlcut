@@ -1753,9 +1753,10 @@ pub async fn import_project() -> Result<Option<serde_json::Value>, String> {
         if metadata.len() > 2_000_000 {
             return Err("Project file is too large".into());
         }
-        let project: serde_json::Value =
+        let mut project: serde_json::Value =
             serde_json::from_slice(&std::fs::read(path).map_err(|error| error.to_string())?)
                 .map_err(|error| format!("Cannot read project: {error}"))?;
+        settings::migrate_legacy_names(&mut project);
         validate_project(&project)?;
         Ok(Some(project))
     })
@@ -1763,8 +1764,9 @@ pub async fn import_project() -> Result<Option<serde_json::Value>, String> {
 }
 
 #[tauri::command]
-pub async fn export_project(project: serde_json::Value) -> Result<bool, String> {
+pub async fn export_project(mut project: serde_json::Value) -> Result<bool, String> {
     blocking(move || {
+        settings::migrate_legacy_names(&mut project);
         validate_project(&project)?;
         let name = project
             .get("name")

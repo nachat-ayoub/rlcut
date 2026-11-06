@@ -84,13 +84,13 @@ test('black-and-white preview filters rendered video without backdrop filters', 
 
 test('preset saturation stays in the compositor and the variable separation shadow renders', async () => {
   const html = renderToStaticMarkup(createElement(Composition, {
-    video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[], texts:[], preview:null, preset:{...classic,gameplay:{...classic.gameplay,shadow:true,shadowHeight:.06,saturation:1.35}}, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
+    video: { width:1920, height:1080 }, playbackPath:'', proxyPreparing:false, segments:[{id:'a',start:0,end:2,volume:1,colorFix:0}], effects:[], texts:[], preview:null, preset:{...classic,gameplay:{...classic.gameplay,shadow:true,shadowHeight:.06,saturation:1.35,hue:32}}, before:false, guides:false, layer:null, setLayer:()=>{}, change:()=>{}, importVideo:()=>{}, quality:1080, playing:false, timestamp:.5, onTimestamp:()=>{}, onPlayingChange:()=>{}, onTextSelect:()=>{}, onTextChange:()=>{},
   }));
   const shader = await readFile(new URL('../src/lib/gpu-compositor.ts', import.meta.url), 'utf8');
   assert.match(shader, /uniform float saturation/);
   assert.match(shader, /vec3 saturateColor/);
   assert.doesNotMatch(shader, /raggeo|coldGrade/);
-  assert.doesNotMatch(html, /composition-output[^>]+filter:/);
+  assert.match(html, /composition-output[^>]+filter:hue-rotate\(32deg\)/);
   assert.match(html, /gameplay-frame-shadow/);
   assert.match(html, /--shadow-height:6cqh/);
 });

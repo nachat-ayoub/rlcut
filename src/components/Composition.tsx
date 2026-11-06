@@ -266,12 +266,14 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   };
   const videoGrade = gradeFilter('video');
   const allGrade = gradeFilter('all');
+  const hue = preset.gameplay.hue ?? 0;
+  const previewVideoFilter = before ? undefined : [videoGrade, hue ? `hue-rotate(${hue}deg)` : ''].filter(Boolean).join(' ');
   const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount, mixBlendMode: 'overlay' }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className="preview-viewport" ref={viewport} onWheel={previewWheel}>
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
-        <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: videoGrade }} />
+        <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: previewVideoFilter }} />
         {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={{ ...rect('gameplay'), '--shadow-height': `${(preset.gameplay.shadowHeight ?? .035) * 100}cqh` } as CSSProperties} aria-hidden="true" />}
         {renderEffects('video')}
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
