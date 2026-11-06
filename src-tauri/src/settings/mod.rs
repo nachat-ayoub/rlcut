@@ -234,10 +234,16 @@ pub fn load(path: &Path) -> Result<Store, String> {
     let bytes = fs::read(path).map_err(|e| format!("Cannot read settings: {e}"))?;
     let mut value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|e| format!("Cannot read settings JSON (original file retained): {e}"))?;
+    let original = value.clone();
     migrate_legacy_names(&mut value);
     let store: Store = serde_json::from_value(value)
         .map_err(|e| format!("Cannot read settings JSON (original file retained): {e}"))?;
     store.validate()?;
+    // Persist the one-way upgrade immediately so future app versions and
+    // project exports only ever see the canonical camelCase spelling.
+    if original != serde_json::to_value(&store).unwrap_or_default() {
+        let _ = save(path, &store);
+    }
     Ok(store)
 }
 pub fn save(path: &Path, store: &Store) -> Result<(), String> {
@@ -291,6 +297,36 @@ mod tests {
         assert_eq!(gameplay["fadeDuration"], 1.0);
         assert!(gameplay.get("shadow_height").is_none());
         assert!(gameplay.get("fade_duration").is_none());
+    }
+    #[test]
+    fn loading_legacy_store_rewrites_canonical_names() {
+        let dir =
+            std::env::temp_dir().join(format!("rlcut-settings-migration-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = data_file(dir.clone());
+        let mut store = Store::default();
+        let mut preset = Preset::default();
+        preset.id = "custom".into();
+        store.active_preset = preset.id.clone();
+        store.settings.default_preset = preset.id.clone();
+        store.presets.push(preset);
+        let mut value = serde_json::to_value(store).unwrap();
+        let gameplay = value["presets"][0]["gameplay"].as_object_mut().unwrap();
+        let height = gameplay.remove("shadowHeight").unwrap();
+        gameplay.insert("shadow_height".into(), height);
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.presets[0].gameplay.shadow_height, 0.035);
+        let rewritten: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert!(rewritten["presets"][0]["gameplay"]
+            .get("shadowHeight")
+            .is_some());
+        assert!(rewritten["presets"][0]["gameplay"]
+            .get("shadow_height")
+            .is_none());
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn cannot_mutate_builtin() {
