@@ -306,8 +306,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let path = data_file(dir.clone());
         let mut store = Store::default();
-        let mut preset = Preset::default();
-        preset.id = "custom".into();
+        let preset = Preset {
+            id: "custom".into(),
+            ..Preset::default()
+        };
         store.active_preset = preset.id.clone();
         store.settings.default_preset = preset.id.clone();
         store.presets.push(preset);
