@@ -141,7 +141,9 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
       waiting: value => { if (!disposed) setWaiting(value); },
       ended: () => { if (!disposed) callbacks.current.onPlayingChange(false); },
       error: error => { if (!disposed) { setMediaReady(false); setPlaybackFailed(true); callbacks.current.onPlayingChange(false); callbacks.current.onPlaybackError?.(error); } },
-    }, /Windows/i.test(navigator.userAgent) ? 30 : video.fps >= 50 ? 60 : 30, renderer.current?.backend === 'cpu' ? 440 : 540);
+      // The source is an import-time 30 FPS edit proxy.  Pulling it at 60 FPS
+      // doubles IPC/compositor pressure without adding temporal detail.
+    }, 30, renderer.current?.backend === 'cpu' ? 416 : 512);
     player.current = session;
     return () => { disposed = true; session.dispose(); if (player.current === session) player.current = null; };
     // Native source lifetime is independent of scene and timeline changes.

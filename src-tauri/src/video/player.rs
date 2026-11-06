@@ -162,7 +162,11 @@ impl Player {
                     .music
                     .iter()
                     .chain(self.sfx.iter())
-                    .all(|player| player.last_sync.elapsed().as_millis() < 50))
+                    // Separate GStreamer pipelines naturally differ by a few
+                    // frames.  Seeking every 50 ms in an attempt to remove that
+                    // tiny drift restarts audio repeatedly, producing the short
+                    // loop/stutter users hear during preview playback.
+                    .all(|player| player.last_sync.elapsed().as_millis() < 250))
         {
             return Ok(());
         }
@@ -816,7 +820,10 @@ impl MusicPlayer {
                 rl_player_volume(self.handle, volume * fade_gain);
             }
             let current = unsafe { rl_player_position(self.handle) };
-            if (force || self.segment != Some(index) || (current - time).abs() > 0.15)
+            // Only correct a meaningful clock drift.  Both playbins run on
+            // the same system clock, so regular seeks are control events—not
+            // a per-frame playback task.
+            if (force || self.segment != Some(index) || (current - time).abs() > 0.75)
                 && unsafe { rl_player_seek(self.handle, time) } == 0
             {
                 return Err("Could not seek music".into());

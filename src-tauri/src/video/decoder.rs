@@ -57,7 +57,10 @@ pub fn prepare_progress(
     fs::create_dir_all(cache).map_err(|e| format!("Cannot create decoder cache: {e}"))?;
     let metadata = fs::metadata(&video.path).map_err(|e| format!("Cannot open recording: {e}"))?;
     let mut hash = DefaultHasher::new();
-    "decoder-v2-live-composition-audio".hash(&mut hash);
+    // This is an edit proxy, never an export intermediate.  Keeping it small,
+    // CFR and simple-to-decode is what makes scrubbing/playback predictable on
+    // integrated GPUs and lower-end CPUs.
+    "decoder-v3-edit-proxy-640p-30fps-fastdecode".hash(&mut hash);
     video.path.hash(&mut hash);
     metadata.len().hash(&mut hash);
     metadata.modified().ok().hash(&mut hash);
@@ -72,10 +75,17 @@ pub fn prepare_progress(
         progress: output.with_extension("progress"),
     };
     let stderr = fs::File::create(&partial.log).map_err(|e| e.to_string())?;
-    let fps = if video.fps >= 50. { 60 } else { 30 };
-    let filter=format!("{},scale=trunc(iw*sar/2)*2:ih,setsar=1,scale=960:960:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,fps={fps}",color_filter(video));
+    // Preview stays at 30 FPS regardless of the source.  A 640px H.264
+    // baseline proxy is cheap to decode and its small, frequent keyframes make
+    // seeks responsive.  The full-resolution/original-FPS source is retained
+    // for export.
+    const FPS: u32 = 30;
+    let filter = format!(
+        "{},scale=trunc(iw*sar/2)*2:ih,setsar=1,scale=640:640:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=fast_bilinear,setsar=1,fps={FPS}",
+        color_filter(video)
+    );
     let threads = std::thread::available_parallelism()
-        .map(|value| value.get().min(12))
+        .map(|value| value.get().min(4))
         .unwrap_or(2)
         .to_string();
     let mut process = command(binaries.ffmpeg()?);
@@ -121,13 +131,19 @@ pub fn prepare_progress(
         "-c:v",
         "libx264",
         "-preset",
-        "ultrafast",
+        "superfast",
+        "-tune",
+        "fastdecode",
         "-crf",
-        "28",
+        "30",
+        "-maxrate",
+        "1800k",
+        "-bufsize",
+        "3600k",
         "-g",
-        "15",
+        "30",
         "-keyint_min",
-        "15",
+        "30",
         "-sc_threshold",
         "0",
         "-pix_fmt",
@@ -143,7 +159,7 @@ pub fn prepare_progress(
         "-ar",
         "48000",
         "-b:a",
-        "96k",
+        "80k",
         "-af",
         "apad",
     ]);

@@ -28,7 +28,7 @@ export class NativePlayback {
   private waitingSince = performance.now();
   private desiredPlaying = false;
   private nativePlaying = false;
-  constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks, private fps = 60, maxEdge = 640) {
+  constructor(path: string, time: number, segments: Segment[], private callbacks: Callbacks, private fps = 30, maxEdge = 512) {
     this.latestTime = time;
     this.commands = invoke<void>('playback_open', { session: this.session, path, time, segments, maxEdge });
     void this.commands.then(() => { if (!this.disposed) void this.poll(); }).catch(error => this.fail(error));
