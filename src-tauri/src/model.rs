@@ -25,7 +25,10 @@ pub struct Gameplay {
     pub y: f64,
     #[cfg_attr(feature = "serialization", serde(default))]
     pub shadow: bool,
-    #[cfg_attr(feature = "serialization", serde(default = "default_shadow_height"))]
+    #[cfg_attr(
+        feature = "serialization",
+        serde(default = "default_shadow_height", alias = "shadow_height")
+    )]
     pub shadow_height: f64,
     #[cfg_attr(feature = "serialization", serde(default = "default_saturation"))]
     pub saturation: f64,
@@ -663,5 +666,15 @@ mod tests {
         let preset: Preset = serde_json::from_value(value).unwrap();
         assert_eq!(preset.gameplay.shadow_height, default_shadow_height());
         assert_eq!(preset.gameplay.saturation, default_saturation());
+    }
+    #[cfg(feature = "serialization")]
+    #[test]
+    fn legacy_presets_accept_snake_case_shadow_height() {
+        let mut value = serde_json::to_value(Preset::default()).unwrap();
+        let gameplay = value["gameplay"].as_object_mut().unwrap();
+        let shadow_height = gameplay.remove("shadowHeight").unwrap();
+        gameplay.insert("shadow_height".into(), shadow_height);
+        let preset: Preset = serde_json::from_value(value).unwrap();
+        assert_eq!(preset.gameplay.shadow_height, default_shadow_height());
     }
 }

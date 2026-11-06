@@ -50,6 +50,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Restore pinned AI payload
+        uses: actions/cache@v4
+        with:
+          path: .runtime/ai
+          key: linux-ai-payload-v0.6.6-4782e5fe06fd70fa
       - run: npm ci
       - name: Build Linux AppImage
         run: |
