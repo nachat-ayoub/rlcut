@@ -134,18 +134,16 @@ fn filter_graph_with_input(
         even_coordinate((video.height - source_crop_height) as f64 * p.background.y)
             .min(video.height - source_crop_height);
     let background = if p.background.blur > 0.001 {
-        let divisor = if p.background.blur >= 20. {
-            4
-        } else if p.background.blur >= 8. {
-            2
-        } else {
-            1
-        };
+        // Two-pass Gaussian blur at half resolution keeps the soft, natural
+        // falloff of Premiere's Gaussian Blur without spending work on detail
+        // that a strong blur will discard anyway. Quarter-resolution proxies
+        // made broad gradients visibly blocky.
+        let divisor = if p.background.blur >= 10. { 2 } else { 1 };
         let blur_width = (w / divisor).max(2) / 2 * 2;
         let blur_height = (h / divisor).max(2) / 2 * 2;
         let sigma = p.background.blur * blur_width as f64 / 1080.;
         format!(
-            "crop={source_crop_width}:{source_crop_height}:{source_crop_x}:{source_crop_y},scale={blur_width}:{blur_height}:flags=bilinear,gblur=sigma={sigma:.6}:steps=2,scale={w}:{h}:flags=lanczos,eq=brightness={:.6}",
+            "crop={source_crop_width}:{source_crop_height}:{source_crop_x}:{source_crop_y},scale={blur_width}:{blur_height}:flags=bilinear,gblur=sigma={sigma:.6}:steps=6,scale={w}:{h}:flags=lanczos,eq=brightness={:.6}",
             p.background.brightness
         )
     } else {
@@ -188,42 +186,37 @@ fn filter_graph_with_input(
         ""
     });
     if p.gameplay.shadow {
-        // Match the preview's soft drop shadow. Keep the feather outside the
-        // gameplay image so it separates the sharp frame from the blurred
-        // backdrop without darkening gameplay or creating a solid black bar.
+        // Render continuous alpha ramps rather than stacked drawboxes. The
+        // previous bands were visible on large/high-contrast footage.
         let extent = (h as f64 * p.gameplay.shadow_height).round().max(2.) as i32;
         let top_space = game_top.min(extent);
         let bottom_space = (h as i32 - game_bottom).max(0).min(extent);
-        let mut shadow = Vec::new();
-        for (boundary, space, direction) in [
-            (game_top, top_space, -1_i32),
-            (game_bottom, bottom_space, 1_i32),
-        ] {
-            if space == 0 {
-                continue;
-            }
-            let steps = space.min(16);
-            for step in 0..steps {
-                let near = space * step / steps;
-                let far = space * (step + 1) / steps;
-                let band = (far - near).max(1);
-                let distance = step as f64 / steps.max(1) as f64;
-                let alpha = 0.62 * (1. - distance).powf(1.35);
-                let y = if direction < 0 {
-                    boundary - far
-                } else {
-                    boundary + near
-                };
-                shadow.push(format!(
-                    "drawbox=x={game_left}:y={y}:w={game_width}:h={band}:color=black@{alpha:.3}:t=fill"
-                ));
-            }
+        let color = p
+            .gameplay
+            .shadow_color
+            .strip_prefix('#')
+            .filter(|value| value.len() == 6 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            .unwrap_or("000000");
+        let red = u8::from_str_radix(&color[0..2], 16).unwrap_or(0);
+        let green = u8::from_str_radix(&color[2..4], 16).unwrap_or(0);
+        let blue = u8::from_str_radix(&color[4..6], 16).unwrap_or(0);
+        let opacity = p.gameplay.shadow_opacity.clamp(0., 1.) * 255.;
+        let mut base = "base_unshadowed".to_string();
+        if top_space > 0 {
+            graph.push_str(&format!(
+                ";[{base}]split=2[shadow_base_top][shadow_top_source];[shadow_top_source]crop={game_width}:{top_space}:{game_left}:{},format=rgba,geq=r='{red}':g='{green}':b='{blue}':a='{opacity:.6}*pow(Y/{top_space},1.35)'[shadow_top];[shadow_base_top][shadow_top]overlay=x={game_left}:y={}:format=auto[shadowed_top]",
+                game_top - top_space,
+                game_top - top_space,
+            ));
+            base = "shadowed_top".into();
         }
-        if shadow.is_empty() {
-            graph.push_str(";[base_unshadowed]null[base]");
-        } else {
-            graph.push_str(&format!(";[base_unshadowed]{}[base]", shadow.join(",")));
+        if bottom_space > 0 {
+            graph.push_str(&format!(
+                ";[{base}]split=2[shadow_base_bottom][shadow_bottom_source];[shadow_bottom_source]crop={game_width}:{bottom_space}:{game_left}:{game_bottom},format=rgba,geq=r='{red}':g='{green}':b='{blue}':a='{opacity:.6}*pow(1-Y/{bottom_space},1.35)'[shadow_bottom];[shadow_base_bottom][shadow_bottom]overlay=x={game_left}:y={game_bottom}:format=auto[shadowed_bottom]"
+            ));
+            base = "shadowed_bottom".into();
         }
+        graph.push_str(&format!(";[{base}]null[base]"));
     }
     if p.boost.enabled {
         let radius = b.width.min(b.height) as f64 / 2.;
@@ -301,12 +294,12 @@ mod tests {
             assert!((small.y * 3 - large.y).abs() <= 2);
         }
         let preview_graph = filter_graph(&v, &p, 360, 640).unwrap();
-        assert!(preview_graph.contains("scale=90:160:flags=bilinear"));
-        assert!(preview_graph.contains("sigma=2.500000:steps=2,scale=360:640"));
+        assert!(preview_graph.contains("scale=180:320:flags=bilinear"));
+        assert!(preview_graph.contains("sigma=5.000000:steps=6,scale=360:640"));
         let export_graph = filter_graph(&v, &p, 1080, 1920).unwrap();
         assert!(export_graph.contains("crop=608:1080:656:0"));
-        assert!(export_graph.contains("scale=270:480:flags=bilinear"));
-        assert!(export_graph.contains("sigma=7.500000:steps=2,scale=1080:1920"));
+        assert!(export_graph.contains("scale=540:960:flags=bilinear"));
+        assert!(export_graph.contains("sigma=15.000000:steps=6,scale=1080:1920"));
         assert!(!export_graph.contains("scale=1920:1080:flags=lanczos,setsar=1,split="));
     }
     #[test]
@@ -334,8 +327,10 @@ mod tests {
         p.gameplay.shadow = true;
         p.gameplay.scale = 2.36;
         let graph = filter_graph(&video(3840, 2160), &p, 1080, 1920).unwrap();
-        assert!(graph.contains("color=black@0.620"), "{graph}");
-        assert!(graph.contains("color=black@0.015"), "{graph}");
+        assert!(graph.contains("geq=r='0':g='0':b='0'"), "{graph}");
+        assert!(graph.contains("pow(Y/"), "{graph}");
+        assert!(graph.contains("pow(1-Y/"), "{graph}");
+        assert!(!graph.contains("drawbox="), "{graph}");
         assert!(graph.contains("eq=saturation=1.000000"), "{graph}");
         assert!(graph.contains("hue=h=0.000000"), "{graph}");
         assert!(!graph.contains("black@0.68"), "{graph}");

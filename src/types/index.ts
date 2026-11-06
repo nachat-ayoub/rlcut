@@ -22,6 +22,8 @@ export type Preset = {
     y: number;
     shadow?: boolean;
     shadowHeight?: number;
+    shadowColor?: string;
+    shadowOpacity?: number;
     saturation?: number;
     hue?: number;
   };

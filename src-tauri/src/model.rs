@@ -30,6 +30,10 @@ pub struct Gameplay {
         serde(default = "default_shadow_height", alias = "shadow_height")
     )]
     pub shadow_height: f64,
+    #[cfg_attr(feature = "serialization", serde(default = "default_shadow_color"))]
+    pub shadow_color: String,
+    #[cfg_attr(feature = "serialization", serde(default = "default_shadow_opacity"))]
+    pub shadow_opacity: f64,
     #[cfg_attr(feature = "serialization", serde(default = "default_saturation"))]
     pub saturation: f64,
     #[cfg_attr(feature = "serialization", serde(default))]
@@ -37,6 +41,12 @@ pub struct Gameplay {
 }
 fn default_shadow_height() -> f64 {
     0.035
+}
+fn default_shadow_color() -> String {
+    "#000000".into()
+}
+fn default_shadow_opacity() -> f64 {
+    0.62
 }
 fn default_saturation() -> f64 {
     1.
@@ -136,6 +146,8 @@ impl Default for Preset {
                 y: 0.5,
                 shadow: false,
                 shadow_height: default_shadow_height(),
+                shadow_color: default_shadow_color(),
+                shadow_opacity: default_shadow_opacity(),
                 saturation: default_saturation(),
                 hue: 0.,
             },
@@ -193,6 +205,16 @@ impl Preset {
             0.12,
             "Shadow gradient height",
         )?;
+        let shadow_color = &self.gameplay.shadow_color;
+        if shadow_color.len() != 7
+            || !shadow_color.starts_with('#')
+            || !shadow_color[1..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("Shadow color must be a six-digit hex color".into());
+        }
+        range(self.gameplay.shadow_opacity, 0., 1., "Shadow opacity")?;
         range(self.gameplay.saturation, 0., 2., "Saturation")?;
         range(self.gameplay.hue, -180., 180., "Hue")?;
         let h = &self.boost;

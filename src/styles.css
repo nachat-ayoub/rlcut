@@ -502,10 +502,11 @@ h1 {
   pointer-events:none
 }
 .composition .composition-output { display:block; width:100%; height:100%; object-fit:contain; }
-.gameplay-frame-shadow { position:absolute; z-index:3; pointer-events:none; --shadow-height:3.5cqh }
+.gameplay-frame-shadow { position:absolute; z-index:3; pointer-events:none; --shadow-height:3.5cqh; --shadow-color:0 0 0; --shadow-opacity:.62 }
 .gameplay-frame-shadow::before,.gameplay-frame-shadow::after { content:""; position:absolute; left:0; width:100%; height:var(--shadow-height) }
-.gameplay-frame-shadow::before { bottom:100%; background:linear-gradient(to top,rgb(0 0 0 / 62%),transparent) }
-.gameplay-frame-shadow::after { top:100%; background:linear-gradient(to bottom,rgb(0 0 0 / 62%),transparent) }
+.gameplay-frame-shadow::before { bottom:100%; background:linear-gradient(to top,rgb(var(--shadow-color) / var(--shadow-opacity)),transparent) }
+.gameplay-frame-shadow::after { top:100%; background:linear-gradient(to bottom,rgb(var(--shadow-color) / var(--shadow-opacity)),transparent) }
+.shadow-color-field input[type=color] { width:100%; height:29px; margin-top:4px; padding:2px; border:1px solid #3c3444; border-radius:6px; background:#121016; cursor:pointer }
 .composition.background-selected {
   box-shadow:0 0 0 2px #9c72d2,0 8px 50px #0008
 }
@@ -1736,6 +1737,7 @@ progress::-moz-progress-bar {
 /* Detailed editing and explicit selection. */
 .preview-viewport { width:100%; height:100%; overflow:hidden; display:flex; justify-content:safe center; align-items:flex-start; padding:3px; touch-action:none; }
 .preview-viewport .composition { will-change:transform }
+.preview-viewport.panning { cursor:grabbing }
 .preview-stage { overflow:hidden; }
 .canvas-caption select { padding:2px 4px; font-size:10px; width:auto; }
 .layer-guide.unselected { border-color:transparent; box-shadow:none; }

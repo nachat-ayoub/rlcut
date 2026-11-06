@@ -16,6 +16,11 @@ type Gesture = {
   preset: Preset;
 };
 type TextGesture = { pointer: number; x: number; y: number; value: TextOverlay };
+type PanGesture = { pointer: number; x: number; y: number; pan: { x: number; y: number } };
+const hexToRgb = (value: string) => {
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(value);
+  return match ? `${parseInt(match[1], 16)} ${parseInt(match[2], 16)} ${parseInt(match[3], 16)}` : '0 0 0';
+};
 function PreviewPerformance({ canvas, playing }: { canvas: RefObject<HTMLCanvasElement | null>; playing: boolean }) {
   const [sample, setSample] = useState<{ fps: number; backend: string } | null>(null);
   useEffect(() => {
@@ -63,13 +68,14 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   onPlaybackError?: (error: unknown) => void;
   onSourceFrame?: (source: string) => void;
 }) {
-  const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), textGesture = useRef<TextGesture | null>(null);
+  const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), textGesture = useRef<TextGesture | null>(null), panGesture = useRef<PanGesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
   const playbackTimestamp = useRef(timestamp);
   const textFrame = useRef(-1), textSignature = useRef(''), effectSignature = useRef('');
   const [forceCPU, setForceCPU] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
   const [mediaReady, setMediaReady] = useState(false);
   const [playbackFailed, setPlaybackFailed] = useState(false), [playbackAttempt, setPlaybackAttempt] = useState(0);
   const [visualTime, setVisualTime] = useState(() => sourceToEdited(segments, timestamp));
@@ -179,8 +185,23 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
     }
     setPan(current => ({ x: current.x - event.deltaX * .6, y: current.y - event.deltaY * .6 }));
   };
-  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
-  function beginText(e: PointerEvent<HTMLDivElement>, text: TextOverlay) { e.preventDefault(); e.stopPropagation(); onTextSelect(text.id); textGesture.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY, value: structuredClone(text) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  const beginPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 1) return;
+    event.preventDefault(); event.stopPropagation();
+    panGesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, pan };
+    setPanning(true); event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const movePan = (event: PointerEvent<HTMLDivElement>) => {
+    const current = panGesture.current;
+    if (!current || current.pointer !== event.pointerId) return;
+    setPan({ x: current.pan.x + event.clientX - current.x, y: current.pan.y + event.clientY - current.y });
+  };
+  const finishPan = (event: PointerEvent<HTMLDivElement>) => {
+    if (panGesture.current?.pointer !== event.pointerId) return;
+    panGesture.current = null; setPanning(false);
+  };
+  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function beginText(e: PointerEvent<HTMLDivElement>, text: TextOverlay) { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); onTextSelect(text.id); textGesture.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY, value: structuredClone(text) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function moveText(e: PointerEvent<HTMLDivElement>) {
     const state = textGesture.current, target = canvas.current; if (!state || state.pointer !== e.pointerId || !target) return;
     const rect = target.getBoundingClientRect(), thresholdX = 8 / rect.width, thresholdY = 8 / rect.height;
@@ -272,11 +293,11 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   const previewVideoFilter = before ? undefined : [videoGrade, hue ? `hue-rotate(${hue}deg)` : ''].filter(Boolean).join(' ');
   const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount, mixBlendMode: 'overlay' }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
-    <div className="preview-viewport" ref={viewport} onWheel={previewWheel}>
-      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+    <div className={`preview-viewport ${panning ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan} onAuxClick={event => event.preventDefault()}>
+      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.button !== 0 || (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas'))) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
         <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: previewVideoFilter }} />
-        {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={{ ...rect('gameplay'), '--shadow-height': `${(preset.gameplay.shadowHeight ?? .035) * 100}cqh` } as CSSProperties} aria-hidden="true" />}
+        {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={{ ...rect('gameplay'), '--shadow-height': `${(preset.gameplay.shadowHeight ?? .035) * 100}cqh`, '--shadow-color': hexToRgb(preset.gameplay.shadowColor ?? '#000000'), '--shadow-opacity': preset.gameplay.shadowOpacity ?? .62 } as CSSProperties} aria-hidden="true" />}
         {renderEffects('video')}
         {!before && texts.filter(text => visualTime >= text.start && visualTime <= text.end).map(text => {
           const current = visualTime, local = current - text.start, remaining = text.end - current;

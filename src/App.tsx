@@ -31,6 +31,17 @@ const customPresetName = (presets: Preset[]) => {
   while (names.has(`Custom Preset ${index}`)) index++;
   return `Custom Preset ${index}`;
 };
+function GameplayShadowControls({ gameplay, onChange }: { gameplay: Preset['gameplay']; onChange: (change: Partial<Preset['gameplay']>) => void }) {
+  const height = gameplay.shadowHeight ?? classic.gameplay.shadowHeight ?? .035;
+  const color = /^#[\da-f]{6}$/i.test(gameplay.shadowColor ?? '') ? gameplay.shadowColor! : '#000000';
+  return <>
+    <Slider label="Shadow height" value={height * 100} min={.5} max={12} step={.1} defaultValue={(classic.gameplay.shadowHeight ?? .035) * 100} onChange={shadowHeight => onChange({ shadowHeight: shadowHeight / 100 })} suffix="%" />
+    <div className="two-controls shadow-controls">
+      <label className="field shadow-color-field">Shadow color<input aria-label="Frame shadow color" type="color" value={color} onChange={event => onChange({ shadowColor: event.target.value })} /></label>
+      <Slider label="Starting opacity" value={gameplay.shadowOpacity ?? .62} min={0} max={1} step={.01} defaultValue={.62} onChange={shadowOpacity => onChange({ shadowOpacity })} suffix="×" />
+    </div>
+  </>;
+}
 const fileSize = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(bytes >= 100 * 1024 ** 2 ? 0 : 1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 const matchesHdr = (transfer?: string) => transfer === 'smpte2084' || transfer === 'arib-std-b67';
 const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | number | null>>): TrackMarkers => ({
@@ -936,7 +947,7 @@ export default function App() {
           </Section>}
           {layer === 'gameplay' && <Section title="Transform" icon={<Film size={16} />} reset={() => reset('gameplay')}>
             <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add depth between gameplay and the blurred backdrop.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
-            {preset.gameplay.shadow && <Slider label="Shadow height" value={(preset.gameplay.shadowHeight ?? classic.gameplay.shadowHeight ?? .035) * 100} min={.5} max={12} step={.1} defaultValue={(classic.gameplay.shadowHeight ?? .035) * 100} onChange={shadowHeight => edit('gameplay', { shadowHeight: shadowHeight / 100 })} suffix="%" />}
+            {preset.gameplay.shadow && <GameplayShadowControls gameplay={preset.gameplay} onChange={change => edit('gameplay', change)} />}
             <div className="two-controls">
               <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
               <Slider label="Hue" value={preset.gameplay.hue ?? 0} min={-180} max={180} step={1} defaultValue={0} onChange={hue => edit('gameplay', { hue })} suffix="°" />
@@ -1002,7 +1013,7 @@ export default function App() {
           </Section>}
           {selectedVideoSegment && <Section title="Video look" icon={<Palette size={16} />}>
             <div className="setting-toggle compact flush"><div><strong>Frame separation shadow</strong><small>Add a soft depth edge between gameplay and the blurred background.</small></div><input className="switch" type="checkbox" aria-label="Gameplay frame shadow" checked={preset.gameplay.shadow ?? false} onChange={event => edit('gameplay', { shadow: event.target.checked })} /></div>
-            {preset.gameplay.shadow && <Slider label="Shadow height" value={(preset.gameplay.shadowHeight ?? classic.gameplay.shadowHeight ?? .035) * 100} min={.5} max={12} step={.1} defaultValue={(classic.gameplay.shadowHeight ?? .035) * 100} onChange={shadowHeight => edit('gameplay', { shadowHeight: shadowHeight / 100 })} suffix="%" />}
+            {preset.gameplay.shadow && <GameplayShadowControls gameplay={preset.gameplay} onChange={change => edit('gameplay', change)} />}
             <div className="two-controls">
               <Slider label="Saturation" value={preset.gameplay.saturation ?? 1} min={0} max={2} step={.01} defaultValue={1} onChange={saturation => edit('gameplay', { saturation })} suffix="×" />
               <Slider label="Hue" value={preset.gameplay.hue ?? 0} min={-180} max={180} step={1} defaultValue={0} onChange={hue => edit('gameplay', { hue })} suffix="°" />
