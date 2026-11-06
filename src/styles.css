@@ -1735,8 +1735,6 @@ progress::-moz-progress-bar {
 }
 /* Detailed editing and explicit selection. */
 .preview-viewport { width:100%; height:100%; overflow:hidden; display:flex; justify-content:safe center; align-items:flex-start; padding:3px; touch-action:none; }
-.preview-viewport.pan-ready { cursor:zoom-in }
-.preview-viewport.pan-ready:active { cursor:grabbing }
 .preview-viewport .composition { will-change:transform }
 .preview-stage { overflow:hidden; }
 .canvas-caption select { padding:2px 4px; font-size:10px; width:auto; }

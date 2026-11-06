@@ -22,7 +22,7 @@ const shortcuts = [
   ['Playback', [['Space', 'Play or pause'], ['← / →', 'Move one frame'], ['Shift + ← / →', 'Move one second'], ['Home / End', 'Jump to timeline start or end']]],
   ['Editing', [['Ctrl / ⌘ + K', 'Split selected clip'], ['Ctrl / ⌘ + C', 'Copy selected clip'], ['Ctrl / ⌘ + V', 'Paste at playhead'], ['Q', 'Trim left side to playhead'], ['W', 'Trim right side to playhead'], ['Delete', 'Delete selected item'], ['M', 'Toggle marker at playhead'], ['F', 'Toggle impact flash at playhead'], ['Ctrl / ⌘ + Z', 'Undo'], ['Ctrl / ⌘ + Shift + Z', 'Redo']]],
   ['Timeline', [['Drag clip', 'Reorder clips'], ['Shift + drag clip', 'Trim or restore the clip start'], ['Drag clip edge', 'Trim or restore that edge'], ['Alt while trimming', 'Temporarily disable snapping'], ['Ctrl + scroll', 'Zoom around the pointer']]],
-  ['Preview & files', [['Ctrl + scroll', 'Zoom preview'], ['Alt + drag', 'Pan a zoomed preview'], ['Ctrl / ⌘ + O', 'Import videos'], ['Ctrl / ⌘ + S', 'Save project'], ['Ctrl / ⌘ + E', 'Export clip']]],
+  ['Preview & files', [['Ctrl + scroll', 'Zoom preview'], ['Scroll', 'Pan preview vertically'], ['Shift + scroll', 'Pan preview horizontally'], ['Ctrl / ⌘ + O', 'Import videos'], ['Ctrl / ⌘ + S', 'Save project'], ['Ctrl / ⌘ + E', 'Export clip']]],
 ] as const;
 const customPresetName = (presets: Preset[]) => {
   const names = new Set(presets.map(preset => preset.name));

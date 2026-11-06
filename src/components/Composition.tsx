@@ -15,7 +15,6 @@ type Gesture = {
   y: number;
   preset: Preset;
 };
-type PanGesture = { pointer: number; x: number; y: number; originX: number; originY: number };
 type TextGesture = { pointer: number; x: number; y: number; value: TextOverlay };
 function PreviewPerformance({ canvas, playing }: { canvas: RefObject<HTMLCanvasElement | null>; playing: boolean }) {
   const [sample, setSample] = useState<{ fps: number; backend: string } | null>(null);
@@ -64,7 +63,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   onPlaybackError?: (error: unknown) => void;
   onSourceFrame?: (source: string) => void;
 }) {
-  const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), panGesture = useRef<PanGesture | null>(null), textGesture = useRef<TextGesture | null>(null);
+  const canvas = useRef<HTMLDivElement>(null), viewport = useRef<HTMLDivElement>(null), player = useRef<NativePlayback | null>(null), gesture = useRef<Gesture | null>(null), textGesture = useRef<TextGesture | null>(null);
   const output = useRef<HTMLCanvasElement>(null), renderer = useRef<Compositor | null>(null);
   const playbackTimestamp = useRef(timestamp);
   const textFrame = useRef(-1), textSignature = useRef(''), effectSignature = useRef('');
@@ -155,33 +154,31 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   useEffect(() => { if (playing) player.current?.seek(callbacks.current.timestamp); player.current?.control({ playing }); if (!playing) snapshot.current(); }, [playing, playbackPath, sourceVersion, playbackAttempt]);
   useEffect(() => { if (!playing) { playbackTimestamp.current = timestamp; setVisualTime(sourceToEdited(segments, timestamp)); player.current?.seek(timestamp); } }, [timestamp, playing, segments]);
   useEffect(() => { const frame = requestAnimationFrame(() => draw.current()); return () => cancelAnimationFrame(frame); }, [preset, before, colorPreviewBefore, quality, video, playing, segments, effects]);
-  const updateZoom = (next: number) => {
+  const updateZoom = (next: number, anchor?: { x: number; y: number }) => {
     const bounded = Math.max(1, Math.min(4, next));
     const snapped = Math.abs(bounded - 1) < .08 ? 1 : bounded;
+    if (anchor && viewport.current && snapped !== zoom) {
+      const rect = viewport.current.getBoundingClientRect(), factor = snapped / zoom;
+      const x = anchor.x - rect.left - rect.width / 2, y = anchor.y - rect.top - rect.height / 2;
+      setPan(current => ({ x: current.x - x * (factor - 1), y: current.y - y * (factor - 1) }));
+    }
     setZoom(snapped);
-    if (snapped === 1) setPan({ x: 0, y: 0 });
   };
   const previewWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!event.ctrlKey) return;
     event.preventDefault();
-    updateZoom(zoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12));
+    if (event.ctrlKey) {
+      updateZoom(zoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12), { x: event.clientX, y: event.clientY });
+      return;
+    }
+    const travel = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+    if (event.shiftKey) {
+      setPan(current => ({ ...current, x: current.x - travel * .6 }));
+      return;
+    }
+    setPan(current => ({ x: current.x - event.deltaX * .6, y: current.y - event.deltaY * .6 }));
   };
-  const beginPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (!event.altKey || zoom <= 1) return;
-    event.preventDefault(); event.stopPropagation();
-    panGesture.current = { pointer: event.pointerId, x: event.clientX, y: event.clientY, originX: pan.x, originY: pan.y };
-    event.currentTarget.setPointerCapture(event.pointerId);
-  };
-  const movePan = (event: PointerEvent<HTMLDivElement>) => {
-    const state = panGesture.current;
-    if (!state || state.pointer !== event.pointerId) return;
-    setPan({ x: state.originX + event.clientX - state.x, y: state.originY + event.clientY - state.y });
-  };
-  const finishPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (panGesture.current?.pointer === event.pointerId) panGesture.current = null;
-  };
-  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { if (e.altKey) return; e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
-  function beginText(e: PointerEvent<HTMLDivElement>, text: TextOverlay) { if (e.altKey) return; e.preventDefault(); e.stopPropagation(); onTextSelect(text.id); textGesture.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY, value: structuredClone(text) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function begin(e: PointerEvent, target: 'gameplay' | 'boost', resize: Corner | null = null) { e.preventDefault(); e.stopPropagation(); setLayer(target); gesture.current = { layer: target, resize, x: e.clientX, y: e.clientY, preset: structuredClone(preset) }; e.currentTarget.setPointerCapture(e.pointerId); }
+  function beginText(e: PointerEvent<HTMLDivElement>, text: TextOverlay) { e.preventDefault(); e.stopPropagation(); onTextSelect(text.id); textGesture.current = { pointer: e.pointerId, x: e.clientX, y: e.clientY, value: structuredClone(text) }; e.currentTarget.setPointerCapture(e.pointerId); }
   function moveText(e: PointerEvent<HTMLDivElement>) {
     const state = textGesture.current, target = canvas.current; if (!state || state.pointer !== e.pointerId || !target) return;
     const rect = target.getBoundingClientRect(), thresholdX = 8 / rect.width, thresholdY = 8 / rect.height;
@@ -271,8 +268,8 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   const allGrade = gradeFilter('all');
   const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount, mixBlendMode: 'overlay' }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
-    <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
-      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
+    <div className="preview-viewport" ref={viewport} onWheel={previewWheel}>
+      <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>
         <PreviewPerformance canvas={output} playing={playing} />
         <canvas key={forceCPU || softwareRendering ? 'cpu' : 'gpu'} className="composition-output" ref={output} aria-label={before ? 'Original recording' : 'Live edited composition'} style={{ filter: videoGrade }} />
         {!before && preset.gameplay.shadow && <div className="gameplay-frame-shadow" style={{ ...rect('gameplay'), '--shadow-height': `${(preset.gameplay.shadowHeight ?? .035) * 100}cqh` } as CSSProperties} aria-hidden="true" />}
