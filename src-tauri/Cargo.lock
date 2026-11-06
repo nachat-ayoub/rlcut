@@ -3676,7 +3676,7 @@ dependencies = [
 
 [[package]]
 name = "rlcut"
-version = "0.7.22"
+version = "0.7.23"
 dependencies = [
  "reqwest 0.12.28",
  "rfd",

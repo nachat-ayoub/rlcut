@@ -25,7 +25,7 @@ jobs:
           workspaces: src-tauri
       - uses: actions/cache@v4
         with:
-          path: .runtime/windows/ffmpeg-8.1.2-essentials_build.zip
+          path: .runtime/windows/*.zip
           key: windows-ffmpeg-8.1.2-db580001
       - run: npm ci
       - name: Prepare verified Windows media tools
