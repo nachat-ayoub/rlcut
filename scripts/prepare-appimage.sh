@@ -8,6 +8,8 @@ else
   python3 scripts/prepare-ai-gpu.py
 fi
 stage=.runtime/appimage-tools
+yt_dlp=.runtime/yt-dlp/yt-dlp
+[[ -x "$yt_dlp" ]] || { echo 'Missing yt-dlp helper. Run scripts/prepare-ytdlp.sh first.' >&2; exit 1; }
 for library in libvulkan.so.1 libpng16.so.16 libgomp.so.1; do
   file="$(ldconfig -p | awk -v name="$library" '$1 == name && !found {path=$NF; found=1} END {print path}')"
   [[ -n "$file" ]] || { echo "Missing AI runtime library: $library" >&2; exit 1; }
@@ -19,6 +21,8 @@ for tool in ffmpeg ffprobe; do
   cp "$(command -v "$tool")" "$stage/$tool"
   chmod 755 "$stage/$tool"
 done
+cp "$yt_dlp" "$stage/yt-dlp"
+chmod 755 "$stage/yt-dlp"
 cp /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner "$stage/gstreamer-scanner/"
 # The native engine uses GStreamer for decoding, audio and the media clock. Explicitly stage the
 # playback elements because linuxdeploy cannot discover dynamically loaded plugins.

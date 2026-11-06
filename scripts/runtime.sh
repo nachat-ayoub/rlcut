@@ -92,6 +92,7 @@ case "$action" in
   build)
     if [[ "${RLCUT_CONTAINER:-}" == 1 ]]; then export APPIMAGE_EXTRACT_AND_RUN=1; fi
     if [[ "$(uname -s)" == Linux ]]; then
+      prepare_dev_ytdlp
       bash scripts/prepare-appimage.sh
       npm run desktop:build:native -- "$@" --config src-tauri/tauri.appimage.conf.json
       appimage="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name 'rlcut_*_amd64.AppImage' -type f -print -quit)"

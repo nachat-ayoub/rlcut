@@ -843,8 +843,6 @@ async fn download_youtube_audio_with_ytdlp(
                 "--no-cache-dir",
                 "--quiet",
                 "--no-warnings",
-                "--extractor-args",
-                "youtube:player_client=web_safari,android_vr,web",
                 "--retries",
                 "5",
                 "--fragment-retries",

@@ -58,6 +58,7 @@ jobs:
       - run: npm ci
       - name: Build Linux AppImage
         run: |
+          bash scripts/prepare-ytdlp.sh
           bash scripts/prepare-appimage.sh
           npm run desktop:build:native -- --bundles appimage --config src-tauri/tauri.appimage.conf.json
           mkdir -p dist
