@@ -401,14 +401,24 @@ pub fn execute(
 mod tests {
     use super::*;
     fn fixture() -> (std::path::PathBuf, Video, ExportOptions) {
-        let dir = std::env::temp_dir().join(format!(
-            "rlcut-test-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
+        // Windows can give parallel tests the same clock tick. Create the
+        // directory atomically instead of relying on a timestamp alone.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut dir = None;
+        for attempt in 0..1000 {
+            let candidate = std::env::temp_dir().join(format!(
+                "rlcut-test-{}-{stamp}-{attempt}",
+                std::process::id()
+            ));
+            if fs::create_dir(&candidate).is_ok() {
+                dir = Some(candidate);
+                break;
+            }
+        }
+        let dir = dir.expect("could not create a unique export test directory");
         let v = Video {
             path: dir.join("source.mp4").to_string_lossy().into(),
             width: 1920,
