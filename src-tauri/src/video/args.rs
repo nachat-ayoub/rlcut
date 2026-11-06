@@ -24,35 +24,38 @@ fn append_effect_filters(
             EffectScope::All => "all_effect",
         };
         let next = format!("{prefix}{index}");
-        let alpha = if effect.kind == EffectKind::Flash {
-            let u = format!("(T/{:.6})", effect.duration);
-            let fade = match &effect.easing {
-                BoostEasing::Linear => format!("1-{u}"),
-                BoostEasing::Ease => format!("1-(pow({u},2)*(3-2*{u}))"),
-                BoostEasing::EaseIn => format!("1-pow({u},3)"),
-                BoostEasing::EaseOut => format!("pow(1-{u},3)"),
-                BoostEasing::EaseInOut => {
-                    format!("if(lt({u},0.5),1-4*pow({u},3),pow(-2*{u}+2,3)/2)")
-                }
-            };
-            format!("{:.6}*({fade})", effect.intensity)
-        } else {
-            String::new()
-        }
-        .replace(',', "\\,");
         match effect.kind {
             EffectKind::Flash => {
                 let styled = format!("{prefix}_styled{index}");
+                let base = format!("{prefix}_base{index}");
+                let overlay_base = format!("{prefix}_overlay_base{index}");
+                let blended = format!("{prefix}_blended{index}");
                 let color = effect.color.trim_start_matches('#');
                 let duration = effect.duration;
                 let time = effect.time;
+                let fade_duration = effect.fade_duration.min(effect.duration).max(0.08);
+                let fade_u = format!("clip((T-{time:.6})/{fade_duration:.6},0,1)");
+                // CapCut describes its standard fade-out as fast at the start
+                // and slow at the end. This is an ease-out opacity curve.
+                let fade_alpha = match &effect.easing {
+                    BoostEasing::Linear => format!("1-{fade_u}"),
+                    BoostEasing::Ease => format!("1-(3*pow({fade_u},2)-2*pow({fade_u},3))"),
+                    BoostEasing::EaseIn => format!("1-pow({fade_u},3)"),
+                    BoostEasing::EaseOut => format!("pow(1-{fade_u},3)"),
+                    BoostEasing::EaseInOut => {
+                        format!("if(lt({fade_u},0.5),1-4*pow({fade_u},3),pow(-2*{fade_u}+2,3)/2)")
+                    }
+                };
+                let overlay_alpha =
+                    format!("{:.6}*({fade_alpha})", effect.intensity).replace(',', "\\,");
+                let mix = format!("A+(B-A)*({overlay_alpha})");
                 let enabled = format!(
                     "between(t\\,{:.6}\\,{:.6})",
                     effect.time,
                     effect.time + effect.duration
                 );
                 graph.push_str(&format!(
-                    ";color=c=0x{color}@0.0:s={width}x{height}:r={fps}:d={duration:.6},format=yuva420p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='255*({alpha})',setpts=PTS+{time:.6}/TB[{styled}];[{video_output}][{styled}]overlay=x=0:y=0:format=yuv420:eof_action=pass:repeatlast=0:shortest=0:enable='{enabled}'[{next}]"
+                    ";[{video_output}]split=2[{base}][{overlay_base}];color=c=0x{color}:s={width}x{height}:r={fps}:d={duration:.6},format=yuv420p,setpts=PTS+{time:.6}/TB[{styled}];[{overlay_base}][{styled}]blend=all_mode=overlay:eof_action=pass:repeatlast=0:shortest=0[{blended}];[{base}][{blended}]blend=all_expr='{mix}':enable='{enabled}'[{next}]"
                 ));
             }
             EffectKind::DarkGray => {
@@ -914,6 +917,7 @@ mod tests {
                     scope: EffectScope::Video,
                     time: 0.1,
                     duration: 0.4,
+                    fade_duration: 0.4,
                     intensity: 0.8,
                     color: "#ffffff".into(),
                     easing: BoostEasing::EaseOut,
@@ -925,6 +929,7 @@ mod tests {
                     scope: EffectScope::All,
                     time: 0.2,
                     duration: 0.4,
+                    fade_duration: 0.4,
                     intensity: 0.7,
                     color: "#ffffff".into(),
                     easing: BoostEasing::Ease,
@@ -935,10 +940,11 @@ mod tests {
         let text = graph.find("drawtext=").unwrap();
         let all_effect = graph.find("[all_effect1]").unwrap();
         assert!(video_effect < text && text < all_effect);
-        assert!(graph.contains("d=0.400000,format=yuva420p"));
+        assert!(graph.contains("d=0.400000,format=yuv420p"));
         assert!(graph.contains("setpts=PTS+0.100000/TB"));
-        assert!(graph.contains("eof_action=pass:repeatlast=0"));
-        assert!(!graph.contains("blend=all_expr"));
+        assert!(graph.contains("blend=all_mode=overlay"));
+        assert!(graph.contains("blend=all_expr='A+(B-A)*"));
+        assert!(graph.contains("T-0.100000"));
         assert!(graph.contains("colorchannelmixer="));
         assert!(graph.contains(":enable='between(t\\,0.200000\\,0.600000)'"));
     }

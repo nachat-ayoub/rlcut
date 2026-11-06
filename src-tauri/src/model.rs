@@ -15,7 +15,10 @@ pub struct Background {
 }
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serialization", serde(deny_unknown_fields))]
+#[cfg_attr(
+    feature = "serialization",
+    serde(rename_all = "camelCase", deny_unknown_fields)
+)]
 pub struct Gameplay {
     pub scale: f64,
     pub x: f64,
@@ -332,9 +335,17 @@ pub struct FlashEffect {
     pub scope: EffectScope,
     pub time: f64,
     pub duration: f64,
+    #[cfg_attr(
+        feature = "serialization",
+        serde(default = "default_flash_fade_duration")
+    )]
+    pub fade_duration: f64,
     pub intensity: f64,
     pub color: String,
     pub easing: BoostEasing,
+}
+fn default_flash_fade_duration() -> f64 {
+    1.
 }
 impl FlashEffect {
     pub fn validate_all(effects: &[Self], timeline_duration: f64) -> Result<(), String> {
@@ -353,8 +364,10 @@ impl FlashEffect {
                 || effect.time < 0.
                 || !effect.duration.is_finite()
                 || effect.duration < 0.08
-                || (effect.kind == EffectKind::Flash && effect.duration > 1.5)
+                || (effect.kind == EffectKind::Flash && effect.duration > 5.)
                 || effect.time + effect.duration > timeline_duration + 0.001
+                || !effect.fade_duration.is_finite()
+                || effect.fade_duration < 0.08
                 || !effect.intensity.is_finite()
                 || !(0.05..=1.).contains(&effect.intensity)
                 || !valid_color
@@ -623,6 +636,7 @@ mod tests {
             scope: EffectScope::Video,
             time: 0.,
             duration: 60.,
+            fade_duration: 1.,
             intensity: 1.,
             color: "#ffffff".into(),
             easing: BoostEasing::Ease,

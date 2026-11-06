@@ -39,14 +39,16 @@ const normalizeMarkers = (value?: Partial<Record<'video' | 'music', number[] | n
 });
 const normalizeFlash = (value: Partial<FlashEffect>): FlashEffect => ({
   id: value.id || crypto.randomUUID(), trackId: value.trackId || '', kind: value.kind === 'darkGray' ? 'darkGray' : 'flash', timing: value.timing === 'clip' ? 'clip' : 'duration', scope: value.scope === 'video' ? 'video' : 'all', time: Number.isFinite(value.time) ? Math.max(0, value.time!) : 0,
-  duration: Number.isFinite(value.duration) ? Math.max(.08, value.duration!) : .45,
+  duration: Number.isFinite(value.duration) ? Math.max(.08, value.duration!) : 1,
+  fadeDuration: Number.isFinite(value.fadeDuration) ? Math.max(.08, value.fadeDuration!) : 1,
   intensity: Number.isFinite(value.intensity) ? Math.max(.05, Math.min(1, value.intensity!)) : .82,
   color: /^#[0-9a-f]{6}$/i.test(value.color ?? '') ? value.color! : '#ffffff', easing: value.easing ?? 'easeOut',
 });
 const fitFlash = (effect: FlashEffect, total: number): FlashEffect => {
   const time = Math.max(0, Math.min(effect.time, Math.max(0, total - .08)));
-  const maximum = effect.kind === 'flash' ? Math.min(1.5, Math.max(.08, total - time)) : Math.max(.08, total - time);
-  return { ...effect, time, duration: Math.max(.08, Math.min(effect.duration, maximum)) };
+  const maximum = effect.kind === 'flash' ? Math.min(5, Math.max(.08, total - time)) : Math.max(.08, total - time);
+  const duration = Math.max(.08, Math.min(effect.duration, maximum));
+  return { ...effect, time, duration, fadeDuration: Math.max(.08, Math.min(effect.fadeDuration ?? duration, duration)) };
 };
 const fitEffectToClip = (effect: FlashEffect, segments: Segment[]): FlashEffect => {
   if (effect.timing !== 'clip' || !segments.length) return effect;
@@ -719,7 +721,7 @@ export default function App() {
   const addEffect = useCallback((at: number, requestedTrackId?: string, kind: FlashEffect['kind'] = 'flash') => {
     const total = editedDuration(segments); if (total < .08) return;
     undoStack.current.push(snapshot()); if (undoStack.current.length > 100) undoStack.current.shift(); redoStack.current = [];
-    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', kind, time: at, duration: kind === 'flash' ? .45 : Math.min(3, Math.max(.08, total - at)), intensity: kind === 'flash' ? 1 : .8 }), total);
+    const candidate = fitFlash(normalizeFlash({ id: crypto.randomUUID(), trackId: '', kind, time: at, duration: kind === 'flash' ? 1 : Math.min(3, Math.max(.08, total - at)), fadeDuration: kind === 'flash' ? 1 : undefined, intensity: kind === 'flash' ? 1 : .8 }), total);
     const isFree = (track: EffectTrack) => !effects.some(effect => effect.trackId === track.id && overlaps(candidate.time, candidate.time + candidate.duration, effect.time, effect.time + effect.duration));
     const requested = requestedTrackId ? effectTracks.find(track => track.id === requestedTrackId) : undefined;
     const freeTrack = requested && isFree(requested) ? requested : [...effectTracks].reverse().find(isFree);

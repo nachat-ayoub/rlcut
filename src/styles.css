@@ -2210,6 +2210,7 @@ progress::-moz-progress-bar {
 
 /* Timeline-native effects */
 .composition-effect { position:absolute; inset:0; pointer-events:none; will-change:opacity,backdrop-filter }
+.composition-effect.flash { mix-blend-mode:overlay }
 .composition-effect.video-only { z-index:4 }
 .composition-effect.all-layers { z-index:6 }
 .composition-effect.dark-gray { background:#0000 }

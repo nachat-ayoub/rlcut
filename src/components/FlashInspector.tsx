@@ -5,9 +5,9 @@ import { Section, Slider } from './Controls';
 import { time } from '../lib/presets';
 
 const styles = [
-  { label: 'Soft', intensity: .55, duration: .58, easing: 'ease' as const },
-  { label: 'Impact', intensity: .82, duration: .45, easing: 'easeOut' as const },
-  { label: 'Hard', intensity: 1, duration: .28, easing: 'easeOut' as const },
+  { label: 'Soft', intensity: .55, duration: 1, fadeDuration: 1, easing: 'easeOut' as const },
+  { label: 'Impact', intensity: .82, duration: .6, fadeDuration: .6, easing: 'easeOut' as const },
+  { label: 'Hard', intensity: 1, duration: .28, fadeDuration: .28, easing: 'easeOut' as const },
 ];
 
 export function FlashInspector({ value, onChange, onDelete, onPreview }: {
@@ -25,21 +25,21 @@ export function FlashInspector({ value, onChange, onDelete, onPreview }: {
     </div>
     <Section title="Effect" icon={<Sparkles size={16} />}>
       <div className="flash-kind effect-types" role="group" aria-label="Effect type">
-        <button className={value.kind === 'flash' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'flash', timing: 'duration', duration: Math.min(1.5, value.duration) })}>Impact flash</button>
+        <button className={value.kind === 'flash' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'flash', timing: 'duration', duration: Math.min(5, value.duration), fadeDuration: Math.min(value.fadeDuration ?? value.duration, value.duration) })}>Impact flash</button>
         <button className={value.kind === 'darkGray' ? 'active' : ''} onClick={() => onChange({ ...value, kind: 'darkGray' })}>Black & white</button>
       </div>
       {value.kind === 'flash' && <div className="flash-presets" role="group" aria-label="Effect style">
-        {styles.map(style => <button key={style.label} className={Math.abs(value.intensity - style.intensity) < .01 && Math.abs(value.duration - style.duration) < .01 ? 'active' : ''} onClick={() => onChange({ ...value, intensity: style.intensity, duration: style.duration, easing: style.easing })}>{style.label}</button>)}
+        {styles.map(style => <button key={style.label} className={Math.abs(value.intensity - style.intensity) < .01 && Math.abs(value.duration - style.duration) < .01 ? 'active' : ''} onClick={() => onChange({ ...value, intensity: style.intensity, duration: style.duration, fadeDuration: style.fadeDuration, easing: style.easing })}>{style.label}</button>)}
       </div>}
       <Slider label={value.kind === 'flash' ? 'Intensity' : 'Strength'} value={value.intensity} min={.05} max={1} step={.01} defaultValue={.82} onChange={intensity => onChange({ ...value, intensity })} suffix="×" />
       {value.kind !== 'flash' && <div className="flash-kind" role="group" aria-label={`${name} duration`}>
         <button className={value.timing === 'duration' ? 'active' : ''} onClick={() => onChange({ ...value, timing: 'duration' })}>Timeline range</button>
         <button className={value.timing === 'clip' ? 'active' : ''} onClick={() => onChange({ ...value, timing: 'clip' })}>Whole clip</button>
       </div>}
-      {value.kind === 'flash' && value.timing === 'duration' && <Slider label="Duration" value={value.duration} min={.08} max={1.5} step={.01} defaultValue={.45} onChange={duration => onChange({ ...value, duration })} suffix="s" />}
+      {value.kind === 'flash' && value.timing === 'duration' && <><Slider label="Overlay duration" value={value.duration} min={.08} max={5} step={.01} defaultValue={1} onChange={duration => onChange({ ...value, duration, fadeDuration: Math.min(value.fadeDuration ?? duration, duration) })} suffix="s" /><Slider label="Fade-out" value={Math.min(value.fadeDuration ?? value.duration, value.duration)} min={.08} max={value.duration} step={.01} defaultValue={1} onChange={fadeDuration => onChange({ ...value, fadeDuration })} suffix="s" /><p className="help-text">White overlay · CapCut-style ease-out fade.</p></>}
       {value.kind !== 'flash' && value.timing === 'duration' && <p className="help-text">Resize the effect directly on the timeline. It can span the full edit.</p>}
       {value.kind === 'flash' && <label className="field">Fade curve<Dropdown label="Effect fade curve" value={value.easing} onChange={easing => onChange({ ...value, easing: easing as FlashEffect['easing'] })} options={[
-        { value: 'easeOut', label: 'Quick hit · recommended' },
+        { value: 'easeOut', label: 'CapCut-style ease out · recommended' },
         { value: 'ease', label: 'Smooth' },
         { value: 'linear', label: 'Linear' },
         { value: 'easeIn', label: 'Hold then fade' },

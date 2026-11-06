@@ -255,7 +255,10 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
         </div>
       </div>
     </div>;
-  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => ({ effect, amount: effect.kind === 'flash' ? effect.intensity * (1 - ease((visualTime - effect.time) / effect.duration, effect.easing)) : effect.intensity }));
+  const activeEffects = before ? [] : effects.filter(effect => visualTime >= effect.time && visualTime < effect.time + effect.duration).map(effect => {
+    const fadeDuration = Math.min(effect.fadeDuration ?? effect.duration, effect.duration);
+    return { effect, amount: effect.kind === 'flash' ? effect.intensity * (1 - ease(Math.min(1, (visualTime - effect.time) / fadeDuration), effect.easing)) : effect.intensity };
+  });
   const gradeFilter = (target: 'video' | 'all') => {
     const filters = activeEffects.flatMap(({ effect, amount }) => {
       if (effect.kind === 'flash' || (target === 'all' && effect.scope !== 'all')) return [];
@@ -266,7 +269,7 @@ export function Composition({ video, sourceVersion = 0, softwareRendering = fals
   };
   const videoGrade = gradeFilter('video');
   const allGrade = gradeFilter('all');
-  const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount }} />);
+  const renderEffects = (scope: FlashEffect['scope']) => activeEffects.filter(item => item.effect.kind === 'flash' && item.effect.scope === scope).map(({ effect, amount }) => <div key={effect.id} className={`composition-effect ${scope === 'all' ? 'all-layers' : 'video-only'} flash`} aria-hidden="true" style={{ backgroundColor: effect.color, opacity: amount, mixBlendMode: 'overlay' }} />);
   return <div className="preview-stage" onPointerDown={() => setLayer(null)}>
     <div className={`preview-viewport ${zoom > 1 ? 'pan-ready' : ''} ${panGesture.current ? 'panning' : ''}`} ref={viewport} onWheel={previewWheel} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={finishPan} onPointerCancel={finishPan}>
       <div className={`composition ${before ? 'source-mode' : ''} ${layer === 'background' ? 'background-selected' : ''}`} ref={canvas} style={{ aspectRatio: before ? `${video.width}/${video.height}` : `${ratio}`, maxHeight: 'none', maxWidth: 'none', width: before ? `${zoom * 100}%` : 'auto', height: `${zoom * 100}%`, flexShrink: 0, transform: `translate(${pan.x}px, ${pan.y}px)` }} onPointerDown={e => { if (e.altKey) return; if (e.target !== e.currentTarget && !(e.target as HTMLElement).matches('canvas')) return; e.stopPropagation(); if (!before) setLayer('background'); }} onPointerMove={move} onPointerUp={() => { gesture.current = null; setSnaps([null, null]); }} onPointerCancel={() => { gesture.current = null; setSnaps([null, null]); }}>

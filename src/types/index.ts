@@ -127,6 +127,7 @@ export type FlashEffect = {
   scope: 'video' | 'all';
   time: number;
   duration: number;
+  fadeDuration?: number;
   intensity: number;
   color: string;
   easing: BoostEasing;

@@ -330,7 +330,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       next.time = Math.max(0, Math.min(right - MIN_CLIP, state.value.time + delta));
       next.duration = right - next.time;
     } else {
-      const maximum = state.value.kind === 'flash' ? Math.min(1.5, editedDuration - next.time) : editedDuration - next.time;
+      const maximum = state.value.kind === 'flash' ? Math.min(5, editedDuration - next.time) : editedDuration - next.time;
       next.duration = Math.max(.08, Math.min(maximum, state.value.duration + delta));
     }
     if (!event.altKey) {
@@ -345,7 +345,7 @@ export function Timeline({ duration, sourceDurations, timestamp, playheadRef, se
       if (match) {
         if (state.mode === 'move') next.time = Math.max(0, Math.min(editedDuration - next.duration, next.time + match.snapped - match.edge));
         else if (state.mode === 'start') { const right = next.time + next.duration; next.time = Math.max(0, Math.min(right - MIN_CLIP, match.snapped)); next.duration = right - next.time; }
-        else next.duration = Math.max(.08, Math.min(next.kind === 'flash' ? 1.5 : editedDuration - next.time, match.snapped - next.time));
+        else next.duration = Math.max(.08, Math.min(next.kind === 'flash' ? 5 : editedDuration - next.time, match.snapped - next.time));
       }
     }
     effectPreviewRef.current = next; setEffectPreview(next);

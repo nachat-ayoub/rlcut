@@ -60,9 +60,11 @@ test('timeline exposes video/music lanes, edge trims, zoom and clip volume', () 
 });
 
 test('timeline effects expose fast placement and contextual controls', () => {
-  const effect = { id:'fx', kind:'darkGray', timing:'duration', scope:'all', time:1, duration:4, intensity:.82, color:'#ffffff', easing:'easeOut' };
+  const effect = { id:'fx', kind:'flash', timing:'duration', scope:'all', time:1, duration:1, fadeDuration:1, intensity:.82, color:'#ffffff', easing:'easeOut' };
   const inspector = renderToStaticMarkup(createElement(FlashInspector, { value:effect, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
-  for (const label of ['Black &amp; white','Impact flash','Timeline range','Whole clip','Resize the effect directly on the timeline','Layer placement','Top · include text','Remove effect']) assert.match(inspector, new RegExp(label));
+  for (const label of ['Black &amp; white','Impact flash','Overlay duration','Fade-out','CapCut-style ease-out fade','Layer placement','Top · include text','Remove effect']) assert.match(inspector, new RegExp(label));
+  const monochrome = renderToStaticMarkup(createElement(FlashInspector, { value:{ ...effect, kind:'darkGray' }, onChange:()=>{}, onDelete:()=>{}, onPreview:()=>{} }));
+  for (const label of ['Timeline range','Whole clip','Resize the effect directly on the timeline']) assert.match(monochrome, new RegExp(label));
   assert.doesNotMatch(inspector, /Raggeo/);
 });
 
